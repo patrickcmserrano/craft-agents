@@ -1,0 +1,20 @@
+{:agent/id :antigravity
+ :agent/name "Antigravity"
+ :agent/role "Companheiro Tático de Escolta"
+ :agent/spawn {:dimension "minecraft:overworld" :pos [-26.0 68.0 -48.0]}
+ :agent/loadout {:head "minecraft:netherite_helmet"
+                 :chest "minecraft:netherite_chestplate"
+                 :legs "minecraft:netherite_leggings"
+                 :feet "minecraft:netherite_boots"
+                 :mainhand "jeg:assault_rifle"}
+ :bt/root
+ [:selector
+  [:sequence
+   [:guard :hostile-nearby? {:radius 16.0}]
+   [:action :engage-hostiles {:weapon "jeg:assault_rifle" :priority 100}]]
+  [:sequence
+   [:guard :has-active-directive?]
+   [:action :run-blackboard-directive {:priority 85}]]
+  [:parallel
+   [:action :escort-player {:default-leader "Pace" :min-dist 3.0 :max-dist 18.0 :priority 50}]
+   [:action :social-gaze {:radius 12.0 :priority 15}]]]}

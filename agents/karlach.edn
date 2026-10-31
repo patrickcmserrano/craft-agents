@@ -1,0 +1,23 @@
+{:agent/id :karlach
+ :agent/name "Karlach"
+ :agent/role "Guardiã do Santuário"
+ :agent/spawn {:dimension "minecraft:overworld" :pos [-175.0 65.0 180.0]}
+ :agent/loadout {:mainhand "minecraft:apple"}
+ :bt/root
+ [:selector
+  [:sequence
+   [:guard :hostile-nearby? {:radius 12.0}]
+   [:action :engage-hostiles {:priority 100}]]
+  [:sequence
+   [:guard :has-active-directive?]
+   [:action :run-blackboard-directive {:priority 80}]]
+  [:sequence
+   [:cooldown {:ms 45000}
+    [:action :care-for-enclosure
+     {:region :sanctuary
+      :food-item "minecraft:apple"
+      :max-feed 2
+      :priority 40}]]]
+  [:parallel
+   [:action :patrol-waypoints {:region :sanctuary :priority 20}]
+   [:action :social-gaze {:radius 8.0 :priority 10}]]]}

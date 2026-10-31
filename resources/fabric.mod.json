@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "craft-agents",
+  "version": "0.1.0",
+  "name": "Craft Agents Engine",
+  "description": "Next-Gen Dual-Backend Autonomous Agent & Embodied AI Engine for Minecraft.",
+  "authors": ["Patrick Serrano"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.craft.agents.fabric.FabricModInit"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+  }
+}

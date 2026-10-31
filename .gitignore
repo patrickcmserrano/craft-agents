@@ -1,0 +1,10 @@
+target/
+.cpcache/
+.nrepl-port
+.calva/
+.lsp/
+state/*.edn
+state/*.jsonl
+!state/.gitkeep
+*.class
+*.jar

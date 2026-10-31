@@ -1,0 +1,29 @@
+{:region/id :sanctuary
+ :region/name "Santuário de Animais"
+ :region/dimension "minecraft:overworld"
+ :region/corridor-waypoints [[-175 65 171] [-175 65 180] [-175 65 189]]
+ :region/enclosures
+ [{:enclosure/id :pen-north-east
+   :enclosure/bounds {:min [-170 65 166] :max [-162 69 176]}
+   :enclosure/portal {:blocks [[-171 65 171] [-171 66 171]]
+                      :normal [1.0 0.0 0.0]
+                      :inside-anchor [-169 65 171]
+                      :outside-anchor [-173 65 171]}}
+  {:enclosure/id :pen-south-east
+   :enclosure/bounds {:min [-170 65 184] :max [-162 69 194]}
+   :enclosure/portal {:blocks [[-171 65 189] [-171 66 189]]
+                      :normal [1.0 0.0 0.0]
+                      :inside-anchor [-169 65 189]
+                      :outside-anchor [-173 65 189]}}
+  {:enclosure/id :pen-south-west
+   :enclosure/bounds {:min [-188 65 184] :max [-180 69 194]}
+   :enclosure/portal {:blocks [[-179 65 189] [-179 66 189]]
+                      :normal [-1.0 0.0 0.0]
+                      :inside-anchor [-181 65 189]
+                      :outside-anchor [-177 65 189]}}
+  {:enclosure/id :pen-north-west
+   :enclosure/bounds {:min [-188 65 166] :max [-180 69 176]}
+   :enclosure/portal {:blocks [[-179 65 171] [-179 66 171]]
+                      :normal [-1.0 0.0 0.0]
+                      :inside-anchor [-181 65 171]
+                      :outside-anchor [-177 65 171]}}]}

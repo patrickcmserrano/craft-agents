@@ -1,0 +1,13 @@
+{:agent/id :picard
+ :agent/name "Picard"
+ :agent/role "Comandante Diplomático da Base"
+ :agent/spawn {:dimension "minecraft:overworld" :pos [-140.0 68.0 130.0]}
+ :agent/loadout {:mainhand "minecraft:spyglass"}
+ :bt/root
+ [:selector
+  [:sequence
+   [:guard :has-active-directive?]
+   [:action :run-blackboard-directive {:priority 80}]]
+  [:parallel
+   [:action :patrol-waypoints {:waypoints [[-140 68 130] [-148 68 136] [-135 68 142]] :priority 20}]
+   [:action :social-gaze {:radius 10.0 :priority 15}]]]}
