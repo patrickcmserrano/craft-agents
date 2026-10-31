@@ -10,7 +10,7 @@ NREPL_PORT ?= 7890
 
 JAVA_SOURCES = $(shell find src/java -name "*.java" | sort)
 
-.PHONY: all compile-java test test-epic tdd-status jar attach clean
+.PHONY: all compile-java test test-epic tdd-status jar attach studio clean
 
 all: compile-java
 
@@ -18,6 +18,10 @@ compile-java:
 	@mkdir -p $(BUILD_DIR)
 	$(JAVAC) -d $(BUILD_DIR) $(JAVA_SOURCES)
 	@echo "[+] Java 21 compilado em $(BUILD_DIR)"
+
+studio: compile-java
+	@echo "[+] Iniciando Agent Studio na porta $(STUDIO_PORT)..."
+	$(CLOJURE) -M -m craft.agents.studio.server $(STUDIO_PORT)
 
 test: compile-java
 	$(CLOJURE) -M:test -m craft.agents.test-runner
