@@ -35,7 +35,8 @@ jar: compile-java
 	@echo "[+] Artefato gerado em $(AGENT_JAR)"
 
 attach: jar
-	@PID_RESOLVED=$$( [ -n "$(PID)" ] && echo "$(PID)" || pgrep -f "KnotServer" | head -n 1 ); \
+	@PID_RESOLVED=$$( [ -n "$(PID)" ] && echo "$(PID)" || pgrep -f "fabric-server-launcher" | head -n 1 ); \
+	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "KnotServer" | head -n 1); fi; \
 	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "KnotClient" | head -n 1); fi; \
 	if [ -z "$$PID_RESOLVED" ]; then \
 		echo "[-] Erro: Minecraft nao detectado em execucao!"; \
