@@ -3,6 +3,16 @@
  :agent/role "Guardiã do Santuário"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-175.0 65.0 180.0]}
  :agent/loadout {:mainhand "minecraft:apple"}
+ :agent/quarters {:id :karlach-bedroom
+                  :name "Quarto da Karlach"
+                  :pos [-129.0 65.0 194.0]
+                  :waypoints [[-136.0 65.0 180.5] [-129.0 65.0 180.5] [-129.0 65.0 194.0]]
+                  :return-waypoints [[-129.0 65.0 180.5] [-136.0 65.0 180.5] [-173.0 65.0 180.0]]
+                  :hold-item "minecraft:golden_apple"
+                  :pause-ticks 160
+                  :barks ["Ah, finalmente um descanso pro meu motor infernal!",
+                          "Caminha macia do lado da savana... hora de relaxar o machado!",
+                          "Meu cantinho aconchegante! Que paz no coração, soldado!"]}
  :agent/dialogues
  {:corridors
   {:north "Patrulhando a ala norte do santuário. Nenhum monstro passa por mim, soldado!"

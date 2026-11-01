@@ -84,6 +84,7 @@
    [:agent/spawn {:optional true} [:map [:dimension {:optional true} :string] [:pos Coord3D]]]
    [:agent/loadout {:optional true} :map]
    [:agent/dialogues {:optional true} :map]
+   [:agent/quarters {:optional true} :map]
    [:bt/root BTNode]])
 
 (def SceneDigest

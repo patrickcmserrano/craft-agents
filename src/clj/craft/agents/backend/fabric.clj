@@ -285,8 +285,22 @@
                               :residents   (:enclosure/residents enc [])
                               :barks       barks
                               :bark        (first barks)}))
-                         (:region/enclosures region))]
-    (vec (interleave corridors enclosures))))
+                         (:region/enclosures region))
+        base-route (vec (interleave corridors enclosures))
+        quarters   (when-let [q (:agent/quarters karlach)]
+                     [{:type             :quarters
+                       :id               (:id q :karlach-bedroom)
+                       :name             (:name q "Quarto da Karlach")
+                       :pos              (:pos q [-129.0 65.0 194.0])
+                       :waypoints        (:waypoints q [[-136.0 65.0 180.5] [-129.0 65.0 180.5] (:pos q [-129.0 65.0 194.0])])
+                       :return-waypoints (:return-waypoints q [[-129.0 65.0 180.5] [-136.0 65.0 180.5] [-173.0 65.0 180.0]])
+                       :hold-item        (:hold-item q "minecraft:golden_apple")
+                       :pause-ticks      (:pause-ticks q 140)
+                       :barks            (:barks q ["Ah, finalmente um descanso pro meu motor infernal!"])
+                       :bark             (first (:barks q))}])]
+    (if (seq quarters)
+      (into base-route quarters)
+      base-route)))
 
 (def sanctuary-route (build-sanctuary-route))
 
@@ -344,11 +358,27 @@
 (defn- expand-route-microsteps
   "Converte um item da rota do santuario em micro-etapas atomicas para execucao deterministica a 20Hz."
   [stop]
-  (if (= (:type stop) :promenade)
+  (cond
+    (= (:type stop) :promenade)
     [{:op :equip :item (:hold-item stop) :label (:name stop)}
      {:op :walk  :target (:pos stop)     :label (str "Caminhando -> " (:name stop))}
      {:op :BARK  :text (:bark stop)      :label (:name stop)}
      {:op :wait  :ticks (:pause-ticks stop 40) :label (str "Vigiando " (:name stop))}]
+
+    (= (:type stop) :quarters)
+    (let [wps (or (:waypoints stop) [(:pos stop)])
+          ret (or (:return-waypoints stop) [])
+          barks-vec (seq (:barks stop))
+          chosen-bark (if barks-vec (rand-nth (vec barks-vec)) (:bark stop))]
+      (vec
+       (concat
+        [{:op :equip :item (:hold-item stop "minecraft:golden_apple") :label (:name stop)}]
+        (mapv (fn [wp] {:op :walk :target wp :label (str "Indo ao " (:name stop))}) wps)
+        [{:op :BARK :text chosen-bark :label (:name stop)}
+         {:op :wait :ticks (:pause-ticks stop 140) :label (str "Descansando no " (:name stop))}]
+        (mapv (fn [wp] {:op :walk :target wp :label "Retornando à ronda"} ret)))))
+
+    :else
     ;; Enclosure care sequence with guaranteed gate close
     [{:op :equip :item (:food stop)      :label (:name stop)}
      {:op :walk  :target (:outside stop) :label (str "Indo ao portão -> " (:name stop))}
@@ -434,6 +464,21 @@
                                      (do
                                        (swap! nav-state assoc :dance-ticks 80)
                                        (karlach-say! "Haha! Olha o passinho de Avernus, soldado! 🔥"))
+
+                                     (or (str/includes? lower "quarto")
+                                         (str/includes? lower "descansa")
+                                         (str/includes? lower "dormir")
+                                         (str/includes? lower "cama"))
+                                     (do
+                                       (let [quarters-stop (some #(when (= (:type %) :quarters) %) sanctuary-route)]
+                                         (if quarters-stop
+                                           (do
+                                             (karlach-say! "Partiu quarto descansar o motor infernal, soldado!")
+                                             (swap! nav-state assoc
+                                                    :mode :sanctuary-patrol
+                                                    :follow-target nil
+                                                    :steps (vec (expand-route-microsteps quarters-stop))))
+                                           (karlach-say! "Meu quarto ainda tá sendo arrumado, soldado!"))))
 
                                      (or (str/includes? lower "patrulha")
                                          (str/includes? lower "santuario")
