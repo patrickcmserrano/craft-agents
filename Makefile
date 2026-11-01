@@ -34,20 +34,24 @@ tdd-status: compile-java
 
 jar: compile-java
 	@mkdir -p target
-	@printf "Manifest-Version: 1.0\nAgent-Class: com.craft.agents.attach.CraftAgentsBootstrap\nCan-Redefine-Classes: true\nCan-Retransform-Classes: true\n" > target/MANIFEST.MF
+	@printf "Manifest-Version: 1.0\nAgent-Class: com.craft.agents.attach.BridgeReloadAgent\nCan-Redefine-Classes: true\nCan-Retransform-Classes: true\n" > target/MANIFEST.MF
 	$(JAR) cmf target/MANIFEST.MF $(AGENT_JAR) -C $(BUILD_DIR) . -C resources .
 	@echo "[+] Artefato gerado em $(AGENT_JAR)"
 
 attach: jar
-	@PID_RESOLVED=$$( [ -n "$(PID)" ] && echo "$(PID)" || pgrep -f "fabric-server-launcher" | head -n 1 ); \
-	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "KnotServer" | head -n 1); fi; \
-	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "KnotClient" | head -n 1); fi; \
+	@PID_RESOLVED=$$( [ -n "$(PID)" ] && echo "$(PID)" || pgrep -f "[s]erver.jar nogui" | head -n 1 ); \
+	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[f]abric-server-launcher" | head -n 1); fi; \
+	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[K]notServer" | head -n 1); fi; \
+	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[K]notClient" | head -n 1); fi; \
 	if [ -z "$$PID_RESOLVED" ]; then \
 		echo "[-] Erro: Minecraft nao detectado em execucao!"; \
 		exit 1; \
 	fi; \
 	echo "[+] Anexando craft-agents ao PID $$PID_RESOLVED..."; \
-	$(JAVA) -cp $(BUILD_DIR) com.craft.agents.attach.AttachCli $$PID_RESOLVED $(AGENT_JAR) $(STUDIO_PORT)
+	TMP_JAR="target/craft-agents-attach-$$$$.jar"; \
+	cp $(AGENT_JAR) "$$TMP_JAR"; \
+	$(JAVA) -cp $(BUILD_DIR) com.craft.agents.attach.AttachCli $$PID_RESOLVED "$$TMP_JAR" $(STUDIO_PORT); \
+	rm -f "$$TMP_JAR"
 
 clean:
 	rm -rf target .cpcache

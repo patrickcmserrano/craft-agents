@@ -1,29 +1,81 @@
 {:region/id :sanctuary
  :region/name "Santuário de Animais"
  :region/dimension "minecraft:overworld"
- :region/corridor-waypoints [[-175 65 171] [-175 65 180] [-175 65 189]]
+ :region/corridor-waypoints [[-175 65 175] [-173 65 180] [-175 65 185] [-177 65 180]]
  :region/enclosures
  [{:enclosure/id :pen-north-east
-   :enclosure/bounds {:min [-170 65 166] :max [-162 69 176]}
+   :enclosure/name "Reserva Oriental dos Pandas"
+   :enclosure/bounds {:min [-170 65 165] :max [-136 69 177]}
    :enclosure/portal {:blocks [[-171 65 171] [-171 66 171]]
                       :normal [1.0 0.0 0.0]
-                      :inside-anchor [-169 65 171]
-                      :outside-anchor [-173 65 171]}}
+                      :inside-anchor [-168.5 65.0 171.0]
+                      :outside-anchor [-173.0 65.0 171.0]
+                      :gate-block "minecraft:dark_oak_fence_gate"
+                      :gate-facing "west"}
+   :enclosure/feed-pos [-161.0 65.0 171.0]
+   :enclosure/food "minecraft:bamboo"
+   :enclosure/species ["minecraft:panda" "minecraft:camel" "minecraft:sniffer"]
+   :enclosure/residents [{:type "minecraft:panda"   :name "Panda Bambu"       :pos [-163 65 170]}
+                         {:type "minecraft:panda"   :name "Panda Alegre"      :pos [-159 65 170]}
+                         {:type "minecraft:camel"   :name "Camelo Real"       :pos [-142 65 170]}
+                         {:type "minecraft:sniffer" :name "Sniffer Ancestral" :pos [-142 65 173]}]}
+
   {:enclosure/id :pen-south-east
-   :enclosure/bounds {:min [-170 65 184] :max [-162 69 194]}
+   :enclosure/name "Savana dos Elefantes & Girafas"
+   :enclosure/bounds {:min [-170 65 184] :max [-136 69 196]}
    :enclosure/portal {:blocks [[-171 65 189] [-171 66 189]]
                       :normal [1.0 0.0 0.0]
-                      :inside-anchor [-169 65 189]
-                      :outside-anchor [-173 65 189]}}
+                      :inside-anchor [-168.5 65.0 189.0]
+                      :outside-anchor [-173.0 65.0 189.0]
+                      :gate-block "minecraft:dark_oak_fence_gate"
+                      :gate-facing "west"}
+   :enclosure/feed-pos [-161.0 65.0 189.0]
+   :enclosure/food "minecraft:hay_block"
+   :enclosure/species ["naturalist:elephant" "naturalist:giraffe" "naturalist:zebra" "naturalist:ostrich"]
+   :enclosure/residents [{:type "naturalist:elephant" :name "Elefante Real"       :pos [-161 65 190]}
+                         {:type "naturalist:elephant" :name "Elefante Majestoso"  :pos [-157 65 192]}
+                         {:type "naturalist:giraffe"  :name "Girafa Alta"         :pos [-146 65 190]}
+                         {:type "naturalist:giraffe"  :name "Girafa Graciosa"     :pos [-142 65 192]}
+                         {:type "naturalist:zebra"    :name "Zebra das Planicies" :pos [-164 65 191]}
+                         {:type "naturalist:zebra"    :name "Zebra Rajada"        :pos [-161 65 192]}
+                         {:type "naturalist:ostrich"  :name "Avestruz Veloz"      :pos [-141 65 192]}]}
+
   {:enclosure/id :pen-south-west
-   :enclosure/bounds {:min [-188 65 184] :max [-180 69 194]}
+   :enclosure/name "Bosque das Capivaras & Cervos"
+   :enclosure/bounds {:min [-214 65 184] :max [-180 69 196]}
    :enclosure/portal {:blocks [[-179 65 189] [-179 66 189]]
                       :normal [-1.0 0.0 0.0]
-                      :inside-anchor [-181 65 189]
-                      :outside-anchor [-177 65 189]}}
+                      :inside-anchor [-181.5 65.0 189.0]
+                      :outside-anchor [-177.0 65.0 189.0]
+                      :gate-block "minecraft:dark_oak_fence_gate"
+                      :gate-facing "east"}
+   :enclosure/feed-pos [-192.0 65.0 189.0]
+   :enclosure/food "minecraft:apple"
+   :enclosure/species ["naturalist:capybara" "naturalist:deer" "naturalist:duck" "naturalist:hedgehog" "minecraft:armadillo"]
+   :enclosure/residents [{:type "naturalist:capybara" :name "Capivara Fofinha"    :pos [-200 65 190]}
+                         {:type "naturalist:capybara" :name "Capivara Nadadora"   :pos [-197 65 192]}
+                         {:type "naturalist:capybara" :name "Capivarinha Filhote" :pos [-202 65 192]}
+                         {:type "naturalist:deer"     :name "Cervo Real"          :pos [-187 65 190]}
+                         {:type "naturalist:deer"     :name "Cerva da Floresta"   :pos [-184 65 192]}
+                         {:type "naturalist:duck"     :name "Patinho Amarelo"     :pos [-199 65 190]}
+                         {:type "naturalist:duck"     :name "Pato Selvagem"       :pos [-196 65 191]}
+                         {:type "naturalist:hedgehog" :name "Ourico Espinhudo"    :pos [-185 65 192]}
+                         {:type "minecraft:armadillo" :name "Tatu-Bola"           :pos [-210 65 193]}]}
+
   {:enclosure/id :pen-north-west
-   :enclosure/bounds {:min [-188 65 166] :max [-180 69 176]}
+   :enclosure/name "Tundra do Ártico & Raposas das Neves"
+   :enclosure/bounds {:min [-214 65 165] :max [-180 69 177]}
    :enclosure/portal {:blocks [[-179 65 171] [-179 66 171]]
                       :normal [-1.0 0.0 0.0]
-                      :inside-anchor [-181 65 171]
-                      :outside-anchor [-177 65 171]}}]}
+                      :inside-anchor [-181.5 65.0 171.0]
+                      :outside-anchor [-177.0 65.0 171.0]
+                      :gate-block "minecraft:spruce_fence_gate"
+                      :gate-facing "east"}
+   :enclosure/feed-pos [-190.0 65.0 171.0]
+   :enclosure/food "minecraft:sweet_berries"
+   :enclosure/species ["minecraft:fox" "naturalist:mammoth" "naturalist:tortoise"]
+   :enclosure/residents [{:type "naturalist:mammoth"  :name "Mamute Ancestral"  :pos [-204 65 171]}
+                         {:type "naturalist:mammoth"  :name "Mamute das Neves"  :pos [-189 65 171]}
+                         {:type "naturalist:tortoise" :name "Tartaruga Gigante" :pos [-209 65 173]}
+                         {:type "minecraft:fox"       :name "Raposa das Neves"  :pos [-192 65 171]}
+                         {:type "minecraft:fox"       :name "Raposa do Ártico"  :pos [-196 65 172]}]}]}

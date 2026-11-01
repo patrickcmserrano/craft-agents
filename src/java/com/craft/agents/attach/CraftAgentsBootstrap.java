@@ -1,5 +1,6 @@
 package com.craft.agents.attach;
 
+import com.craft.agents.fabric.SyntheticPlayerFactory;
 import java.io.StringReader;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Method;
@@ -14,8 +15,9 @@ public final class CraftAgentsBootstrap {
     private CraftAgentsBootstrap() {}
 
     public static void agentmain(String agentArgs, Instrumentation inst) {
+        SyntheticPlayerFactory.startInServerBridge(inst, 25595);
         if (!BOOTSTRAPPED.compareAndSet(false, true)) {
-            System.out.println("[craft-agents] Agente ja inicializado no processo alvo.");
+            System.out.println("[craft-agents] Agente ja inicializado no processo alvo (In-Server Bridge verificado em :25595).");
             return;
         }
 

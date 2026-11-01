@@ -1,13 +1,47 @@
 {:agent/id :picard
  :agent/name "Picard"
- :agent/role "Comandante Diplomático da Base"
- :agent/spawn {:dimension "minecraft:overworld" :pos [-140.0 68.0 130.0]}
- :agent/loadout {:mainhand "minecraft:spyglass"}
+ :agent/role "Capitão da USS Enterprise-D & Oficial de Meteorologia Orbital"
+ :agent/spawn {:dimension "minecraft:overworld" :pos [-65.0 145.0 101.0]}
+ :agent/loadout {:mainhand "minecraft:spyglass"
+                 :offhand  "minecraft:compass"}
+ :agent/dialogues
+ {:stations
+  [{:id :command-chair
+    :name "Cadeira de Comando"
+    :pos [-65.0 145.0 101.0]
+    :yaw 0.0 :pitch 0.0
+    :wait-ticks 160
+    :bark "Computador, manter posição orbital sincronizada sobre o Castelo."}
+   {:id :tactical
+    :name "Console Tática de Ré"
+    :pos [-65.0 145.0 99.2]
+    :yaw 180.0 :pitch 15.0
+    :wait-ticks 120
+    :bark "Escudos defletores a 100%. Nenhuma anomalia hostil no quadrante."}
+   {:id :ops-weather
+    :name "Estação de Operações & Meteorologia (Ops)"
+    :pos [-67.0 145.0 102.0]
+    :yaw 0.0 :pitch 20.0
+    :wait-ticks 140
+    :weather-broadcast? true
+    :bark "Consultando sensores meteorológicos orbitais e planetários..."}
+   {:id :memorial
+    :name "Placa Dedicatória Memorial"
+    :pos [-65.0 145.0 98.5]
+    :yaw 180.0 :pitch -5.0
+    :wait-ticks 140
+    :bark "\"O tempo é um companheiro que nos acompanha na viagem... e nos lembra de valorizar cada momento.\""}
+   {:id :conn
+    :name "Estação de Navegação (Conn)"
+    :pos [-63.0 145.0 102.0]
+    :yaw 0.0 :pitch 20.0
+    :wait-ticks 120
+    :bark "Curso traçado. À espera das suas ordens, Número Um."}]}
  :bt/root
  [:selector
   [:sequence
    [:guard :has-active-directive?]
    [:action :run-blackboard-directive {:priority 80}]]
   [:parallel
-   [:action :patrol-waypoints {:waypoints [[-140 68 130] [-148 68 136] [-135 68 142]] :priority 20}]
+   [:action :patrol-waypoints {:waypoints [[-65 145 101] [-65 145 99] [-67 145 102] [-63 145 102]] :priority 20}]
    [:action :social-gaze {:radius 10.0 :priority 15}]]]}

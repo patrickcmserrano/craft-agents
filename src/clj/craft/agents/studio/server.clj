@@ -2,15 +2,17 @@
   "Servidor HTTP + WebSocket (porta 8095) do Agent Studio transmitindo telemetria ao vivo (CA-040)."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [craft.agents.backend.fabric :as fabric]
             [org.httpkit.server :as http]))
 
 (defn build-telemetry-frame
   "Monta frame compacto de telemetria (arvore ativa, leases, rota A*, blackboard) p/ broadcast WebSocket (CA-040)."
   [engine-ctx]
-  {:tick      (:tick engine-ctx 0)
-   :timestamp (System/currentTimeMillis)
-   :agents    (:agents engine-ctx {})
-   :leases    (:leases engine-ctx {})})
+  (let [ctx (if (instance? clojure.lang.IDeref engine-ctx) @engine-ctx engine-ctx)]
+    {:tick      (:tick ctx 0)
+     :timestamp (System/currentTimeMillis)
+     :agents    (:agents ctx {})
+     :leases    (:leases ctx {})}))
 
 (defn- serve-file [path content-type]
   (if-let [res (io/resource path)]
@@ -62,11 +64,11 @@
     (http/run-server handler {:port p})))
 
 (defn -main [& args]
-  (let [port (or (some-> (first args) parse-long) 8095)]
-    (start-studio-server! {:tick 0
-                          :agents {:karlach {:status :patrolling :pos [-175.0 65.0 180.0]}
-                                   :picard  {:status :diplomatic :pos [-140.0 68.0 130.0]}
-                                   :antigravity {:status :escorting :pos [-26.0 68.0 -48.0]}}}
-                          port)
-    (println "[craft-agents] Pressione Ctrl+C para encerrar o Agent Studio.")
+  (let [port (or (some-> (first args) parse-long) 8095)
+        live-ctx (atom {:tick 0
+                        :leases {:legs nil :hands nil :gaze nil}
+                        :agents {:karlach {:status "starting" :pos [-175.0 65.0 180.0]}}})]
+    (fabric/start-live-karlach-loop! live-ctx)
+    (start-studio-server! live-ctx port)
+    (println "[craft-agents] 🔥 Karlach Server-Native + Agent Studio em execucao continua.")
     (while true (Thread/sleep 10000))))

@@ -9,10 +9,18 @@
             [craft.agents.schemas :as schemas]))
 
 (deftest ca-043-sanctuary-region-profile-validation-test
-  (testing "CA-043: agents/regions/sanctuary.edn mapeia os 4 cercados reais de portoes duplos e passa na validacao Malli"
-    (let [data (edn/read-string (slurp (io/file "agents/regions/sanctuary.edn")))]
+  (testing "CA-043: agents/regions/sanctuary.edn mapeia os 4 cercados reais, suas especies/residentes e vincula falas em karlach.edn"
+    (let [data    (edn/read-string (slurp (io/file "agents/regions/sanctuary.edn")))
+          karlach (edn/read-string (slurp (io/file "agents/karlach.edn")))]
       (is (true? (schemas/valid-region-profile? data)))
+      (is (true? (schemas/valid-agent-profile? karlach)))
       (is (= 4 (count (:region/enclosures data))))
+      (doseq [enc (:region/enclosures data)]
+        (is (seq (:enclosure/species enc)) "Cada cercado deve declarar as especies presentes")
+        (is (seq (:enclosure/residents enc)) "Cada cercado deve declarar os animais residentes")
+        (is (string? (:enclosure/food enc)) "Cada cercado deve declarar o alimento apropriado")
+        (is (seq (get-in karlach [:agent/dialogues :enclosures (:enclosure/id enc)]))
+            "Karlach deve ter falas vinculadas especificamente a cada cercado"))
       (let [loaded (regions/load-region-file "agents/regions/sanctuary.edn")]
         (is (= :sanctuary (:region/id loaded)))))))
 
@@ -35,10 +43,13 @@
           (core/stop! rt))))))
 
 (deftest ca-045-picard-command-patrol-and-social-gaze-acceptance-test
-  (testing "CA-045: Capitao Picard valida perfil declarativo, patrulha waypoints da base e acompanha jogadores com :gaze"
-    (let [profile (edn/read-string (slurp (io/file "agents/picard.edn")))]
+  (testing "CA-045: Capitao Picard valida perfil declarativo, estacoes da ponte Enterprise-D, meteorologia orbital e olhar social"
+    (let [profile  (edn/read-string (slurp (io/file "agents/picard.edn")))
+          stations (get-in profile [:agent/dialogues :stations])]
       (is (true? (schemas/valid-agent-profile? profile)))
-      (is (= "Picard" (:agent/name profile))))))
+      (is (= "Picard" (:agent/name profile)))
+      (is (seq stations))
+      (is (some :weather-broadcast? stations) "Picard deve possuir estacao de previsao do tempo na ponte"))))
 
 (deftest ca-046-antigravity-jeg-combat-and-escort-acceptance-test
   (testing "CA-046: Antigravity escolta Pace, engaja Ravager hostil com jeg:assault_rifle e retoma escolta quando limpo"

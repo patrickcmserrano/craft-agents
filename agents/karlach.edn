@@ -3,6 +3,45 @@
  :agent/role "Guardiã do Santuário"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-175.0 65.0 180.0]}
  :agent/loadout {:mainhand "minecraft:apple"}
+ :agent/dialogues
+ {:corridors
+  {:north "Patrulhando a ala norte do santuário. Nenhum monstro passa por mim, soldado!"
+   :east  "Corredor leste limpo! Dos pandas até a savana, tá tudo em paz por aqui."
+   :south "Tudo tranquilo na Praça Sul. Os bichinhos estão bem cuidados com a Mamãe K!"
+   :west  "Vigiando a ala oeste entre o bosque das capivaras e a neve do Ártico!"}
+
+  :enclosures
+  {:pen-north-east
+   ["Bambu crocante saindo do forno pros nossos pandas, pro Camelo Real e pro Sniffer!"
+    "Olha só esse Panda Bambu mastigando... que paz no coração, soldado!"]
+
+   :pen-south-east
+   ["Feno fresquinho pros elefantes, girafas e zebras da savana! Fiquem fortes, grandalhões!"
+    "Olha o pescoço dessa Girafa Alta e o porte do Elefante Real! Uma fortaleza gentil!"]
+
+   :pen-south-west
+   ["Olha só essas capivarinhas na lagoa com os cervos e patinhos! Toma maçã fresquinha, suas fofuras!"
+    "Capivarinha linda! Se alguém estressar você ou os patinhos, eu corto no meio com o machado!"]
+
+   :pen-north-west
+   ["Framboesas doces pras raposinhas da neve e pros mamutes do Ártico!"
+    "Um mamute de verdade e duas raposinhas brancas! Esse gelo até refresca o motor no meu peito!"]}
+
+  :species
+  {"minecraft:panda"     "Bambu fresquinho pra você, Panda fofo!"
+   "minecraft:camel"     "Descansa aí na duna, Camelo Real!"
+   "minecraft:sniffer"   "Farejando sementes antigas, hein Sniffer Ancestral?"
+   "naturalist:elephant" "Toma feno, Elefante Real! Você é quase tão forte quanto eu!"
+   "naturalist:giraffe"  "Aí em cima o ar é mais fresco, né Dona Girafa?"
+   "naturalist:zebra"    "Zebrinhas rápidas e bem alimentadas!"
+   "naturalist:ostrich"  "Calma aí, Avestruz Veloz, tem comida pra todo mundo!"
+   "naturalist:capybara" "Toma uma maçã docinha, capivarinha linda da Mamãe K!"
+   "naturalist:deer"     "Fiquem tranquilos no bosque, cervos reais!"
+   "naturalist:duck"     "Quack pra você também, patinho amarelo!"
+   "naturalist:mammoth"  "Toma comida quentinha, Mamute das Neves!"
+   "minecraft:fox"       "Framboesa doce pras raposinhas do Ártico!"
+   "naturalist:tortoise" "Devagar e sempre, né Tartaruga Gigante?"}}
+
  :bt/root
  [:selector
   [:sequence

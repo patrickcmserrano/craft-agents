@@ -15,13 +15,26 @@
    [:blocks [:vector Coord3D]]
    [:normal [:tuple number? number? number?]]
    [:inside-anchor Coord3D]
-   [:outside-anchor Coord3D]])
+   [:outside-anchor Coord3D]
+   [:gate-block {:optional true} :string]
+   [:gate-facing {:optional true} :string]])
+
+(def ResidentSpec
+  [:map
+   [:type :string]
+   [:name :string]
+   [:pos {:optional true} Coord3D]])
 
 (def EnclosureSpec
   [:map
    [:enclosure/id :keyword]
+   [:enclosure/name {:optional true} :string]
    [:enclosure/bounds [:map [:min Coord3D] [:max Coord3D]]]
-   [:enclosure/portal PortalSpec]])
+   [:enclosure/portal PortalSpec]
+   [:enclosure/feed-pos {:optional true} Coord3D]
+   [:enclosure/food {:optional true} :string]
+   [:enclosure/species {:optional true} [:vector :string]]
+   [:enclosure/residents {:optional true} [:vector ResidentSpec]]])
 
 (def RegionProfile
   [:map
@@ -70,6 +83,7 @@
    [:agent/role {:optional true} :string]
    [:agent/spawn {:optional true} [:map [:dimension {:optional true} :string] [:pos Coord3D]]]
    [:agent/loadout {:optional true} :map]
+   [:agent/dialogues {:optional true} :map]
    [:bt/root BTNode]])
 
 (def SceneDigest
