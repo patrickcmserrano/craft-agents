@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [craft.agents.core :as core]
+            [craft.agents.backend.fabric :as fabric]
             [craft.agents.fixtures.world-fixture :as wf]
             [craft.agents.regions :as regions]
             [craft.agents.schemas :as schemas]))
@@ -87,3 +88,16 @@
               "25 agentes somados devem gastar menos de 15ms por tick no servidor"))
         (finally
           (core/stop! rt))))))
+
+(deftest ca-044b-karlach-quarters-and-route-expansion-test
+  (testing "CA-044b: Quarto da Karlach é integrado à rota do santuário e micro-etapas expandem perfeitamente"
+    (let [route (fabric/build-sanctuary-route)
+          quarters-stop (some #(when (= (:type %) :quarters) %) route)]
+      (is (some? quarters-stop) "Rota do santuário deve conter a parada do quarto da Karlach")
+      (is (= [-129.0 65.0 194.0] (:pos quarters-stop)))
+      (let [steps (#'fabric/expand-route-microsteps quarters-stop)]
+        (is (vector? steps))
+        (is (seq steps))
+        (is (some #(= (:op %) :walk) steps))
+        (is (some #(= (:op %) :wait) steps))
+        (is (some #(= (:op %) :BARK) steps))))))

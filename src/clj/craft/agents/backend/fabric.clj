@@ -376,7 +376,7 @@
         (mapv (fn [wp] {:op :walk :target wp :label (str "Indo ao " (:name stop))}) wps)
         [{:op :BARK :text chosen-bark :label (:name stop)}
          {:op :wait :ticks (:pause-ticks stop 140) :label (str "Descansando no " (:name stop))}]
-        (mapv (fn [wp] {:op :walk :target wp :label "Retornando à ronda"} ret)))))
+        (mapv (fn [wp] {:op :walk :target wp :label "Retornando à ronda"}) ret))))
 
     :else
     ;; Enclosure care sequence with guaranteed gate close
