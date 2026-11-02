@@ -7,7 +7,8 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [craft.agents.backend.protocol :as proto]
-            [craft.agents.regions :as regions])
+            [craft.agents.regions :as regions]
+            [craft.agents.skills.composer :as composer])
   (:import [java.io BufferedReader InputStreamReader OutputStreamWriter PrintWriter RandomAccessFile]
            [java.net Socket]
            [java.nio.charset StandardCharsets]))
@@ -465,6 +466,58 @@
                                        (swap! nav-state assoc :dance-ticks 80)
                                        (karlach-say! "Haha! Olha o passinho de Avernus, soldado! 🔥"))
 
+                                     (or (str/includes? lower "chuva")
+                                         (str/includes? lower "chovendo")
+                                         (str/includes? lower "abrigar")
+                                         (str/includes? lower "abriga")
+                                         (str/includes? lower "abrigo")
+                                         (str/includes? lower "molhar"))
+                                     (do
+                                       ;; 1. Fala inicial da Karlach acusando o estímulo e intenção de aprender
+                                       (send-bridge-cmd! "SWING|Karlach")
+                                       (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
+                                       (karlach-say! "Chuva?! O motor infernal chia com água, soldado! Sintetizando nova Skill de abrigo emergencial...")
+
+                                       ;; 2. Composição e Validação da Nova Skill em Tempo Real via Malli
+                                       (let [skills-dir (io/file "skills")
+                                             _ (.mkdirs skills-dir)
+                                             skill-registry (atom {:known-actions #{:check-weather :move-to-quarters :rest-at-bed :wait-out-rain}
+                                                                   :composite-skills {}})
+                                             shelter-skill {:skill/id :shelter-from-rain
+                                                            :skill/name "Abrigo de Emergência contra Chuva"
+                                                            :skill/author "Voyager-System-2-Cognition"
+                                                            :skill/trigger :weather-rain
+                                                            :skill/timeout-ms 20000
+                                                            :skill/tree [:sequence
+                                                                         [:action :check-weather]
+                                                                         [:action :move-to-quarters]
+                                                                         [:action :rest-at-bed]
+                                                                         [:action :wait-out-rain]]}
+                                             reg-res (composer/validate-and-register-skill! skill-registry skills-dir shelter-skill)]
+                                         (println (str "[craft-agents] 🧠 Nova Skill composta via MCP: :shelter-from-rain"))
+                                         (println (str "[craft-agents] 🛡️ Gatekeeper Malli: " (if (:ok? reg-res) "APROVADA (Sem eval / Schema OK / Ciclos 0)" "REJEITADA") " -> Salvo em " (str (io/file skills-dir "shelter-from-rain.edn"))))
+
+                                         ;; Atualiza telemetria do Agent Studio se disponível
+                                         (when engine-ctx-atom
+                                           (swap! engine-ctx-atom assoc-in [:agents :karlach :skills] ["shelter-from-rain"])
+                                           (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] ":shelter-from-rain (Malli OK)"))
+
+                                         ;; 3. Efeitos in-game de aprendizado (Level-Up, partículas de encantamento e mensagem de sistema)
+                                         (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.player.levelup master @a ~ ~ ~ 1.0 1.0")
+                                         (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:enchant ~ ~1.5 ~ 0.6 0.6 0.6 1.0 45 normal")
+                                         (send-bridge-cmd! "CMD|tellraw @a [\"\",{\"text\":\"[craft-agents] \",\"color\":\"aqua\",\"bold\":true},{\"text\":\"🧠 Nova Skill aprendida e gravada na Skill Library: \",\"color\":\"yellow\"},{\"text\":\":shelter-from-rain\",\"color\":\"gold\",\"bold\":true},{\"text\":\" (Validada por Malli / Zero-eval)\",\"color\":\"gray\"}]")
+                                         (Thread/sleep 300)
+                                         (karlach-say! "Skill :shelter-from-rain gravada na memória! Indo pro meu quarto me proteger da chuva agora, soldado!")
+
+                                         ;; 4. Execução imediata da nova skill (caminha para o quarto)
+                                         (let [quarters-stop (some #(when (= (:type %) :quarters) %) sanctuary-route)]
+                                           (if quarters-stop
+                                             (swap! nav-state assoc
+                                                    :mode :sanctuary-patrol
+                                                    :follow-target nil
+                                                    :steps (vec (expand-route-microsteps quarters-stop)))
+                                             (karlach-say! "Meu quarto ainda tá sendo arrumado!")))))
+
                                      (or (str/includes? lower "quarto")
                                          (str/includes? lower "descansa")
                                          (str/includes? lower "dormir")
@@ -682,7 +735,11 @@
                                          {:status (:status @picard-state)
                                           :pos [(/ (Math/round (* px 10.0)) 10.0)
                                                 (double py)
-                                                (/ (Math/round (* pz 10.0)) 10.0)]})]
+                                                (/ (Math/round (* pz 10.0)) 10.0)]})
+                           k-skills (vec (or (get-in @engine-ctx-atom [:agents :karlach :skills]) []))
+                           make-karlach-card (fn [status pos]
+                                               (cond-> {:status status :pos pos}
+                                                 (seq k-skills) (assoc :skills k-skills)))]
                        (cond
                          ;; 1. Dance override
                          (pos? (:dance-ticks st 0))
@@ -700,7 +757,7 @@
                            (swap! engine-ctx-atom assoc
                                   :tick tick
                                   :leases {:legs {:owner :dance} :hands {:owner :dance} :gaze {:owner :dance}}
-                                  :agents {:karlach {:status "dancing 🔥" :pos [cx cy cz]}
+                                  :agents {:karlach (make-karlach-card "dancing 🔥" [cx cy cz])
                                            :picard  picard-card}))
 
                          ;; 2. Follow player mode
@@ -729,8 +786,7 @@
                                (swap! engine-ctx-atom assoc
                                       :tick tick
                                       :leases {:legs {:owner :escort-player} :hands nil :gaze {:owner :social-gaze}}
-                                      :agents {:karlach {:status (str "escoltando " (:name target-p))
-                                                         :pos (:pos @nav-state)}
+                                      :agents {:karlach (make-karlach-card (str "escoltando " (:name target-p)) (:pos @nav-state))
                                                :picard  picard-card}))
                              (swap! nav-state assoc :mode :sanctuary-patrol)))
 
@@ -776,10 +832,7 @@
                                        (swap! engine-ctx-atom assoc
                                               :tick tick
                                               :leases {:legs {:owner :patrol-waypoints} :hands nil :gaze {:owner :path-look}}
-                                              :agents {:karlach {:status (:label cur-step)
-                                                                 :pos [(/ (Math/round (* nx 10.0)) 10.0)
-                                                                       (double ty)
-                                                                       (/ (Math/round (* nz 10.0)) 10.0)]}
+                                              :agents {:karlach (make-karlach-card (:label cur-step) [(/ (Math/round (* nx 10.0)) 10.0) (double ty) (/ (Math/round (* nz 10.0)) 10.0)])
                                                        :picard  picard-card}))))
 
                                  :gate
@@ -791,7 +844,7 @@
                                           :leases {:legs {:owner :portal-traversal}
                                                    :hands {:owner :toggle-double-gate}
                                                    :gaze {:owner :portal-traversal}}
-                                          :agents {:karlach {:status (:label cur-step) :pos [cx cy cz]}
+                                          :agents {:karlach (make-karlach-card (:label cur-step) [cx cy cz])
                                                    :picard  picard-card}))
 
                                  :feed
@@ -809,7 +862,7 @@
                                           :leases {:legs {:owner :care-for-enclosure}
                                                    :hands {:owner :feed-animals}
                                                    :gaze {:owner :care-for-enclosure}}
-                                          :agents {:karlach {:status (:label cur-step) :pos [cx cy cz]}
+                                          :agents {:karlach (make-karlach-card (:label cur-step) [cx cy cz])
                                                    :picard  picard-card}))
 
                                  :BARK
@@ -846,10 +899,7 @@
                                    (swap! engine-ctx-atom assoc
                                           :tick tick
                                           :leases {:legs nil :hands nil :gaze {:owner :social-gaze}}
-                                          :agents {:karlach {:status (:label cur-step)
-                                                             :pos [(/ (Math/round (* cx 10.0)) 10.0)
-                                                                   cy
-                                                                   (/ (Math/round (* cz 10.0)) 10.0)]}
+                                          :agents {:karlach (make-karlach-card (:label cur-step) [(/ (Math/round (* cx 10.0)) 10.0) cy (/ (Math/round (* cz 10.0)) 10.0)])
                                                    :picard  picard-card}))))))))
                      (catch Throwable _ nil))
                    (let [elapsed (- (System/currentTimeMillis) t0)

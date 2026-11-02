@@ -57,6 +57,7 @@ function renderTelemetry(data) {
             <h4>${k.toUpperCase()}</h4>
             <p><strong>Status:</strong> ${agents[k].status || "active"}</p>
             <p><strong>Pos:</strong> ${JSON.stringify(agents[k].pos || [])}</p>
+            ${agents[k].skills && agents[k].skills.length ? `<p><strong>Skill Library:</strong> <span class="badge held">🧠 ${agents[k].skills.join(', ')}</span></p>` : ''}
           </div>
         `).join("")}
       </div>
