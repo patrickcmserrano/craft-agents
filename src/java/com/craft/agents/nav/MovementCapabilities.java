@@ -32,7 +32,7 @@ public final class MovementCapabilities {
     public boolean isEscorting = false;
     public boolean escortLeashed = false;
     public String escortSpecies = null;
-    public double escortSpeed = 0.120;      // 2.4 m/s (evita esticar a guia contra quinas)
+    public double escortSpeed = 0.165;      // 3.3 m/s (conducao agil e segura com folga de amortecimento)
     public double cornerEasingAngle = 30.0; // Ângulo mínimo para acionar micro-pausa em curvas
 
     // Lista de Blocos onde NÃO é permitido caminhar ou apoiar degrau (Mineflayer blocksCantWalkOn)

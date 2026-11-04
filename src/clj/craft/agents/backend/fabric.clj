@@ -733,7 +733,14 @@
       (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Conduzindo " entity " ao Bosque")))
 
     ;; 4. Execução imediata da rota motora de resgate com targeting real e A* 3D
-    (let [players (query-online-players)
+    (let [norm-sp (critic/normalize-species (or species entity))
+          mob-resp (send-bridge-cmd! (str "LOCATE_MOB|Karlach|" norm-sp))
+          mob-pos (when (and mob-resp (clojure.string/starts-with? mob-resp "OK|"))
+                    (let [parts (clojure.string/split mob-resp #"\|")]
+                      [(Double/parseDouble (nth parts 1))
+                       (Double/parseDouble (nth parts 2))
+                       (Double/parseDouble (nth parts 3))]))
+          players (query-online-players)
           target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or speaker "pace"))) players))
           near-player-pos (when target-p
                             (let [px (:x target-p)
@@ -741,10 +748,10 @@
                               (if (nil? (current-enclosure-id [px 65.0 pz]))
                                 [px 65.0 pz]
                                 outside-pos)))
-          animal-rescue-pos (or near-player-pos outside-pos [-175.0 65.0 185.0])
+          animal-rescue-pos (or mob-pos near-player-pos outside-pos [-175.0 65.0 185.0])
           init-snap (critic/parse-sanctuary-snapshot (send-bridge-cmd! "SANCTUARY"))
           target-quad (get critic/enclosure->quadrant (or pen-id :pen-south-west) :SW)
-          init-count (get-in init-snap [target-quad (critic/normalize-species species)] 0)
+          init-count (get-in init-snap [target-quad norm-sp] 0)
           gate-coords [gate-pos [(first gate-pos) (inc (second gate-pos)) (nth gate-pos 2)]]
           gate-blk (or gate-block "minecraft:dark_oak_fence_gate")
           gate-fac (or gate-facing "east")
@@ -764,8 +771,8 @@
           deep-in (:deep-inside funnel)
 
           ;; Navegação 100% guiada por Voxels Reais, A* 3D e Funil Ortogonal:
-          ;; 1. Karlach caminha até o animal (no lago ou com o jogador)
-          to-animal-steps (generate-walk-steps (:pos @nav-state) animal-rescue-pos (str "Indo até " entity " com " speaker) {:radius 1.0})
+          ;; 1. Karlach caminha até o animal (localizado dinamicamente via LOCATE_MOB)
+          to-animal-steps (generate-walk-steps (:pos @nav-state) animal-rescue-pos (str "Indo até " entity " para resgatar") {:radius 1.2})
 
           ;; 2. Conduz o animal até o início do funil no corredor central
           to-funnel-steps (generate-walk-steps animal-rescue-pos funnel-entry (str "Conduzindo " entity " ao corredor de acesso") {:species species :radius 1.0})
@@ -1423,9 +1430,9 @@
                                                                (assoc :steps (if corner-pause?
                                                                                (into [{:op :wait :ticks 5 :label "Aguardando animal contornar curva"}] rem-steps)
                                                                                rem-steps)))))
-                                       (let [base-speed (if is-leashed? 0.120 0.215)
+                                       (let [base-speed (if is-leashed? 0.165 0.245)
                                              speed (if (and is-leashed? (> (:distance leash-info 0.0) 7.5))
-                                                     0.060
+                                                     0.090
                                                      base-speed)
                                              nx (+ cx (* (/ dx dist) speed))
                                              nz (+ cz (* (/ dz dist) speed))
@@ -1478,13 +1485,37 @@
                                                    :picard  picard-card}))
 
                                  :attach-lead
-                                 (do
-                                   (send-bridge-cmd! "CMD|item replace entity Karlach weapon.offhand with minecraft:lead")
-                                   (send-bridge-cmd! (str "LEASH|Karlach|" (critic/normalize-species (:species cur-step))))
-                                   (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.leash_knot.place master @a ~ ~ ~ 1.0 1.0")
-                                   (swap! nav-state #(-> %
-                                                         (assoc :leashed? true)
-                                                         (update :steps (fn [s] (vec (rest s)))))))
+                                 (let [species (or (:species cur-step) "animal")
+                                       norm-sp (critic/normalize-species species)
+                                       mob-resp (send-bridge-cmd! (str "LOCATE_MOB|Karlach|" norm-sp))
+                                       mob-info (when (and mob-resp (clojure.string/starts-with? mob-resp "OK|"))
+                                                  (let [parts (clojure.string/split mob-resp #"\|")]
+                                                    {:pos [(Double/parseDouble (nth parts 1))
+                                                           (Double/parseDouble (nth parts 2))
+                                                           (Double/parseDouble (nth parts 3))]
+                                                     :type (nth parts 4)}))
+                                       mob-dist (when mob-info
+                                                  (let [[mx my mz] (:pos mob-info)]
+                                                    (Math/sqrt (+ (Math/pow (- mx cx) 2) (Math/pow (- my cy) 2) (Math/pow (- mz cz) 2)))))]
+                                   (if (and mob-info mob-dist (> mob-dist 2.2))
+                                     ;; O animal está além do alcance físico (2.2 blocos): aproxima-se antes de usar a corda
+                                     (let [close-steps (generate-walk-steps [cx cy cz] (:pos mob-info) (str "Aproximando-se de " norm-sp " para laçar") {:radius 1.2})]
+                                       (swap! nav-state update :steps #(vec (concat close-steps [%]))))
+                                     (do
+                                       (send-bridge-cmd! "CMD|item replace entity Karlach weapon.offhand with minecraft:lead")
+                                       (when mob-info
+                                         (let [[mx _ mz] (:pos mob-info)
+                                               look-yaw (compute-yaw (- mx cx) (- mz cz))]
+                                           (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz look-yaw))))
+                                       (let [leash-res (send-bridge-cmd! (str "LEASH|Karlach|" norm-sp))]
+                                         (if (clojure.string/starts-with? (or leash-res "") "ERR|TOO_FAR")
+                                           (let [close-steps (generate-walk-steps [cx cy cz] (or (:pos mob-info) [cx cy cz]) (str "Fechando distancia de " norm-sp) {:radius 1.0})]
+                                             (swap! nav-state update :steps #(vec (concat close-steps [%]))))
+                                           (do
+                                             (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.leash_knot.place master @a ~ ~ ~ 1.0 1.0")
+                                             (swap! nav-state #(-> %
+                                                                   (assoc :leashed? true)
+                                                                   (update :steps (fn [s] (vec (rest s))))))))))))
 
                                  :detach-lead
                                  (do

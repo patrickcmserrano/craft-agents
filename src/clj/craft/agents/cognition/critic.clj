@@ -22,6 +22,10 @@
     (nil? species-str) "Capybara"
     (str/includes? (str/lower-case species-str) "capybara") "Capybara"
     (str/includes? (str/lower-case species-str) "capivara") "Capybara"
+    (str/includes? (str/lower-case species-str) "fox") "Fox"
+    (str/includes? (str/lower-case species-str) "raposa") "Fox"
+    (str/includes? (str/lower-case species-str) "armadillo") "Armadillo"
+    (str/includes? (str/lower-case species-str) "tatu") "Armadillo"
     (str/includes? (str/lower-case species-str) "deer") "Deer"
     (str/includes? (str/lower-case species-str) "cervo") "Deer"
     (str/includes? (str/lower-case species-str) "cerva") "Deer"
@@ -35,6 +39,13 @@
     (str/includes? (str/lower-case species-str) "mammoth") "Mammoth"
     (str/includes? (str/lower-case species-str) "mamute") "Mammoth"
     (str/includes? (str/lower-case species-str) "panda") "Panda"
+    (str/includes? (str/lower-case species-str) "duck") "Duck"
+    (str/includes? (str/lower-case species-str) "pato") "Duck"
+    (str/includes? (str/lower-case species-str) "tortoise") "Tortoise"
+    (str/includes? (str/lower-case species-str) "tartaruga") "Tortoise"
+    (str/includes? (str/lower-case species-str) "hedgehog") "Hedgehog"
+    (str/includes? (str/lower-case species-str) "ourico") "Hedgehog"
+    (str/includes? (str/lower-case species-str) "ouriço") "Hedgehog"
     :else species-str))
 
 (defn parse-sanctuary-snapshot

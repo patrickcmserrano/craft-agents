@@ -516,7 +516,12 @@ public final class SyntheticPlayerFactory {
                     double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
                     double ey = (Double) e.getClass().getMethod("method_23318").invoke(e);
                     double ez = (Double) e.getClass().getMethod("method_23321").invoke(e);
-                    String sName = e.getClass().getSimpleName();
+                    String rawId = EntityTargetResolver.getEntityRegistryIdOrName(e, cl);
+                    String sName = rawId.contains(":") ? rawId.substring(rawId.indexOf(':') + 1) : rawId;
+                    if (sName.startsWith("class_") || sName.isEmpty()) sName = e.getClass().getSimpleName();
+                    if (!sName.isEmpty()) {
+                        sName = Character.toUpperCase(sName.charAt(0)) + sName.substring(1);
+                    }
                     String pen;
                     if (ex >= -171.5 && ex <= -135.0 && ez >= 164.0 && ez <= 178.0) pen = "NE";
                     else if (ex >= -171.5 && ex <= -135.0 && ez >= 183.0 && ez <= 197.5) pen = "SE";
@@ -683,7 +688,7 @@ public final class SyntheticPlayerFactory {
                         Class<?> boxClass = Class.forName("net.minecraft.class_238", true, cl);
                         Object box = boxClass.getConstructor(
                                 double.class, double.class, double.class, double.class, double.class, double.class)
-                                .newInstance(px - 16.0, py - 6.0, pz - 16.0, px + 16.0, py + 6.0, pz + 16.0);
+                                .newInstance(px - 10.0, py - 4.0, pz - 10.0, px + 10.0, py + 4.0, pz + 10.0);
                         Class<?> mobClass = Class.forName("net.minecraft.class_1308", true, cl);
                         Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
                         List<?> ents = (List<?>) world.getClass()
@@ -693,8 +698,7 @@ public final class SyntheticPlayerFactory {
                         double bestDist = Double.MAX_VALUE;
                         for (Object e : ents) {
                             if (mobClass.isInstance(e)) {
-                                String cName = e.getClass().getSimpleName().toLowerCase();
-                                if (!targetType.isEmpty() && !cName.contains(targetType) && !targetType.contains(cName)) {
+                                if (!EntityTargetResolver.entityMatchesTarget(e, targetType, cl)) {
                                     continue;
                                 }
                                 double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
@@ -707,21 +711,10 @@ public final class SyntheticPlayerFactory {
                                 }
                             }
                         }
-                        if (closest == null && !targetType.isEmpty()) {
-                            for (Object e : ents) {
-                                if (mobClass.isInstance(e)) {
-                                    double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
-                                    double ey = (Double) e.getClass().getMethod("method_23318").invoke(e);
-                                    double ez = (Double) e.getClass().getMethod("method_23321").invoke(e);
-                                    double d = (ex - px)*(ex - px) + (ey - py)*(ey - py) + (ez - pz)*(ez - pz);
-                                    if (d < bestDist) {
-                                        bestDist = d;
-                                        closest = e;
-                                    }
-                                }
-                            }
-                        }
                         if (closest != null) {
+                            if (bestDist > 20.25) { // 4.5 blocks max reach for attaching lead
+                                return String.format(java.util.Locale.ROOT, "ERR|TOO_FAR|%.2f", Math.sqrt(bestDist));
+                            }
                             Method attachM = null;
                             for (Method m : closest.getClass().getMethods()) {
                                 if (("method_60964".equals(m.getName()) || "attachLeash".equals(m.getName()))
@@ -741,13 +734,16 @@ public final class SyntheticPlayerFactory {
                             }
                             if (attachM != null) {
                                 attachM.invoke(closest, player, true);
+                                return "OK";
                             }
+                            return "ERR|NO_ATTACH_METHOD";
                         }
+                        return "ERR|NOT_FOUND";
                     } catch (Throwable t) {
-                        t.printStackTrace();
+                        return "ERR|" + t.getMessage();
                     }
                 }
-                return "OK";
+                return "ERR|NO_PLAYER";
             }
 
             if ("UNLEASH".equals(op) && parts.length >= 2) {
@@ -917,8 +913,7 @@ public final class SyntheticPlayerFactory {
                         double bestDist = Double.MAX_VALUE;
                         for (Object e : ents) {
                             if (mobClass.isInstance(e)) {
-                                String cName = e.getClass().getSimpleName().toLowerCase();
-                                if (!targetType.isEmpty() && !cName.contains(targetType) && !targetType.contains(cName)) {
+                                if (!EntityTargetResolver.entityMatchesTarget(e, targetType, cl)) {
                                     continue;
                                 }
                                 double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
@@ -935,7 +930,8 @@ public final class SyntheticPlayerFactory {
                             double ex = (Double) closest.getClass().getMethod("method_23317").invoke(closest);
                             double ey = (Double) closest.getClass().getMethod("method_23318").invoke(closest);
                             double ez = (Double) closest.getClass().getMethod("method_23321").invoke(closest);
-                            return String.format(java.util.Locale.ROOT, "OK|%.2f|%.2f|%.2f|%s", ex, ey, ez, closest.getClass().getSimpleName());
+                            String rawId = EntityTargetResolver.getEntityRegistryIdOrName(closest, cl);
+                            return String.format(java.util.Locale.ROOT, "OK|%.2f|%.2f|%.2f|%s", ex, ey, ez, rawId);
                         }
                         return "ERR|NOT_FOUND";
                     } catch (Throwable t) {
