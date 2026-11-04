@@ -945,6 +945,68 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            if ("HEALTH_STATUS".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticPhysiology.inspectPlayerHealth(player, cl).toProtocolString();
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("LOCATE_ITEMS".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                double radius = parts.length >= 3 ? Double.parseDouble(parts[2]) : 16.0;
+                String filter = parts.length >= 4 ? parts[3] : "";
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    List<SyntheticItemCollector.DroppedItem> drops =
+                            SyntheticItemCollector.scanNearbyDrops(player, radius, filter, cl);
+                    return SyntheticItemCollector.formatDropsProtocol(drops);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("TARGET_HOSTILE".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                double radius = parts.length >= 3 ? Double.parseDouble(parts[2]) : 16.0;
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticHostileScanner.scanAndFormat(player, radius, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("ATTACK_HOSTILE".equals(op) && parts.length >= 3) {
+                String pName = parts[1];
+                int targetId = Integer.parseInt(parts[2]);
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    Object world = player.getClass().getMethod("method_51469").invoke(player);
+                    Method getEntById = null;
+                    for (Method m : world.getClass().getMethods()) {
+                        if (("method_8469".equals(m.getName()) || "getEntityById".equals(m.getName()))
+                                && m.getParameterCount() == 1 && m.getParameterTypes()[0] == int.class) {
+                            getEntById = m;
+                            break;
+                        }
+                    }
+                    if (getEntById != null) {
+                        Object target = getEntById.invoke(world, targetId);
+                        if (target != null) {
+                            float cd = SyntheticCombat.getAttackCooldown(player);
+                            SyntheticCombat.runAttackOnServer(server, player, target);
+                            return String.format(java.util.Locale.ROOT, "OK|%d|%.2f", targetId, cd);
+                        }
+                    }
+                    return "ERR|TARGET_NOT_FOUND";
+                }
+                return "ERR|NO_PLAYER";
+            }
 
             return "ERR|UNKNOWN_OP";
         } catch (Throwable t) {

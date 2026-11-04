@@ -490,6 +490,91 @@
          {:leashed? true :id eid :species sp :distance dist :pos coords})
        {:leashed? false}))))
 
+(defn query-health-status
+  "Consulta estado fisiologico nativo (HP, foodLevel, saturation) via bridge (CA-E1.1)."
+  ([] (query-health-status "Karlach"))
+  ([player-name]
+   (let [resp (send-bridge-cmd! (str "HEALTH_STATUS|" player-name))]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [parts (str/split (subs resp 3) #"\|")]
+         {:hp (try (Double/parseDouble (nth parts 0 "20.0")) (catch Throwable _ 20.0))
+          :food (try (Integer/parseInt (nth parts 1 "20")) (catch Throwable _ 20))
+          :saturation (try (Double/parseDouble (nth parts 2 "5.0")) (catch Throwable _ 5.0))
+          :alive? (try (Boolean/parseBoolean (nth parts 3 "true")) (catch Throwable _ true))})
+       {:hp 20.0 :food 20 :saturation 5.0 :alive? true}))))
+
+(defn locate-dropped-items
+  "Escaneia ItemEntity caidos no chao em um raio via bridge (CA-E1.4)."
+  ([player-name] (locate-dropped-items player-name {}))
+  ([player-name opts]
+   (let [radius (or (:radius opts) 16.0)
+         filter-item (or (:filter opts) "")
+         cmd (uformat "LOCATE_ITEMS|%s|%.1f|%s" player-name (double radius) filter-item)
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [parts (str/split (subs resp 3) #"\|")
+             count-val (try (Integer/parseInt (nth parts 0 "0")) (catch Throwable _ 0))]
+         (if (or (zero? count-val) (< (count parts) 2) (str/blank? (nth parts 1)))
+           []
+           (let [entries (str/split (nth parts 1) #";")]
+             (mapv (fn [raw]
+                     (let [[eid iid cnt x y z dist] (str/split raw #",")]
+                       {:id (try (Integer/parseInt eid) (catch Throwable _ 0))
+                        :item iid
+                        :count (try (Integer/parseInt cnt) (catch Throwable _ 1))
+                        :x (try (Double/parseDouble x) (catch Throwable _ 0.0))
+                        :y (try (Double/parseDouble y) (catch Throwable _ 0.0))
+                        :z (try (Double/parseDouble z) (catch Throwable _ 0.0))
+                        :distance (try (Double/parseDouble dist) (catch Throwable _ 0.0))}))
+                   entries))))
+       []))))
+
+(defn scan-nearby-hostiles
+  "Escaneia monstros hostis no raio de percepcao do jogador via bridge (CA-E1.3)."
+  ([player-name] (scan-nearby-hostiles player-name 16.0))
+  ([player-name radius]
+   (let [cmd (uformat "TARGET_HOSTILE|%s|%.1f" player-name (double radius))
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [parts (str/split (subs resp 3) #"\|")
+             count-val (try (Integer/parseInt (nth parts 0 "0")) (catch Throwable _ 0))]
+         (if (or (zero? count-val) (< (count parts) 2) (str/blank? (nth parts 1)))
+           []
+           (let [entries (str/split (nth parts 1) #";")]
+             (mapv (fn [raw]
+                     (let [[eid type x y z dist hp] (str/split raw #",")]
+                       {:id (try (Integer/parseInt eid) (catch Throwable _ 0))
+                        :type type
+                        :x (try (Double/parseDouble x) (catch Throwable _ 0.0))
+                        :y (try (Double/parseDouble y) (catch Throwable _ 0.0))
+                        :z (try (Double/parseDouble z) (catch Throwable _ 0.0))
+                        :distance (try (Double/parseDouble dist) (catch Throwable _ 0.0))
+                        :hp (try (Double/parseDouble hp) (catch Throwable _ 20.0))}))
+                   entries))))
+       []))))
+
+(defn attack-hostile-target!
+  "Executa ataque fisico com cooldown carregado via bridge (CA-E1.3)."
+  [player-name target-id]
+  (let [cmd (str "ATTACK_HOSTILE|" player-name "|" target-id)
+        resp (send-bridge-cmd! cmd)]
+    (when (and resp (str/starts-with? resp "OK|"))
+      (let [[_ tid cd] (str/split resp #"\|")]
+        {:success? true
+         :target-id (try (Integer/parseInt tid) (catch Throwable _ target-id))
+         :cooldown (try (Double/parseDouble cd) (catch Throwable _ 1.0))}))))
+
+(defn auto-eat-food!
+  "Consome alimento para restaurar barra de fome e curar vida."
+  ([player-name] (auto-eat-food! player-name "minecraft:apple"))
+  ([player-name food-item]
+   (send-bridge-cmd! (str "CMD|item replace entity " player-name " weapon.mainhand with " food-item))
+   (send-bridge-cmd! (str "SWING|" player-name))
+   (send-bridge-cmd! (str "CMD|execute at " player-name " run playsound minecraft:entity.generic.eat neutral @a ~ ~ ~ 1.0 1.0"))
+   (send-bridge-cmd! (str "CMD|effect give " player-name " minecraft:saturation 2 1 true"))
+   (send-bridge-cmd! (str "CMD|effect give " player-name " minecraft:instant_health 1 0 true"))
+   {:eaten? true :item food-item}))
+
 (defn generate-walk-steps
   "Gera passos de caminhada detalhados usando A* 3D (request-path3d) com percepção
    em tempo real de voxels e detecção dinâmica de portais (:TRAVERSE_PORTAL),
