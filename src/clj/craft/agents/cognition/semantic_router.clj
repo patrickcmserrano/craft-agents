@@ -161,6 +161,32 @@
               "vai patrulhar a area agora"
               "alimenta os animais nas baias"]}
 
+   {:id :bodyguard
+    :description "Modo guarda-costas, proteção pessoal, escolta armada e combate a hostis"
+    :anchors ["ativa o modo guarda costas"
+              "me protege contra os monstros"
+              "fica de guarda costas comigo"
+              "mata esse zumbi"
+              "defende o time contra hostis"
+              "escolta armada"
+              "seguranca pessoal"]}
+
+   {:id :mining-cooperation
+    :description "Mineração cooperativa, escavação de veios de minério e quebra de blocos"
+    :anchors ["karlach minera comigo"
+              "minera ferro"
+              "minera carvao"
+              "minera diamante"
+              "minera cobre"
+              "minera ouro"
+              "minera redstone"
+              "quebra esse bloco"
+              "minera aqui"
+              "escava esse minerio"
+              "pega esses minerios"
+              "quebra essa pedra"
+              "vamos minerar"]}
+
    {:id :dialogue
     :description "Diálogo aberto, saudações gerais e perguntas de conversa"
     :anchors ["ola tudo bem com voce"

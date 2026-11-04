@@ -609,6 +609,22 @@
                    entries))))
        []))))
 
+(defn raycast-player-look
+  "Detecta o bloco para o qual o jogador esta olhando (ate max-dist metros)."
+  ([player-name] (raycast-player-look player-name 5.5))
+  ([player-name max-dist]
+   (let [cmd (uformat "RAYCAST_BLOCK|%s|%.1f" player-name (double max-dist))
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [[_ bid bx by bz dist] (str/split resp #"\|")]
+         {:found? true
+          :block-id bid
+          :x (try (Integer/parseInt bx) (catch Throwable _ 0))
+          :y (try (Integer/parseInt by) (catch Throwable _ 0))
+          :z (try (Integer/parseInt bz) (catch Throwable _ 0))
+          :distance (try (Double/parseDouble dist) (catch Throwable _ 0.0))})
+       {:found? false}))))
+
 (defn auto-eat-food!
   "Consome alimento para restaurar barra de fome e curar vida."
   ([player-name] (auto-eat-food! player-name "minecraft:apple"))
@@ -1051,23 +1067,112 @@
     (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Guarda-Costas de " target)))
   (karlach-say! voice-line))
 
+(def ^:private ore-pt-names
+  {"iron" "ferro"
+   "coal" "carvão"
+   "diamond" "diamante"
+   "copper" "cobre"
+   "gold" "ouro"
+   "redstone" "redstone"
+   "lapis" "lápis-lazúli"
+   "emerald" "esmeralda"
+   "deepslate" "deepslate"
+   "stone" "pedra"
+   "dripstone" "espeleotema"})
+
 (defmethod execute-karlach-goal! :mining-cooperation
-  [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
-  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Iniciando mineração cooperativa com " target))
+  [{:goal/keys [target voice-line] target-filter :goal/filter} engine-ctx-atom nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller"
+                           (str "Iniciando mineração cooperativa com " target " | Filtro: " (or target-filter "geral")))
+  ;; 1. Garante sincronizacao e proximidade imediata com o jogador para mineracao cooperativa
+  (let [players (query-online-players)
+        target-p (first (clojure.core/filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
+        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))
+        [cx cy cz] (:pos @nav-state)
+        dist-to-player (if target-p
+                         (Math/sqrt (+ (Math/pow (- (:x target-p) cx) 2)
+                                       (Math/pow (- (:y target-p) cy) 2)
+                                       (Math/pow (- (:z target-p) cz) 2)))
+                         0.0)]
+    (when (and target-p (> dist-to-player 8.0))
+      (send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
+      (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
+    (swap! nav-state assoc
+           :mode :bodyguard
+           :follow-target (or target "pace")
+           :pos tgt-pos
+           :follow-path []
+           :steps []))
+
   (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe")
   (send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
   (send-bridge-cmd! "SWING|Karlach")
-  (let [ores (locate-nearby-ores "Karlach" 12.0 "")]
-    (if-let [target-ore (first ores)]
-      (do
-        (record-cognitive-event! engine-ctx-atom :perception "Sensor de Minérios"
-                                 (str "Veio detectado: " (:block-id target-ore) " a " (uformat "%.1fm" (:distance target-ore))))
-        (karlach-say! (str "Achei um veio de " (:block-id target-ore) " bem aqui perto! Deixa que eu minero pra gente! ⛏️"))
-        (mine-block! "Karlach" (:x target-ore) (:y target-ore) (:z target-ore))
-        (send-bridge-cmd! "SWING|Karlach"))
-      (karlach-say! (str "Picareta afiada e pronta, " target "! Aponta o minério ou bloco que você quer que eu escave! ⛏️"))))
+  (if voice-line (karlach-say! voice-line))
+
+  (cond
+    ;; Caso A: Minerar o bloco que o jogador está olhando (Raycast / Joint Gaze)
+    (= target-filter "crosshair")
+    (let [look-res (raycast-player-look (or target "pace") 5.5)]
+      (if (:found? look-res)
+        (let [bx (:x look-res)
+              by (:y look-res)
+              bz (:z look-res)
+              bid (:block-id look-res)]
+          ;; Se Karlach estiver a mais de 4.0m do bloco apontado, aproxima
+          (let [[kx ky kz] (:pos @nav-state)
+                dist-b (Math/sqrt (+ (Math/pow (- bx kx) 2) (Math/pow (- by ky) 2) (Math/pow (- bz kz) 2)))]
+            (when (> dist-b 4.0)
+              (send-bridge-cmd! (uformat "CMD|tp Karlach %.1f %.1f %.1f" (double bx) (double by) (double bz)))
+              (swap! nav-state assoc :pos [(double bx) (double by) (double bz)])))
+          (let [mine-res (mine-block! "Karlach" bx by bz)]
+            (send-bridge-cmd! "SWING|Karlach")
+            (if (:success? mine-res)
+              (do
+                (record-cognitive-event! engine-ctx-atom :action "Mineração Instantânea"
+                                         (str "Bloco " bid " quebrado em [" bx " " by " " bz "]"))
+                (karlach-say! (str "Bloco " (str/replace (or bid "alvo") #"minecraft:" "") " quebrado com sucesso na sua frente, soldado! ⛏️ 🔥")))
+              (karlach-say! (str "Não consegui quebrar esse bloco: " (:message mine-res))))))
+        (karlach-say! (str "Não consegui identificar nenhum bloco na sua mira direta, " target "! Chega um pouco mais perto e aponta de novo!"))))
+
+    ;; Caso B: Minerar minério/bloco específico ou veio próximo
+    :else
+    (let [filter-query (if (or (= target-filter "any") (nil? target-filter)) "" target-filter)
+          ores (locate-nearby-ores "Karlach" 16.0 filter-query)]
+      (if-let [target-ore (first ores)]
+        (do
+          (record-cognitive-event! engine-ctx-atom :perception "Sensor de Minérios"
+                                   (str "Veio detectado: " (:block-id target-ore) " a " (uformat "%.1fm" (:distance target-ore))))
+          (let [ore-name (get ore-pt-names target-filter (str/replace (:block-id target-ore) #"minecraft:" ""))]
+            (karlach-say! (str "Localizei um veio de " ore-name " a " (uformat "%.1fm" (:distance target-ore)) "! Deixa comigo! ⛏️ 🔥"))
+            ;; Se estiver a mais de 4.2m, aproxima
+            (when (> (:distance target-ore) 4.2)
+              (send-bridge-cmd! (uformat "CMD|tp Karlach %.1f %.1f %.1f"
+                                         (double (:x target-ore))
+                                         (double (:y target-ore))
+                                         (double (:z target-ore))))
+              (swap! nav-state assoc :pos [(:x target-ore) (:y target-ore) (:z target-ore)]))
+            ;; Minera o bloco alvo
+            (let [mine-res (mine-block! "Karlach" (:x target-ore) (:y target-ore) (:z target-ore))]
+              (send-bridge-cmd! "SWING|Karlach")
+              (if (:success? mine-res)
+                ;; Procura blocos adjacentes do mesmo veio (distância <= 2.5m do bloco quebrado)
+                (let [vein (clojure.core/filter (fn [o] (and (not= [(:x o) (:y o) (:z o)] [(:x target-ore) (:y target-ore) (:z target-ore)])
+                                                             (<= (Math/abs (- (:x o) (:x target-ore))) 2)
+                                                             (<= (Math/abs (- (:y o) (:y target-ore))) 2)
+                                                             (<= (Math/abs (- (:z o) (:z target-ore))) 2)))
+                                                ores)]
+                  (doseq [adj-ore (take 3 vein)]
+                    (mine-block! "Karlach" (:x adj-ore) (:y adj-ore) (:z adj-ore))
+                    (send-bridge-cmd! "SWING|Karlach"))
+                  (karlach-say! (str "Veio de " ore-name " completamente extraído, soldado! Pode recolher o saque! 🔥 ⛏️")))
+                (karlach-say! (str "Não consegui minerar o veio: " (:message mine-res)))))))
+        (let [ore-name (get ore-pt-names target-filter (or target-filter "minérios"))]
+          (karlach-say! (str "Procurei num raio de 16 blocos e não achei nenhum veio de " ore-name " por aqui perto, soldado! Dá uma olhada e me mostra onde tem!"))))))
+
   (when engine-ctx-atom
-    (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Minerando com " target))))
+    (swap! engine-ctx-atom assoc-in [:agents :karlach :task]
+           (if target-filter (str "Minerando " (get ore-pt-names target-filter target-filter) " com " target) (str "Minerando com " target)))))
 
 (defmethod execute-karlach-goal! :spatial-attention
   [{:goal/keys [entity speaker]} engine-ctx-atom nav-state _sanctuary-route]
@@ -1218,6 +1323,33 @@
         (send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
         (picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))
 
+(defonce ^:private log-file-pos (atom 0))
+(def ^:private server-log-path "/home/pace/minecraft-server/logs/latest.log")
+
+(defn poll-server-log-chat!
+  "Le novas linhas do latest.log do Minecraft server em tempo real (fallback robusto de chat)."
+  [engine-ctx-atom nav-state picard-state sanctuary-route]
+  (try
+    (let [f (java.io.File. server-log-path)]
+      (when (.exists f)
+        (let [len (.length f)]
+          (when (< len @log-file-pos)
+            (reset! log-file-pos len))
+          (if (zero? @log-file-pos)
+            (reset! log-file-pos len)
+            (when (> len @log-file-pos)
+              (with-open [raf (java.io.RandomAccessFile. f "r")]
+                (.seek raf @log-file-pos)
+                (loop []
+                  (when-let [raw-line (.readLine raf)]
+                    (let [line (String. (.getBytes raw-line "ISO-8859-1") "UTF-8")]
+                      (when-let [[_ speaker text] (re-find #"\[\d{2}:\d{2}:\d{2}\] \[Server thread/INFO\]: <([^>]+)> (.*)" line)]
+                        (when-not (#{"Karlach" "Picard" "Antigravity"} speaker)
+                          (handle-player-command! speaker text engine-ctx-atom nav-state picard-state sanctuary-route))))
+                    (recur)))
+                (reset! log-file-pos (.getFilePointer raf))))))))
+    (catch Throwable _ nil)))
+
 (defn start-live-karlach-loop!
   "Inicia o loop de 20Hz da Karlach e do Capitão Picard no servidor Fabric e atualiza o engine-ctx do Agent Studio."
   [engine-ctx-atom]
@@ -1307,8 +1439,9 @@
                (when @running?
                  (let [t0 (System/currentTimeMillis)]
                    (try
-                     ;; Polling nativo de Chat via In-Server Bridge (5Hz / 200ms latency)
+                     ;; Polling duplo de Chat via latest.log e In-Server Bridge (5Hz / 200ms latency)
                      (when (zero? (mod tick 4))
+                       (poll-server-log-chat! engine-ctx-atom nav-state picard-state sanctuary-route)
                        (let [resp (send-bridge-cmd! "CHAT_POLL")]
                          (when (and resp (str/starts-with? resp "OK;;"))
                            (let [items (str/split (subs resp 4) #";;")]

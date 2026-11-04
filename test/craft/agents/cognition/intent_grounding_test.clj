@@ -183,3 +183,35 @@
           (let [d (java.io.File. tmp-dir)]
             (doseq [f (.listFiles d)] (.delete f))
             (.delete d)))))))
+
+(deftest test-targeted-mining-intent-and-grounding
+  (testing "Extração de slots e grounding para minérios específicos"
+    (let [r-iron (intent/classify-intent-semantic "karlach, minera ferro aqui" "pace")
+          g-iron (grounding/ground-goal r-iron)]
+      (is (= :mining-cooperation (:intent/type r-iron)))
+      (is (= "iron" (get-in r-iron [:intent/slots :target/filter])))
+      (is (= "iron" (:goal/filter g-iron)))
+      (is (re-find #"ferro" (:goal/voice-line g-iron))))
+
+    (let [r-coal (intent/classify-intent-semantic "karlach, minera carvão" "pace")
+          g-coal (grounding/ground-goal r-coal)]
+      (is (= :mining-cooperation (:intent/type r-coal)))
+      (is (= "coal" (get-in r-coal [:intent/slots :target/filter])))
+      (is (= "coal" (:goal/filter g-coal)))
+      (is (re-find #"carvão" (:goal/voice-line g-coal))))
+
+    (let [r-dia (intent/classify-intent-semantic "karlach, minera diamante agora" "pace")
+          g-dia (grounding/ground-goal r-dia)]
+      (is (= :mining-cooperation (:intent/type r-dia)))
+      (is (= "diamond" (get-in r-dia [:intent/slots :target/filter])))
+      (is (= "diamond" (:goal/filter g-dia)))
+      (is (re-find #"diamante" (:goal/voice-line g-dia)))))
+
+  (testing "Extração de comando por mira/crosshair ('quebra esse bloco' / 'minera aqui')"
+    (let [r-look (intent/classify-intent-semantic "karlach, quebra esse bloco" "pace")
+          g-look (grounding/ground-goal r-look)]
+      (is (= :mining-cooperation (:intent/type r-look)))
+      (is (= "crosshair" (get-in r-look [:intent/slots :target/filter])))
+      (is (= "crosshair" (:goal/filter g-look)))
+      (is (or (re-find #"frente" (:goal/voice-line g-look))
+              (re-find #"mira" (:goal/voice-line g-look)))))))

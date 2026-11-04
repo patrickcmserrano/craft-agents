@@ -1050,6 +1050,17 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            if ("RAYCAST_BLOCK".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                double maxDist = parts.length >= 3 ? Double.parseDouble(parts[2]) : 5.5;
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticRaycast.raycastBlock(player, maxDist, cl).toProtocolString();
+                }
+                return "ERR|NO_PLAYER";
+            }
+
             return "ERR|UNKNOWN_OP";
         } catch (Throwable t) {
             return "ERR|" + t.getMessage();

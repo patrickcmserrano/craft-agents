@@ -118,11 +118,36 @@
        :goal/speaker    speaker}
 
       :mining-cooperation
-      {:goal/id         :mining-cooperation
-       :goal/type       :mining-cooperation
-       :goal/target     speaker
-       :goal/voice-line (str "Picareta em punho, soldado! Deixa que eu quebro as pedras e minérios pra gente!")
-       :goal/speaker    speaker}
+      (let [target-filter (get-in intent-result [:intent/slots :target/filter])
+            ore-label (case target-filter
+                        "diamond" "diamante"
+                        "iron" "ferro"
+                        "coal" "carvão"
+                        "copper" "cobre"
+                        "gold" "ouro"
+                        "redstone" "redstone"
+                        "lapis" "lápis-lazúli"
+                        "emerald" "esmeralda"
+                        "deepslate" "deepslate"
+                        "stone" "pedra"
+                        "dripstone" "espeleotema"
+                        "crosshair" "esse bloco na sua mira"
+                        nil)
+            voice (cond
+                    (= target-filter "crosshair")
+                    (str "Entendido, " speaker "! Quebrando esse bloco bem na sua frente! ⛏️ 🔥")
+
+                    ore-label
+                    (str "Picareta em punho, " speaker "! Deixa comigo que vou escavar veios de " ore-label " pra gente! 🔥 ⛏️")
+
+                    :else
+                    (str "Picareta em punho, " speaker "! Deixa que eu quebro as pedras e minérios pra gente! ⛏️"))]
+        {:goal/id         :mining-cooperation
+         :goal/type       :mining-cooperation
+         :goal/target     speaker
+         :goal/filter     target-filter
+         :goal/voice-line voice
+         :goal/speaker    speaker})
 
       :social-dance
       {:goal/id         :dance-avernus

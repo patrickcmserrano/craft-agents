@@ -19,7 +19,8 @@
    [:intent/slots [:map
                    [:target/entity {:optional true} :string]
                    [:target/action {:optional true} :string]
-                   [:target/speaker {:optional true} :string]]]
+                   [:target/speaker {:optional true} :string]
+                   [:target/filter {:optional true} :string]]]
    [:intent/raw-text :string]])
 
 ;; ----------------------------------------------------------------------------
@@ -128,7 +129,27 @@
 
 ;; Mineração cooperativa e escavação
 (def ^:private mining-pattern
-  #"\b(miner\w*|cav\w*|escav\w*|quebr\w*|picaret\w*|minerio|ferro|carvao|ouro|diamante)\b")
+  #"\b(miner\w*|cav\w*|escav\w*|quebr\w*|picaret\w*|minerio|ferro|carvao|carvoes|ouro|diamante|cobre|redstone|lapis|pedra|deepslate|dripstone)\b")
+
+(defn extract-mining-target
+  "Extrai o alvo específico de mineração ou bloco a partir do texto normalizado (NFD)."
+  [norm-text]
+  (cond
+    (re-find #"\b(carvao|carvoes|coal)\b" norm-text) "coal"
+    (re-find #"\b(ferro|iron)\b" norm-text) "iron"
+    (re-find #"\b(diamante\w*|diamond\w*)\b" norm-text) "diamond"
+    (re-find #"\b(cobre|copper)\b" norm-text) "copper"
+    (re-find #"\b(ouro|gold)\b" norm-text) "gold"
+    (re-find #"\b(redstone)\b" norm-text) "redstone"
+    (re-find #"\b(lapis|lazuli)\b" norm-text) "lapis"
+    (re-find #"\b(esmeralda\w*|emerald\w*)\b" norm-text) "emerald"
+    (re-find #"\b(deepslate)\b" norm-text) "deepslate"
+    (re-find #"\b(pedra|pedregulho|stone|cobble\w*)\b" norm-text) "stone"
+    (re-find #"\b(dripstone|espeleotema|estalactite|estalagmite)\b" norm-text) "dripstone"
+    (re-find #"\b(quartzo|quartz)\b" norm-text) "quartz"
+    (re-find #"\b(netherite|debris)\b" norm-text) "ancient_debris"
+    (re-find #"\b(esse|este|aqui|na minha frente|na frente|onde eu to olhando|na mira|apont\w*)\b" norm-text) "crosshair"
+    :else nil))
 
 ;; ----------------------------------------------------------------------------
 ;; Classificador Semântico Híbrido (System 1 - Vetorial + Morfológico < 1ms)
@@ -225,14 +246,16 @@
        :intent/raw-text     raw-text}
 
       ;; 5.2 Mineração Cooperativa & Escavação
-      (or (= :mining-cooperation routed-type) has-mining)
-      {:intent/type         :mining-cooperation
-       :intent/confidence   (max 0.95 (double router-conf))
-       :intent/route-method :semantic-vector
-       :intent/anchor       (:intent/anchor router-match)
-       :intent/slots        {:target/action  "mining"
-                             :target/speaker speaker}
-       :intent/raw-text     raw-text}
+      (or (and (= :mining-cooperation routed-type) (not has-follow)) has-mining)
+      (let [target-filter (extract-mining-target norm)]
+        {:intent/type         :mining-cooperation
+         :intent/confidence   (max 0.95 (double router-conf))
+         :intent/route-method :semantic-vector
+         :intent/anchor       (:intent/anchor router-match)
+         :intent/slots        (cond-> {:target/action  "mining"
+                                       :target/speaker speaker}
+                                target-filter (assoc :target/filter target-filter))
+         :intent/raw-text     raw-text})
 
       ;; 6. Seguir o Jogador (apenas se não for comando de captura de animal)
       (or (= :follow-player routed-type) has-follow)
