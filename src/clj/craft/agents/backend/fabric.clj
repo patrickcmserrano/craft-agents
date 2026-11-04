@@ -1008,30 +1008,45 @@
 (defmethod execute-karlach-goal! :follow-player
   [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
   (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Seguindo jogador " target))
-  (swap! nav-state assoc
-         :mode :follow
-         :follow-target target
-         :follow-path []
-         :follow-last-target [0.0 0.0 0.0]
-         :follow-lost-ticks 0
-         :steps [])
+  (let [players (query-online-players)
+        target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
+        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))]
+    (when target-p
+      (send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
+      (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
+    (swap! nav-state assoc
+           :mode :follow
+           :pos tgt-pos
+           :follow-target target
+           :follow-path []
+           :follow-last-target [0.0 0.0 0.0]
+           :follow-lost-ticks 0
+           :steps []))
   (karlach-say! voice-line))
 
 (defmethod execute-karlach-goal! :bodyguard
   [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
   (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Modo Guarda-Costas ativado para " target))
-  ;; Equipa machado de combate e escudo
-  (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_axe")
-  (send-bridge-cmd! "CMD|item replace entity Karlach weapon.offhand with minecraft:shield")
-  (send-bridge-cmd! "CMD|playsound minecraft:item.armor.equip_netherite master @a ~ ~ ~ 1.0 1.0")
-  (send-bridge-cmd! "SWING|Karlach")
-  (swap! nav-state assoc
-         :mode :bodyguard
-         :follow-target target
-         :follow-path []
-         :follow-last-target [0.0 0.0 0.0]
-         :follow-lost-ticks 0
-         :steps [])
+  (let [players (query-online-players)
+        target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
+        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))]
+    (when target-p
+      (send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
+      (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
+    (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_axe")
+    (send-bridge-cmd! "CMD|item replace entity Karlach weapon.offhand with minecraft:shield")
+    (send-bridge-cmd! "CMD|playsound minecraft:item.armor.equip_netherite master @a ~ ~ ~ 1.0 1.0")
+    (send-bridge-cmd! "SWING|Karlach")
+    (swap! nav-state assoc
+           :mode :bodyguard
+           :pos tgt-pos
+           :follow-target target
+           :follow-path []
+           :follow-last-target [0.0 0.0 0.0]
+           :follow-lost-ticks 0
+           :steps []))
   (when engine-ctx-atom
     (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Guarda-Costas de " target)))
   (karlach-say! voice-line))
@@ -1440,6 +1455,14 @@
                                    dist (Math/sqrt (+ (* dx dx) (* dz dz)))
                                    yaw (compute-yaw dx dz)]
                                (swap! nav-state assoc :follow-lost-ticks 0)
+
+                               ;; Teleporte de aproximação se o jogador estiver distante (desceu em caverna/mina)
+                               (let [total-d (Math/sqrt (+ (* dx dx) (* (- (double ty) (double cy)) (- (double ty) (double cy))) (* dz dz)))]
+                                 (when (> total-d 28.0)
+                                   (send-bridge-cmd! (uformat "CMD|tp Karlach %s" (:name target-p)))
+                                   (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
+                                   (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
+                                   (swap! nav-state assoc :pos [tx ty tz] :follow-path [])))
 
                                ;; Varredura tática de hostis e proteção do jogador (4 vezes por segundo)
                                (when (zero? (mod tick 5))
