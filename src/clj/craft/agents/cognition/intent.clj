@@ -122,6 +122,14 @@
 (def ^:private weather-pattern
   #"\b(chuv\w*|chov\w*|molh\w*|abrig\w*|tempor\w*|tempest\w*|raio|trov\w*)\b")
 
+;; Guarda-costas, combate e autodefesa
+(def ^:private bodyguard-pattern
+  #"\b(guarda[\s-]*costas?|defend\w*|proteg\w*|escolt\w*|ataqu\w*|combat\w*|lut\w*|seguranc\w*|mat\w*|zumbi|monstro|esqueleto|aranha)\b")
+
+;; Mineração cooperativa e escavação
+(def ^:private mining-pattern
+  #"\b(miner\w*|cav\w*|escav\w*|quebr\w*|picaret\w*|minerio|ferro|carvao|ouro|diamante)\b")
+
 ;; ----------------------------------------------------------------------------
 ;; Classificador Semântico Híbrido (System 1 - Vetorial + Morfológico < 1ms)
 ;; ----------------------------------------------------------------------------
@@ -144,7 +152,9 @@
         has-stop     (boolean (re-find stop-pattern norm))
         has-patrol   (boolean (re-find patrol-pattern norm))
         has-dance    (boolean (re-find dance-pattern norm))
-        has-weather  (boolean (re-find weather-pattern norm))]
+        has-weather  (boolean (re-find weather-pattern norm))
+        has-bodyguard (boolean (re-find bodyguard-pattern norm))
+        has-mining   (boolean (re-find mining-pattern norm))]
     (cond
       ;; 1. Emergência / Fuga / Resgate de Animal (Prioridade Absoluta)
       (or (= :animal-emergency routed-type)
@@ -201,6 +211,26 @@
        :intent/route-method :semantic-vector
        :intent/anchor       (:intent/anchor router-match)
        :intent/slots        {:target/action  "stop-following"
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
+
+      ;; 5.1 Modo Guarda-Costas / Combate e Autodefesa
+      (or (= :bodyguard routed-type) has-bodyguard)
+      {:intent/type         :bodyguard
+       :intent/confidence   (max 0.95 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  "bodyguard"
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
+
+      ;; 5.2 Mineração Cooperativa & Escavação
+      (or (= :mining-cooperation routed-type) has-mining)
+      {:intent/type         :mining-cooperation
+       :intent/confidence   (max 0.95 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  "mining"
                              :target/speaker speaker}
        :intent/raw-text     raw-text}
 

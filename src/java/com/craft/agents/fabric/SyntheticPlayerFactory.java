@@ -1008,6 +1008,48 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            if ("REDEFINE_CLASS".equals(op) && parts.length >= 2) {
+                String className = parts[1];
+                try {
+                    Class<?> target = Class.forName(className);
+                    java.io.File f = new java.io.File("/home/pace/dev/craft-agents/target/classes/" + className.replace('.', '/') + ".class");
+                    if (f.exists() && inst != null && inst.isRedefineClassesSupported()) {
+                        byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
+                        inst.redefineClasses(new java.lang.instrument.ClassDefinition(target, b));
+                        return "OK|" + className;
+                    }
+                    return "ERR|FILE_OR_INST_NOT_FOUND";
+                } catch (Throwable t) {
+                    return "ERR|" + t.getMessage();
+                }
+            }
+
+            if ("MINE_BLOCK".equals(op) && parts.length >= 5) {
+                String pName = parts[1];
+                int bx = Integer.parseInt(parts[2]);
+                int by = Integer.parseInt(parts[3]);
+                int bz = Integer.parseInt(parts[4]);
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticExcavation.executeMine(server, player, bx, by, bz, cl).toProtocolString();
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("LOCATE_ORES".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                double radius = parts.length >= 3 ? Double.parseDouble(parts[2]) : 8.0;
+                String filter = parts.length >= 4 ? parts[3] : "";
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    List<SyntheticExcavation.OreTarget> ores = SyntheticExcavation.scanNearbyOres(player, radius, filter, cl);
+                    return SyntheticExcavation.formatOresProtocol(ores);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
             return "ERR|UNKNOWN_OP";
         } catch (Throwable t) {
             return "ERR|" + t.getMessage();

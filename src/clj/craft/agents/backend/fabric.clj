@@ -561,8 +561,53 @@
     (when (and resp (str/starts-with? resp "OK|"))
       (let [[_ tid cd] (str/split resp #"\|")]
         {:success? true
-         :target-id (try (Integer/parseInt tid) (catch Throwable _ target-id))
-         :cooldown (try (Double/parseDouble cd) (catch Throwable _ 1.0))}))))
+          :target-id (try (Integer/parseInt tid) (catch Throwable _ target-id))
+          :cooldown (try (Double/parseDouble cd) (catch Throwable _ 1.0))}))))
+
+(defn mine-block!
+  "Executa quebra segura de bloco in-JVM respeitando regras de ouro (CA-E3.1).
+   Retorna {:success? true/false :block-id ... :tool-used ...} ou erro."
+  ([x y z] (mine-block! "Karlach" x y z))
+  ([player-name x y z]
+   (let [cmd (uformat "MINE_BLOCK|%s|%d|%d|%d" player-name (int x) (int y) (int z))
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [[_ bid tid bx by bz] (str/split resp #"\|")]
+         {:success? true
+          :block-id bid
+          :tool-used tid
+          :x (try (Integer/parseInt bx) (catch Throwable _ (int x)))
+          :y (try (Integer/parseInt by) (catch Throwable _ (int y)))
+          :z (try (Integer/parseInt bz) (catch Throwable _ (int z)))})
+       (let [parts (str/split (or resp "ERR|UNKNOWN") #"\|")
+             code (nth parts 1 "UNKNOWN")
+             msg (nth parts 2 "")]
+         {:success? false
+          :error-code code
+          :message msg})))))
+
+(defn locate-nearby-ores
+  "Escaneia veios de minerios proximos ao jogador via bridge (CA-E3.1)."
+  ([player-name] (locate-nearby-ores player-name 12.0 ""))
+  ([player-name radius] (locate-nearby-ores player-name radius ""))
+  ([player-name radius filter-str]
+   (let [cmd (uformat "LOCATE_ORES|%s|%.1f|%s" player-name (double radius) (or filter-str ""))
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [parts (str/split (subs resp 3) #"\|")
+             count-val (try (Integer/parseInt (nth parts 0 "0")) (catch Throwable _ 0))]
+         (if (or (zero? count-val) (< (count parts) 2) (str/blank? (nth parts 1)))
+           []
+           (let [entries (str/split (nth parts 1) #";")]
+             (mapv (fn [raw]
+                     (let [[x y z id dist] (str/split raw #",")]
+                       {:x (try (Integer/parseInt x) (catch Throwable _ 0))
+                        :y (try (Integer/parseInt y) (catch Throwable _ 0))
+                        :z (try (Integer/parseInt z) (catch Throwable _ 0))
+                        :block-id id
+                        :distance (try (Double/parseDouble dist) (catch Throwable _ 0.0))}))
+                   entries))))
+       []))))
 
 (defn auto-eat-food!
   "Consome alimento para restaurar barra de fome e curar vida."
@@ -972,6 +1017,43 @@
          :steps [])
   (karlach-say! voice-line))
 
+(defmethod execute-karlach-goal! :bodyguard
+  [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Modo Guarda-Costas ativado para " target))
+  ;; Equipa machado de combate e escudo
+  (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_axe")
+  (send-bridge-cmd! "CMD|item replace entity Karlach weapon.offhand with minecraft:shield")
+  (send-bridge-cmd! "CMD|playsound minecraft:item.armor.equip_netherite master @a ~ ~ ~ 1.0 1.0")
+  (send-bridge-cmd! "SWING|Karlach")
+  (swap! nav-state assoc
+         :mode :bodyguard
+         :follow-target target
+         :follow-path []
+         :follow-last-target [0.0 0.0 0.0]
+         :follow-lost-ticks 0
+         :steps [])
+  (when engine-ctx-atom
+    (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Guarda-Costas de " target)))
+  (karlach-say! voice-line))
+
+(defmethod execute-karlach-goal! :mining-cooperation
+  [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Iniciando mineração cooperativa com " target))
+  (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe")
+  (send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
+  (send-bridge-cmd! "SWING|Karlach")
+  (let [ores (locate-nearby-ores "Karlach" 12.0 "")]
+    (if-let [target-ore (first ores)]
+      (do
+        (record-cognitive-event! engine-ctx-atom :perception "Sensor de Minérios"
+                                 (str "Veio detectado: " (:block-id target-ore) " a " (uformat "%.1fm" (:distance target-ore))))
+        (karlach-say! (str "Achei um veio de " (:block-id target-ore) " bem aqui perto! Deixa que eu minero pra gente! ⛏️"))
+        (mine-block! "Karlach" (:x target-ore) (:y target-ore) (:z target-ore))
+        (send-bridge-cmd! "SWING|Karlach"))
+      (karlach-say! (str "Picareta afiada e pronta, " target "! Aponta o minério ou bloco que você quer que eu escave! ⛏️"))))
+  (when engine-ctx-atom
+    (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Minerando com " target))))
+
 (defmethod execute-karlach-goal! :spatial-attention
   [{:goal/keys [entity speaker]} engine-ctx-atom nav-state _sanctuary-route]
   (let [players (query-online-players)
@@ -1343,8 +1425,8 @@
                                   :agents {:karlach (make-karlach-card "dancing 🔥" [cx cy cz])
                                            :picard  picard-card}))
 
-                         ;; 2. Follow player mode (Navegação Universal via A* 3D e Voxels Reais)
-                         (= (:mode st) :follow)
+                         ;; 2. Follow player & Bodyguard mode (Navegação Universal via A* 3D, Voxels Reais e Autodefesa)
+                         (or (= (:mode st) :follow) (= (:mode st) :bodyguard))
                          (let [players (query-online-players)
                                target-p (first (filter #(= (str/lower-case (:name %))
                                                            (str/lower-case (or (:follow-target st) "pace")))
@@ -1358,6 +1440,27 @@
                                    dist (Math/sqrt (+ (* dx dx) (* dz dz)))
                                    yaw (compute-yaw dx dz)]
                                (swap! nav-state assoc :follow-lost-ticks 0)
+
+                               ;; Varredura tática de hostis e proteção do jogador (4 vezes por segundo)
+                               (when (zero? (mod tick 5))
+                                 (try
+                                   (let [hostiles (scan-nearby-hostiles "Karlach" 14.0)]
+                                     (when-let [target-mob (first hostiles)]
+                                       (let [mdist (:distance target-mob)]
+                                         (if (<= mdist 3.8)
+                                           (let [hdx (- (:x target-mob) cx)
+                                                 hdz (- (:z target-mob) cz)
+                                                 hyaw (compute-yaw hdx hdz)]
+                                             (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz hyaw))
+                                             (attack-hostile-target! "Karlach" (:id target-mob))
+                                             (send-bridge-cmd! "SWING|Karlach")
+                                             (send-bridge-cmd! (uformat "CMD|particle minecraft:crit %.2f %.2f %.2f 0.3 0.3 0.3 0.1 5 normal"
+                                                                       (:x target-mob) (+ (:y target-mob) 1.0) (:z target-mob)))
+                                             (when (zero? (mod tick 30))
+                                               (karlach-say! (str "Toma essa, " (:type target-mob) "! Não mexe com meu esquadrão! 🔥"))))
+                                           (when (and (= (:mode st) :bodyguard) (> mdist 3.8) (<= mdist 10.0))
+                                             (swap! nav-state assoc :follow-path (request-path3d [cx cy cz] [(:x target-mob) (:y target-mob) (:z target-mob)] 2.0)))))))
+                                   (catch Throwable _ nil)))
                                (if (<= dist 2.6)
                                  (do
                                    (send-bridge-cmd!
@@ -1410,7 +1513,7 @@
                                (swap! engine-ctx-atom assoc
                                       :tick tick
                                       :leases {:legs {:owner :escort-player} :hands nil :gaze {:owner :social-gaze}}
-                                      :agents {:karlach (make-karlach-card (str "escoltando " (:name target-p)) (:pos @nav-state))
+                                      :agents {:karlach (make-karlach-card (if (= (:mode st) :bodyguard) (str "🛡️ guarda-costas de " (:name target-p)) (str "escoltando " (:name target-p))) (:pos @nav-state))
                                                :picard  picard-card}))
                              ;; Debounce para evitar cancelamento por oscilação momentânea do socket
                              (let [lost-cnt (inc (:follow-lost-ticks st 0))]

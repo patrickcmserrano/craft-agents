@@ -110,6 +110,20 @@
        :goal/voice-line (str "Tô indo até você, " speaker "! Meu motor infernal já tá aquecido!")
        :goal/speaker    speaker}
 
+      :bodyguard
+      {:goal/id         :bodyguard
+       :goal/type       :bodyguard
+       :goal/target     speaker
+       :goal/voice-line (str "Modo Guarda-Costas ativado, soldado! Macho nenhum e monstro nenhum encosta em você enquanto meu motor infernal estiver rugindo! 🔥")
+       :goal/speaker    speaker}
+
+      :mining-cooperation
+      {:goal/id         :mining-cooperation
+       :goal/type       :mining-cooperation
+       :goal/target     speaker
+       :goal/voice-line (str "Picareta em punho, soldado! Deixa que eu quebro as pedras e minérios pra gente!")
+       :goal/speaker    speaker}
+
       :social-dance
       {:goal/id         :dance-avernus
        :goal/type       :social-dance

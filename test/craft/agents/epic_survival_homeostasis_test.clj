@@ -89,3 +89,35 @@
           (is (true? (:success? res)))
           (is (= 201 (:target-id res)))
           (is (= 0.95 (:cooldown res))))))))
+
+(deftest ca-e3-1-safe-mining-and-excavation-test
+  (testing "CA-E3.1: Mineração Segura & Ferramenta Ótima in-JVM"
+    (testing "Protocolo de mineracao bem-sucedida"
+      (with-redefs [fabric/send-bridge-cmd! (fn [cmd]
+                                              (if (= cmd "MINE_BLOCK|Karlach|-170|64|172")
+                                                "OK|minecraft:iron_ore|minecraft:iron_pickaxe|-170|64|172"
+                                                "ERR"))]
+        (let [res (fabric/mine-block! "Karlach" -170 64 172)]
+          (is (true? (:success? res)))
+          (is (= "minecraft:iron_ore" (:block-id res)))
+          (is (= "minecraft:iron_pickaxe" (:tool-used res)))
+          (is (= -170 (:x res)))
+          (is (= 64 (:y res)))
+          (is (= 172 (:z res))))))
+
+    (testing "Regra de ouro: Rejeição de quebra sob os próprios pés (Fall Hazard)"
+      (with-redefs [fabric/send-bridge-cmd! (fn [_] "ERR|FALL_HAZARD|cannot break floor under feet")]
+        (let [res (fabric/mine-block! "Karlach" -170 63 172)]
+          (is (false? (:success? res)))
+          (is (= "FALL_HAZARD" (:error-code res))))))
+
+    (testing "Varredura de veios de minério próximos (locate-nearby-ores)"
+      (with-redefs [fabric/send-bridge-cmd! (fn [cmd]
+                                              (if (.startsWith cmd "LOCATE_ORES|Karlach|12.0|")
+                                                "OK|2|-170,64,172,minecraft:iron_ore,2.50;-171,63,170,minecraft:coal_ore,4.80"
+                                                "OK|0|"))]
+        (let [ores (fabric/locate-nearby-ores "Karlach" 12.0)]
+          (is (= 2 (count ores)))
+          (is (= "minecraft:iron_ore" (:block-id (first ores))))
+          (is (= 2.5 (:distance (first ores))))
+          (is (= "minecraft:coal_ore" (:block-id (second ores)))))))))
