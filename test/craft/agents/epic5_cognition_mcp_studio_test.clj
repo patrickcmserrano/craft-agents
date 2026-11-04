@@ -3,6 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [craft.agents.backend.fabric :as fabric]
             [craft.agents.blackboard :as bb]
             [craft.agents.cognition :as cognition]
             [craft.agents.fixtures.world-fixture :as wf]
@@ -102,3 +103,82 @@
       (ingame-debug/emit-admin-route-particles! backend "Pace" [{:x -175 :y 65 :z 180} {:x -171 :y 65 :z 171}])
       (let [recipients (set (map :recipient (:particles @w)))]
         (is (= #{"Pace"} recipients))))))
+
+(deftest ca-043-skill-rag-retrieval-test
+  (testing "CA-043 / P2.1: Skill-RAG recupera as habilidades mais relevantes semanticamente"
+    (let [results (composer/retrieve-relevant-skills "resgatar a capivara nadadora no lago" "skills" {:top-k 2})]
+      (is (= 2 (count results)))
+      (let [top (first results)]
+        (is (re-find #"capivara|capybara|animal|resgate" (str/lower-case (get-in top [:skill :skill/name]))))
+        (is (pos? (:score top)))))))
+
+(deftest ca-044-grammar-spec-and-ast-validation-test
+  (testing "CA-044 / P2.2: Especificação de gramática e validação estrita de AST"
+    (let [spec (composer/build-bt-grammar-spec)]
+      (is (= :edn-behavior-tree (:format spec)))
+      (is (contains? (:primitives spec) :open-gate))
+      (is (contains? (:primitives spec) :attach-lead)))
+
+    (let [valid-tree [:sequence
+                      [:action :equip-bait {:item "minecraft:apple"}]
+                      [:action :walk {:target [-175.0 65.0 180.0]}]]
+          invalid-tree [:unsupported-op {:fake true}]]
+      (is (true? (composer/validate-bt-ast valid-tree)))
+      (is (false? (composer/validate-bt-ast invalid-tree))))))
+
+(deftest ca-045-mental-sandbox-preconditions-test
+  (testing "CA-045 / P2.3: Sandbox Mental valida pré-condições de itens no inventário e bloqueia execução às cegas"
+    (let [tree [:sequence
+                [:action :equip-bait {:item "minecraft:apple"}]
+                [:action :attach-lead]
+                [:action :open-gate {:enclosure :pen-south-west}]]
+          obs-ok   {:inventory {"minecraft:apple" 2 "minecraft:lead" 1}}
+          obs-fail {:inventory {"minecraft:lead" 1}} ;; falta a maçã
+          res-ok   (composer/evaluate-preconditions tree obs-ok {:known-enclosures #{:pen-south-west :pen-north-east}})
+          res-fail (composer/evaluate-preconditions tree obs-fail {:known-enclosures #{:pen-south-west}})]
+      (is (true? (:valid? res-ok)))
+      (is (= :preconditions-met (:status res-ok)))
+
+      (is (false? (:valid? res-fail)))
+      (is (= :precondition-failed (:status res-fail)))
+      (is (= "minecraft:apple" (:missing-item res-fail)))
+      (is (= :equip-bait (:failed-action res-fail))))
+
+    (testing "Rejeita cercado desconhecido"
+      (let [tree [:sequence [:action :open-gate {:enclosure :pen-unknown}]]
+            obs  {:inventory {}}
+            res  (composer/evaluate-preconditions tree obs {:known-enclosures #{:pen-south-west}})]
+        (is (false? (:valid? res)))
+        (is (= :precondition-failed (:status res)))
+        (is (= :pen-unknown (:missing-enc res)))))))
+
+(deftest ca-046-dynamic-terrain-portal-perception-test
+  (testing "CA-046: generate-walk-steps detecta :TRAVERSE_PORTAL em tempo real e emite micro-etapas de condução profunda"
+    (let [mock-path [{:x -177 :y 65 :z 189 :action :WALK}
+                     {:x -178 :y 65 :z 189 :action :WALK}
+                     {:x -179 :y 65 :z 189 :action :TRAVERSE_PORTAL}
+                     {:x -180 :y 65 :z 189 :action :WALK}
+                     {:x -181 :y 65 :z 189 :action :WALK}]]
+      (with-redefs [fabric/request-path3d (fn [_ _ _] mock-path)]
+        (let [steps (fabric/generate-walk-steps [-177.0 65.0 189.0] [-181.0 65.0 189.0]
+                                               "Conduzindo capivara ao cercado"
+                                               {:pull-leashed? true :species "naturalist:capybara"})]
+          ;; 1. Verifica se houve abertura dinâmica do portão no voxel correto
+          (let [gate-open (first (filter #(and (= (:op %) :gate) (true? (:open? %))) steps))
+                gate-close (first (filter #(and (= (:op %) :gate) (false? (:open? %))) steps))
+                detach (first (filter #(= (:op %) :detach-lead) steps))
+                waits (filter #(= (:op %) :wait) steps)]
+            (is (some? gate-open))
+            (is (= [-179 65 189] (:pos gate-open)))
+            (is (some? gate-close))
+            (is (= [-179 65 189] (:pos gate-close)))
+            (is (some? detach))
+            (is (= "naturalist:capybara" (:species detach)))
+            ;; Deve conter espera de pelo menos 20 ticks para a física do mob
+            (is (some #(>= (:ticks %) 20) waits)))
+
+          ;; 2. Verifica se a trajetória permaneceu estritamente ortogonal (Z constante = 189.5), sem cortar diagonais
+          (let [walk-targets (keep :target (filter #(= (:op %) :walk) steps))]
+            (doseq [[x y z] walk-targets]
+              (is (= 189.5 z) (str "Passo desviou da reta ortogonal do portão: " [x y z]))
+              (is (= 65.0 y)))))))))

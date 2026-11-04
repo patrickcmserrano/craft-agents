@@ -50,8 +50,7 @@ attach: jar
 	echo "[+] Anexando craft-agents ao PID $$PID_RESOLVED..."; \
 	TMP_JAR="target/craft-agents-attach-$$$$.jar"; \
 	cp $(AGENT_JAR) "$$TMP_JAR"; \
-	$(JAVA) -cp $(BUILD_DIR) com.craft.agents.attach.AttachCli $$PID_RESOLVED "$$TMP_JAR" $(STUDIO_PORT); \
-	rm -f "$$TMP_JAR"
+	$(JAVA) -cp $(BUILD_DIR) com.craft.agents.attach.AttachCli $$PID_RESOLVED "$$TMP_JAR" $(STUDIO_PORT)
 
 clean:
 	rm -rf target .cpcache

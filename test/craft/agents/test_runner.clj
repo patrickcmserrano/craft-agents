@@ -8,7 +8,9 @@
             [craft.agents.epic4-behavior-leases-store-test]
             [craft.agents.epic5-cognition-mcp-studio-test]
             [craft.agents.epic6-production-migration-test]
-            [craft.agents.epic7-headless-swarm-v02-test]))
+            [craft.agents.epic7-headless-swarm-v02-test]
+            [craft.agents.cognition.intent-grounding-test]
+            [craft.agents.cognition.critic-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -18,7 +20,9 @@
    {:epic 4 :title "Epico 4 — Behavior Trees, Leases e Store (CA-029..CA-035)"   :ns 'craft.agents.epic4-behavior-leases-store-test}
    {:epic 5 :title "Epico 5 — Digest 3D, MCP e Agent Studio (CA-036..CA-042)"    :ns 'craft.agents.epic5-cognition-mcp-studio-test}
    {:epic 6 :title "Epico 6 — Migracao Real Karlach/Picard/AGY (CA-043..CA-048)" :ns 'craft.agents.epic6-production-migration-test}
-   {:epic 7 :title "Epico 7 — v0.2 Headless Swarm TCP (CA-049..CA-052)"          :ns 'craft.agents.epic7-headless-swarm-v02-test}])
+   {:epic 7 :title "Epico 7 — v0.2 Headless Swarm TCP (CA-049..CA-052)"          :ns 'craft.agents.epic7-headless-swarm-v02-test}
+   {:epic 8 :title "Epico 8 — Intent Router & Semantic Grounding (CA-040)"        :ns 'craft.agents.cognition.intent-grounding-test}
+   {:epic 9 :title "Epico 9 — Environmental Critic & Reflexion Loop (CA-041)"     :ns 'craft.agents.cognition.critic-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]

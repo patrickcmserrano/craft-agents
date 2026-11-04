@@ -13,7 +13,8 @@
             [craft.agents.regions :as regions])
   (:import [com.craft.agents.api CollisionType PathNodeStep$StepAction PathResult$Status]
            [com.craft.agents.fabric ChunkSnapshotVoxelAccessor]
-           [com.craft.agents.nav LongHashSet MovementCosts PackedPos PathSolver3D PortalDetector PrimitiveMinHeap]))
+           [com.craft.agents.nav GoalBlock GoalLeashedEscort GoalNear GoalPortal GoalXZ
+                                 LongHashSet MovementCapabilities MovementCosts PackedPos PathSolver3D PortalDetector PrimitiveMinHeap]))
 
 (deftest ca-021-packed-pos-heap-and-longset-generative-test
   (testing "CA-021: PackedPos preserva exatamente (x, y, z) em todo o dominio do Minecraft (incluindo coordenadas negativas)"
@@ -137,3 +138,78 @@
       (is (= :pen-north-east (:enclosure/id (regions/enclosure-at reg [-166 65 171]))))
       (is (= :pen-south-west (:enclosure/id (regions/enclosure-at reg [-184 65 189]))))
       (is (nil? (regions/enclosure-at reg [-175 65 180])) "Corredor central nao pertence ao interior das jaulas"))))
+
+(deftest ca-029-flexible-goals-and-movement-capabilities-test
+  (testing "CA-029: Hierarquia de Metas 3D (GoalBlock, GoalNear, GoalXZ, GoalPortal, GoalLeashedEscort)"
+    (let [gb (GoalBlock. 10 65 20)]
+      (is (true? (.isSatisfied gb 10 65 20)))
+      (is (false? (.isSatisfied gb 11 65 20)))
+      (is (= 1.0 (.heuristic gb 11 65 20))))
+
+    (let [gn (GoalNear. 10 65 20 2.0)]
+      (is (true? (.isSatisfied gn 11 65 20)))
+      (is (true? (.isSatisfied gn 10 65 22)))
+      (is (false? (.isSatisfied gn 10 65 25)))
+      (is (> (.heuristic gn 10 65 25) 0.0)))
+
+    (let [gxz (GoalXZ. 10 20 1.5)]
+      (is (true? (.isSatisfied gxz 10 100 20)) "GoalXZ ignora Y")
+      (is (true? (.isSatisfied gxz 11 -50 20)) "GoalXZ dentro do raio horizontal")
+      (is (false? (.isSatisfied gxz 20 65 30))))
+
+    (let [gp (GoalPortal. -171 65 171 1.0 0.0 -169.5 171.5 -172.5 171.5)]
+      (is (true? (.isSatisfied gp -170 65 171)))
+      (is (false? (.isSatisfied gp -175 65 171))))
+
+    (let [escort (GoalLeashedEscort. (GoalBlock. 5 65 5) "naturalist:capybara" 3.5 0.12)]
+      (is (true? (.isSatisfied escort 5 65 5)))
+      (is (false? (.isSatisfied escort 6 65 5)))
+      (is (= "naturalist:capybara" (.species escort)))
+      (is (= 0.12 (.escortSpeed escort)))))
+
+  (testing "CA-029: MovementCapabilities valida lista negra de blocos e deteccao de hazards"
+    (let [w (wf/make-flat-world-state 64)
+          _ (wf/set-block! w [0 64 0] {:id "minecraft:stone" :collision CollisionType/SOLID :height 1.0})
+          _ (wf/set-block! w [1 64 0] {:id "minecraft:oak_fence" :collision CollisionType/SOLID :height 1.5})
+          _ (wf/set-block! w [2 64 0] {:id "minecraft:cobblestone_wall" :collision CollisionType/SOLID :height 1.5})
+          _ (wf/set-block! w [3 64 0] {:id "minecraft:lantern" :collision CollisionType/SOLID :height 0.5})
+          _ (wf/set-block! w [4 64 0] {:id "minecraft:iron_bars" :collision CollisionType/SOLID :height 1.0})
+          _ (wf/set-block! w [5 64 0] {:id "minecraft:lava" :collision CollisionType/LIQUID :hazard? true})
+          _ (wf/set-block! w [6 64 0] {:id "minecraft:sweet_berry_bush" :collision CollisionType/SOLID :hazard? true})
+          vox (wf/->voxel-accessor w)
+          mc (MovementCapabilities/defaults)]
+      (is (true? (.canStandOn mc vox 0 64 0)) "Stone e piso solido valido")
+      (is (false? (.canStandOn mc vox 1 64 0)) "Cerca e proibida como piso")
+      (is (false? (.canStandOn mc vox 2 64 0)) "Muro e proibido como piso")
+      (is (false? (.canStandOn mc vox 3 64 0)) "Lanterna e proibida como piso")
+      (is (false? (.canStandOn mc vox 4 64 0)) "Grades de ferro sao proibidas como piso")
+      (is (true? (.isHazard mc vox 5 64 0)) "Lava e hazard")
+      (is (true? (.isHazard mc vox 6 64 0)) "Sweet berry bush e hazard")))
+
+  (testing "CA-029: PathSolver3D bloqueia corte de quina diagonal contra obstaculo solido"
+    (let [w (wf/make-flat-world-state 64)
+          ;; Parede solida em [1 65 0] e [1 66 0]
+          _ (wf/set-block! w [1 65 0] {:id "minecraft:stone" :collision CollisionType/SOLID})
+          _ (wf/set-block! w [1 66 0] {:id "minecraft:stone" :collision CollisionType/SOLID})
+          vox (wf/->voxel-accessor w)
+          solver (PathSolver3D.)
+          caps (MovementCapabilities/defaults)
+          res (.solve solver vox 0 65 0 (GoalBlock. 1 65 1) caps 1000)]
+      (is (= PathResult$Status/SUCCESS (.status res)))
+      ;; A rota NAO PODE dar um passo direto DIAGONAL de [0 65 0] para [1 65 1] cortando a quina solida!
+      (let [steps (.steps res)
+            first-step (first steps)]
+        (is (not= [1 65 1] [(.x first-step) (.y first-step) (.z first-step)])
+            "Nao pode pular diagonalmente cortando a quina de pedra!"))))
+
+  (testing "CA-029: nav/plan-path-async com metas polimorficas Clojure"
+    (let [w (wf/make-flat-world-state 64)
+          vox (wf/->voxel-accessor w)
+          fut-xz (nav/plan-path-async vox [0 65 0] {:goal-type :xz :x 5 :z 0 :radius 1.0} {})
+          res-xz @fut-xz
+          fut-escort (nav/plan-path-async vox [0 65 0]
+                                         {:goal-type :escort :to [3 65 0] :species "capybara"}
+                                         {:escort-leashed? true :escort-speed 0.12})
+          res-escort @fut-escort]
+      (is (= PathResult$Status/SUCCESS (.status res-xz)))
+      (is (= PathResult$Status/SUCCESS (.status res-escort))))))

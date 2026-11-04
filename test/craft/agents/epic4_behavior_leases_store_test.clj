@@ -121,3 +121,46 @@
           (is (= snap (store/load-agent-snapshot tmp-dir :karlach))))
         (finally
           (doseq [f (reverse (file-seq tmp-dir))] (.delete f)))))))
+
+(deftest ca-046-multiagent-shared-resource-arbiter-test
+  (testing "CA-046 / P3.1: Árbitro Multiagente coordena recursos físicos e espaciais entre Karlach e Picard"
+    (let [arbiter      (leases/create-multiagent-arbiter)
+          preempted?   (atom false)
+          res-portal   :portal-pen-south-west
+          karlach-claim (leases/acquire-shared-resource! arbiter
+                                                        {:resource-id res-portal
+                                                         :agent-id :karlach
+                                                         :priority 10
+                                                         :timeout-ms 5000
+                                                         :on-preempt #(reset! preempted? true)})]
+      (is (true? (:granted? karlach-claim)) "Karlach deve adquirir o portal livre")
+
+      ;; Picard com prioridade menor (5) é bloqueado
+      (let [picard-fail (leases/acquire-shared-resource! arbiter
+                                                         {:resource-id res-portal
+                                                          :agent-id :picard
+                                                          :priority 5})]
+        (is (false? (:granted? picard-fail)))
+        (is (= :RESOURCE_LOCKED (:reason picard-fail)))
+        (is (= :karlach (:held-by picard-fail))))
+
+      ;; Picard com prioridade maior (25) preempta Karlach
+      (let [picard-win (leases/acquire-shared-resource! arbiter
+                                                        {:resource-id res-portal
+                                                         :agent-id :picard
+                                                         :priority 25
+                                                         :timeout-ms 3000})]
+        (is (true? (:granted? picard-win)))
+        (is (true? @preempted?) "Callback on-preempt da Karlach deve ter sido invocado"))
+
+      ;; Liberação por Picard
+      (leases/release-shared-resource! arbiter res-portal :picard)
+      (is (nil? (get (leases/query-shared-resources arbiter) res-portal)))
+
+      ;; Teste de limpeza de leases expirados por TTL
+      (leases/acquire-shared-resource! arbiter {:resource-id :feed-pandas :agent-id :karlach :timeout-ms 100})
+      (is (some? (get (leases/query-shared-resources arbiter (System/currentTimeMillis)) :feed-pandas)))
+      ;; Simula passagem de tempo (+200ms)
+      (leases/clean-expired-leases! arbiter (+ (System/currentTimeMillis) 200))
+      (is (nil? (get (leases/query-shared-resources arbiter (+ (System/currentTimeMillis) 200)) :feed-pandas))
+          "Lease expirado deve ser reavido automaticamente"))))

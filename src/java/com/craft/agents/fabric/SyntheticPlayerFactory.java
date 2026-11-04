@@ -28,6 +28,64 @@ public final class SyntheticPlayerFactory {
     private static volatile Object cachedServer = null;
     private static volatile ClassLoader cachedKnotLoader = null;
 
+    @SuppressWarnings("unchecked")
+    private static java.util.concurrent.ConcurrentLinkedQueue<String> getChatQueue() {
+        Object q = System.getProperties().get("craft.agents.chat.queue");
+        if (q instanceof java.util.concurrent.ConcurrentLinkedQueue) {
+            return (java.util.concurrent.ConcurrentLinkedQueue<String>) q;
+        }
+        java.util.concurrent.ConcurrentLinkedQueue<String> newQ = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        System.getProperties().put("craft.agents.chat.queue", newQ);
+        return newQ;
+    }
+
+    public static void hookChatEvents(ClassLoader cl) {
+        if (cl == null || "true".equals(System.getProperty("craft.agents.chat.hooked"))) return;
+        System.setProperty("craft.agents.chat.hooked", "true");
+        try {
+            Class<?> smeClass = Class.forName("net.fabricmc.fabric.api.message.v1.ServerMessageEvents", true, cl);
+            Field f = smeClass.getField("CHAT_MESSAGE");
+            Object chatEvent = f.get(null);
+            Class<?> chatIface = Class.forName("net.fabricmc.fabric.api.message.v1.ServerMessageEvents$ChatMessage", true, cl);
+            Object proxy = java.lang.reflect.Proxy.newProxyInstance(
+                cl,
+                new Class<?>[]{chatIface},
+                (p, m, args) -> {
+                    if ("onChatMessage".equals(m.getName()) && args != null && args.length >= 2) {
+                        try {
+                            Object msg = args[0];
+                            Object player = args[1];
+                            String senderName = "";
+                            try {
+                                Object gp = player.getClass().getMethod("method_7334").invoke(player);
+                                senderName = (String) gp.getClass().getMethod("getName").invoke(gp);
+                            } catch (Throwable t1) {
+                                Object txt = player.getClass().getMethod("method_5477").invoke(player);
+                                senderName = (String) txt.getClass().getMethod("getString").invoke(txt);
+                            }
+                            String text = "";
+                            try {
+                                text = (String) msg.getClass().getMethod("method_44862").invoke(msg);
+                            } catch (Throwable t2) {
+                                text = String.valueOf(msg);
+                            }
+                            if (senderName != null && text != null && !senderName.isEmpty() && !text.isEmpty()) {
+                                getChatQueue().add(senderName + "|" + text);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                    return null;
+                }
+            );
+            Method regMethod = chatEvent.getClass().getMethod("register", Object.class);
+            regMethod.invoke(chatEvent, proxy);
+            System.out.println("[craft-agents] ✅ Hook de Chat Fabric nativo registrado via ServerMessageEvents!");
+        } catch (Throwable t) {
+            System.out.println("[craft-agents] ℹ️ Hook ServerMessageEvents (fallback para chat poll/injecao): " + t.getMessage());
+        }
+    }
+
+
     private SyntheticPlayerFactory() {}
 
     public static UUID offlineAgentUuid(String agentName) {
@@ -289,6 +347,25 @@ public final class SyntheticPlayerFactory {
             String[] parts = line.split("\\|", -1);
             String op = parts[0];
 
+            hookChatEvents(cl);
+
+            if ("CHAT_POLL".equals(op)) {
+                StringBuilder sb = new StringBuilder("OK");
+                String item;
+                while ((item = getChatQueue().poll()) != null) {
+                    sb.append(";;").append(item);
+                }
+                return sb.toString();
+            }
+
+
+            if ("CHAT_INJECT".equals(op) && parts.length >= 3) {
+                String sender = parts[1];
+                String text = parts[2];
+                getChatQueue().add(sender + "|" + text);
+                return "OK";
+            }
+
             if ("SPAWN".equals(op) && parts.length >= 7) {
                 String name = parts[1];
                 double x = Double.parseDouble(parts[2]);
@@ -426,22 +503,448 @@ public final class SyntheticPlayerFactory {
                 Class<?> boxClass = Class.forName("net.minecraft.class_238", true, cl);
                 Object box = boxClass.getConstructor(
                         double.class, double.class, double.class, double.class, double.class, double.class)
-                        .newInstance(-215.0, 58.0, 150.0, -135.0, 80.0, 215.0);
+                        .newInstance(-240.0, 58.0, 135.0, -120.0, 85.0, 230.0);
                 Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
                 List<?> ents = (List<?>) overworld.getClass()
                         .getMethod("method_8335", entClass, boxClass)
                         .invoke(overworld, null, box);
                 java.util.Map<String, Integer> counts = new java.util.TreeMap<>();
+                StringBuilder entDetails = new StringBuilder();
+                boolean firstEnt = true;
                 for (Object e : ents) {
+                    if (e == null) continue;
                     double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
+                    double ey = (Double) e.getClass().getMethod("method_23318").invoke(e);
                     double ez = (Double) e.getClass().getMethod("method_23321").invoke(e);
-                    String pen = (ex > -175) ? ((ez < 180) ? "NE" : "SE") : ((ez < 180) ? "NW" : "SW");
-                    String key = pen + ":" + e.getClass().getSimpleName();
-                    counts.put(key, counts.getOrDefault(key, 0) + 1);
+                    String sName = e.getClass().getSimpleName();
+                    String pen;
+                    if (ex >= -171.5 && ex <= -135.0 && ez >= 164.0 && ez <= 178.0) pen = "NE";
+                    else if (ex >= -171.5 && ex <= -135.0 && ez >= 183.0 && ez <= 197.5) pen = "SE";
+                    else if (ex >= -215.0 && ex <= -178.5 && ez >= 183.0 && ez <= 197.5) pen = "SW";
+                    else if (ex >= -215.0 && ex <= -178.5 && ez >= 164.0 && ez <= 178.0) pen = "NW";
+                    else pen = "OUT";
+                    String key = pen + ":" + sName;
+
+                    String customName = "";
+                    try {
+                        Object nameObj = e.getClass().getMethod("method_5477").invoke(e);
+                        if (nameObj != null) customName = (String) nameObj.getClass().getMethod("getString").invoke(nameObj);
+                    } catch (Throwable ignored) {}
+                    boolean leashed = false;
+                    try {
+                        Method isLeashedMethod = e.getClass().getMethod("method_5931");
+                        leashed = (Boolean) isLeashedMethod.invoke(e);
+                    } catch (Throwable ignored) {}
+
+                    if (!firstEnt) entDetails.append(";");
+                    entDetails.append(sName).append(",")
+                              .append(customName).append(",")
+                              .append(String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", ex, ey, ez))
+                              .append(",").append(leashed);
+                    firstEnt = false;
                 }
-                sb.append(counts.toString());
+                sb.append(counts.toString()).append("|").append(entDetails.toString());
                 return sb.toString();
             }
+
+
+            if ("BLOCK".equals(op) && parts.length >= 4) {
+                int bx = Integer.parseInt(parts[1]);
+                int by = Integer.parseInt(parts[2]);
+                int bz = Integer.parseInt(parts[3]);
+                try {
+                    Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    Class<?> bpCls = Class.forName("net.minecraft.class_2338", true, cl);
+                    Object bp = bpCls.getConstructor(int.class, int.class, int.class).newInstance(bx, by, bz);
+                    Object bState = overworld.getClass().getMethod("method_8320", bpCls).invoke(overworld, bp);
+                    Object block = bState.getClass().getMethod("method_26204").invoke(bState);
+                    Class<?> regClass = Class.forName("net.minecraft.class_7923", true, cl);
+                    Object blockReg = regClass.getField("field_41175").get(null);
+                    Object idObj = blockReg.getClass().getMethod("method_10221", Object.class).invoke(blockReg, block);
+                    String id = idObj != null ? idObj.toString() : "minecraft:air";
+                    return "OK|" + id + "|" + bState.toString();
+                } catch (Throwable t) {
+                    return "ERR|" + t.getMessage();
+                }
+            }
+
+            if ("TOGGLE_PORTAL".equals(op) && parts.length >= 4) {
+                int bx = Integer.parseInt(parts[1]);
+                int by = Integer.parseInt(parts[2]);
+                int bz = Integer.parseInt(parts[3]);
+                boolean targetOpen = parts.length < 5 || Boolean.parseBoolean(parts[4]);
+                try {
+                    Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    Class<?> bpCls = Class.forName("net.minecraft.class_2338", true, cl);
+                    Object cmdMgr = server.getClass().getMethod("method_3756").invoke(server);
+                    Object cmdSrc = server.getClass().getMethod("method_3763").invoke(server);
+                    Method exec = cmdMgr.getClass().getMethod("method_9249", cmdSrc.getClass(), String.class);
+
+                    int[] ys = new int[]{by, by + 1, by - 1};
+                    for (int curY : ys) {
+                        Object bp = bpCls.getConstructor(int.class, int.class, int.class).newInstance(bx, curY, bz);
+                        Object bState = overworld.getClass().getMethod("method_8320", bpCls).invoke(overworld, bp);
+                        String s = bState.toString();
+                        if (s.contains("_gate") || s.contains("_door") || s.contains("gate") || s.contains("door")) {
+                            int b1 = s.indexOf('{');
+                            int b2 = s.indexOf('}');
+                            if (b1 >= 0 && b2 > b1) {
+                                String blockId = s.substring(b1 + 1, b2);
+                                String props = s.substring(b2 + 1);
+                                if (props.startsWith("[") && props.endsWith("]")) {
+                                    String newProps = props.replace("open=false", "open=" + targetOpen)
+                                                           .replace("open=true", "open=" + targetOpen);
+                                    String cmd = "setblock " + bx + " " + curY + " " + bz + " " + blockId + newProps;
+                                    runOnServerThread(server, () -> {
+                                        try {
+                                            exec.invoke(cmdMgr, cmdSrc, cmd);
+                                        } catch (Throwable ignored) {}
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    String sound = targetOpen ? "minecraft:block.fence_gate.open" : "minecraft:block.fence_gate.close";
+                    runOnServerThread(server, () -> {
+                        try {
+                            exec.invoke(cmdMgr, cmdSrc, "playsound " + sound + " block @a " + bx + " " + by + " " + bz + " 1.0 1.0");
+                        } catch (Throwable ignored) {}
+                    });
+                    return "OK";
+                } catch (Throwable t) {
+                    return "ERR|" + t.getMessage();
+                }
+            }
+
+            if ("PATH".equals(op) && parts.length >= 3) {
+                String[] from = parts[1].split(",");
+                String[] to = parts[2].split(",");
+                double radius = parts.length >= 4 ? Double.parseDouble(parts[3]) : 1.5;
+                int fx = (int) Math.floor(Double.parseDouble(from[0]));
+                int fy = (int) Math.floor(Double.parseDouble(from[1]));
+                int fz = (int) Math.floor(Double.parseDouble(from[2]));
+                int tx = (int) Math.floor(Double.parseDouble(to[0]));
+                int ty = (int) Math.floor(Double.parseDouble(to[1]));
+                int tz = (int) Math.floor(Double.parseDouble(to[2]));
+                try {
+                    java.net.URLClassLoader pathLoader = new java.net.URLClassLoader(
+                            new java.net.URL[]{ new java.io.File("/home/pace/dev/craft-agents/target/classes/").toURI().toURL() },
+                            cl
+                    );
+                    Class<?> voxCls = pathLoader.loadClass("com.craft.agents.fabric.LiveWorldVoxelAccessor");
+                    Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);
+
+                    Class<?> solverCls = pathLoader.loadClass("com.craft.agents.nav.PathSolver3D");
+                    Object solver = solverCls.getConstructor().newInstance();
+
+                    Class<?> costsCls = pathLoader.loadClass("com.craft.agents.nav.MovementCosts");
+                    Object defaultCosts = costsCls.getMethod("defaults").invoke(null);
+
+                    Class<?> voxInterface = pathLoader.loadClass("com.craft.agents.api.VoxelAccessor");
+                    Method solveMethod = solverCls.getMethod("solveToRadius",
+                            voxInterface, int.class, int.class, int.class, int.class, int.class, int.class, double.class, costsCls, int.class);
+
+                    Object res = solveMethod.invoke(solver, liveVox, fx, fy, fz, tx, ty, tz, radius, defaultCosts, 3000);
+                    Object status = res.getClass().getMethod("status").invoke(res);
+                    if ("SUCCESS".equals(status.toString())) {
+                        List<?> steps = (List<?>) res.getClass().getMethod("steps").invoke(res);
+                        StringBuilder sb = new StringBuilder("OK|");
+                        boolean first = true;
+                        for (Object s : steps) {
+                            if (!first) sb.append(";");
+                            first = false;
+                            int sx = (Integer) s.getClass().getMethod("x").invoke(s);
+                            int sy = (Integer) s.getClass().getMethod("y").invoke(s);
+                            int sz = (Integer) s.getClass().getMethod("z").invoke(s);
+                            Object act = s.getClass().getMethod("action").invoke(s);
+                            sb.append(sx).append(",").append(sy).append(",").append(sz).append(",").append(act.toString());
+                        }
+                        return sb.toString();
+                    } else {
+                        return "ERR|NO_PATH";
+                    }
+                } catch (Throwable t) {
+                    return "ERR|" + t.getMessage();
+                }
+            }
+
+            if ("LEASH".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                String targetType = parts.length >= 3 ? parts[2].trim().toLowerCase() : "";
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    try {
+                        Object world = player.getClass().getMethod("method_51469").invoke(player);
+                        double px = (Double) player.getClass().getMethod("method_23317").invoke(player);
+                        double py = (Double) player.getClass().getMethod("method_23318").invoke(player);
+                        double pz = (Double) player.getClass().getMethod("method_23321").invoke(player);
+                        Class<?> boxClass = Class.forName("net.minecraft.class_238", true, cl);
+                        Object box = boxClass.getConstructor(
+                                double.class, double.class, double.class, double.class, double.class, double.class)
+                                .newInstance(px - 16.0, py - 6.0, pz - 16.0, px + 16.0, py + 6.0, pz + 16.0);
+                        Class<?> mobClass = Class.forName("net.minecraft.class_1308", true, cl);
+                        Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
+                        List<?> ents = (List<?>) world.getClass()
+                                .getMethod("method_8335", entClass, boxClass)
+                                .invoke(world, null, box);
+                        Object closest = null;
+                        double bestDist = Double.MAX_VALUE;
+                        for (Object e : ents) {
+                            if (mobClass.isInstance(e)) {
+                                String cName = e.getClass().getSimpleName().toLowerCase();
+                                if (!targetType.isEmpty() && !cName.contains(targetType) && !targetType.contains(cName)) {
+                                    continue;
+                                }
+                                double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
+                                double ey = (Double) e.getClass().getMethod("method_23318").invoke(e);
+                                double ez = (Double) e.getClass().getMethod("method_23321").invoke(e);
+                                double d = (ex - px)*(ex - px) + (ey - py)*(ey - py) + (ez - pz)*(ez - pz);
+                                if (d < bestDist) {
+                                    bestDist = d;
+                                    closest = e;
+                                }
+                            }
+                        }
+                        if (closest == null && !targetType.isEmpty()) {
+                            for (Object e : ents) {
+                                if (mobClass.isInstance(e)) {
+                                    double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
+                                    double ey = (Double) e.getClass().getMethod("method_23318").invoke(e);
+                                    double ez = (Double) e.getClass().getMethod("method_23321").invoke(e);
+                                    double d = (ex - px)*(ex - px) + (ey - py)*(ey - py) + (ez - pz)*(ez - pz);
+                                    if (d < bestDist) {
+                                        bestDist = d;
+                                        closest = e;
+                                    }
+                                }
+                            }
+                        }
+                        if (closest != null) {
+                            Method attachM = null;
+                            for (Method m : closest.getClass().getMethods()) {
+                                if (("method_60964".equals(m.getName()) || "attachLeash".equals(m.getName()))
+                                        && m.getParameterCount() == 2) {
+                                    attachM = m;
+                                    break;
+                                }
+                            }
+                            if (attachM == null) {
+                                for (Method m : closest.getClass().getMethods()) {
+                                    if (m.getParameterCount() == 2 && m.getParameterTypes()[1] == boolean.class
+                                            && entClass.isAssignableFrom(m.getParameterTypes()[0])) {
+                                        attachM = m;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (attachM != null) {
+                                attachM.invoke(closest, player, true);
+                            }
+                        }
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
+                }
+                return "OK";
+            }
+
+            if ("UNLEASH".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    try {
+                        Object world = player.getClass().getMethod("method_51469").invoke(player);
+                        double px = (Double) player.getClass().getMethod("method_23317").invoke(player);
+                        double py = (Double) player.getClass().getMethod("method_23318").invoke(player);
+                        double pz = (Double) player.getClass().getMethod("method_23321").invoke(player);
+                        Class<?> boxClass = Class.forName("net.minecraft.class_238", true, cl);
+                        Object box = boxClass.getConstructor(
+                                double.class, double.class, double.class, double.class, double.class, double.class)
+                                .newInstance(px - 16.0, py - 6.0, pz - 16.0, px + 16.0, py + 6.0, pz + 16.0);
+                        Class<?> mobClass = Class.forName("net.minecraft.class_1308", true, cl);
+                        Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
+                        List<?> ents = (List<?>) world.getClass()
+                                .getMethod("method_8335", entClass, boxClass)
+                                .invoke(world, null, box);
+                        for (Object e : ents) {
+                            if (mobClass.isInstance(e)) {
+                                Method detachM = null;
+                                for (Method m : e.getClass().getMethods()) {
+                                    if (("method_5932".equals(m.getName()) || "detachLeash".equals(m.getName()))
+                                            && m.getParameterCount() == 2) {
+                                        detachM = m;
+                                        break;
+                                    }
+                                }
+                                if (detachM != null) {
+                                    detachM.invoke(e, true, false);
+                                }
+                            }
+                        }
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
+                }
+                return "OK";
+            }
+
+            if ("LEASH_INSPECT".equals(op)) {
+                Class<?> mobClass = Class.forName("net.minecraft.class_1308", true, cl);
+                Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
+                StringBuilder sb = new StringBuilder("METHODS|");
+                for (Method m : mobClass.getMethods()) {
+                    if (m.getParameterCount() == 0 && entClass.isAssignableFrom(m.getReturnType())) {
+                        sb.append(m.getName()).append(":").append(m.getReturnType().getSimpleName()).append(";");
+                    }
+                }
+                return sb.toString();
+            }
+
+            if ("LEASH_STATUS".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    try {
+                        Object world = player.getClass().getMethod("method_51469").invoke(player);
+                        double px = (Double) player.getClass().getMethod("method_23317").invoke(player);
+                        double py = (Double) player.getClass().getMethod("method_23318").invoke(player);
+                        double pz = (Double) player.getClass().getMethod("method_23321").invoke(player);
+                        Class<?> boxClass = Class.forName("net.minecraft.class_238", true, cl);
+                        Object box = boxClass.getConstructor(
+                                double.class, double.class, double.class, double.class, double.class, double.class)
+                                .newInstance(px - 24.0, py - 8.0, pz - 24.0, px + 24.0, py + 8.0, pz + 24.0);
+                        Class<?> mobClass = Class.forName("net.minecraft.class_1308", true, cl);
+                        Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
+                        List<?> ents = (List<?>) world.getClass()
+                                .getMethod("method_8335", entClass, boxClass)
+                                .invoke(world, null, box);
+
+                        Object leashedMob = null;
+                        double leashedDist = Double.MAX_VALUE;
+                        for (Object e : ents) {
+                            if (mobClass.isInstance(e)) {
+                                boolean isLeashed = false;
+                                try {
+                                    Method m = e.getClass().getMethod("method_5931");
+                                    isLeashed = (Boolean) m.invoke(e);
+                                } catch (Throwable ignored) {
+                                    try {
+                                        Method m = e.getClass().getMethod("isLeashed");
+                                        isLeashed = (Boolean) m.invoke(e);
+                                    } catch (Throwable ignored2) {}
+                                }
+                                if (!isLeashed) continue;
+
+                                Object holder = null;
+                                try {
+                                    Method m = e.getClass().getMethod("method_60952");
+                                    holder = m.invoke(e);
+                                } catch (Throwable ignored) {
+                                    try {
+                                        Method m = e.getClass().getMethod("getLeashHolder");
+                                        holder = m.invoke(e);
+                                    } catch (Throwable ignored2) {}
+                                }
+                                if (holder != null && holder == player) {
+                                    double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
+                                    double ey = (Double) e.getClass().getMethod("method_23318").invoke(e);
+                                    double ez = (Double) e.getClass().getMethod("method_23321").invoke(e);
+                                    double d = Math.sqrt((ex - px)*(ex - px) + (ey - py)*(ey - py) + (ez - pz)*(ez - pz));
+                                    leashedMob = e;
+                                    leashedDist = d;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (leashedMob != null) {
+                            String sName = leashedMob.getClass().getSimpleName();
+                            try {
+                                Object typeObj = leashedMob.getClass().getMethod("method_5864").invoke(leashedMob);
+                                Class<?> regClass = Class.forName("net.minecraft.class_7923", true, cl);
+                                Object entReg = regClass.getField("field_41177").get(null);
+                                Object idObj = entReg.getClass().getMethod("method_10221", Object.class).invoke(entReg, typeObj);
+                                if (idObj != null) sName = idObj.toString();
+                            } catch (Throwable ignored) {}
+
+                            double ex = (Double) leashedMob.getClass().getMethod("method_23317").invoke(leashedMob);
+                            double ey = (Double) leashedMob.getClass().getMethod("method_23318").invoke(leashedMob);
+                            double ez = (Double) leashedMob.getClass().getMethod("method_23321").invoke(leashedMob);
+                            int entityId = 0;
+                            try {
+                                entityId = (Integer) leashedMob.getClass().getMethod("method_5628").invoke(leashedMob);
+                            } catch (Throwable ignored) {
+                                try {
+                                    entityId = (Integer) leashedMob.getClass().getMethod("getId").invoke(leashedMob);
+                                } catch (Throwable ignored2) {}
+                            }
+                            return String.format(java.util.Locale.ROOT, "LEASHED|%d|%s|%.2f|%.2f,%.2f,%.2f",
+                                    entityId, sName, leashedDist, ex, ey, ez);
+                        }
+                        return "UNLEASHED";
+                    } catch (Throwable t) {
+                        return "ERR|" + t.getMessage();
+                    }
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("LOCATE_MOB".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                String targetType = parts.length >= 3 ? parts[2].trim().toLowerCase() : "";
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    try {
+                        Object world = player.getClass().getMethod("method_51469").invoke(player);
+                        double px = (Double) player.getClass().getMethod("method_23317").invoke(player);
+                        double py = (Double) player.getClass().getMethod("method_23318").invoke(player);
+                        double pz = (Double) player.getClass().getMethod("method_23321").invoke(player);
+                        Class<?> boxClass = Class.forName("net.minecraft.class_238", true, cl);
+                        Object box = boxClass.getConstructor(
+                                double.class, double.class, double.class, double.class, double.class, double.class)
+                                .newInstance(px - 64.0, py - 16.0, pz - 64.0, px + 64.0, py + 16.0, pz + 64.0);
+                        Class<?> mobClass = Class.forName("net.minecraft.class_1308", true, cl);
+                        Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
+                        List<?> ents = (List<?>) world.getClass()
+                                .getMethod("method_8335", entClass, boxClass)
+                                .invoke(world, null, box);
+                        Object closest = null;
+                        double bestDist = Double.MAX_VALUE;
+                        for (Object e : ents) {
+                            if (mobClass.isInstance(e)) {
+                                String cName = e.getClass().getSimpleName().toLowerCase();
+                                if (!targetType.isEmpty() && !cName.contains(targetType) && !targetType.contains(cName)) {
+                                    continue;
+                                }
+                                double ex = (Double) e.getClass().getMethod("method_23317").invoke(e);
+                                double ey = (Double) e.getClass().getMethod("method_23318").invoke(e);
+                                double ez = (Double) e.getClass().getMethod("method_23321").invoke(e);
+                                double d = (ex - px)*(ex - px) + (ey - py)*(ey - py) + (ez - pz)*(ez - pz);
+                                if (d < bestDist) {
+                                    bestDist = d;
+                                    closest = e;
+                                }
+                            }
+                        }
+                        if (closest != null) {
+                            double ex = (Double) closest.getClass().getMethod("method_23317").invoke(closest);
+                            double ey = (Double) closest.getClass().getMethod("method_23318").invoke(closest);
+                            double ez = (Double) closest.getClass().getMethod("method_23321").invoke(closest);
+                            return String.format(java.util.Locale.ROOT, "OK|%.2f|%.2f|%.2f|%s", ex, ey, ez, closest.getClass().getSimpleName());
+                        }
+                        return "ERR|NOT_FOUND";
+                    } catch (Throwable t) {
+                        return "ERR|" + t.getMessage();
+                    }
+                }
+                return "ERR|NO_PLAYER";
+            }
+
 
             return "ERR|UNKNOWN_OP";
         } catch (Throwable t) {

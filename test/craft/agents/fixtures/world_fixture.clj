@@ -72,8 +72,8 @@
     (getFloorHeight [_ x y z]
       (let [{:keys [floor-y blocks]} @world-atom]
         (if-let [b (get blocks [x y z])]
-          (+ (double y) (double (:height b 1.0)))
-          (if (<= y floor-y) (double (inc y)) (double y)))))
+          (double (:height b 1.0))
+          (if (<= y floor-y) 1.0 0.0))))
     (isHazard [_ x y z]
       (boolean (get-in @world-atom [:blocks [x y z] :hazard?] false)))
     (getBlockId [_ x y z]

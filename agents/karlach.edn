@@ -5,9 +5,9 @@
  :agent/loadout {:mainhand "minecraft:apple"}
  :agent/quarters {:id :karlach-bedroom
                   :name "Quarto da Karlach"
-                  :pos [-129.0 65.0 194.0]
-                  :waypoints [[-136.0 65.0 180.5] [-129.0 65.0 180.5] [-129.0 65.0 194.0]]
-                  :return-waypoints [[-129.0 65.0 180.5] [-136.0 65.0 180.5] [-173.0 65.0 180.0]]
+                  :pos [-131.0 65.0 195.0]
+                  :waypoints [[-136.0 65.0 183.0] [-133.0 65.0 194.0] [-131.0 65.0 195.0]]
+                  :return-waypoints [[-133.0 65.0 194.0] [-136.0 65.0 183.0] [-173.0 65.0 180.0]]
                   :hold-item "minecraft:golden_apple"
                   :pause-ticks 160
                   :barks ["Ah, finalmente um descanso pro meu motor infernal!",

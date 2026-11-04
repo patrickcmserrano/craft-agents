@@ -1,0 +1,1 @@
+{:skill/id :shelter-from-rain, :skill/name "Abrigo de Emergência contra Chuva", :skill/author "Voyager-System-2-Cognition", :skill/trigger :weather-rain, :skill/timeout-ms 20000, :skill/tree [:sequence [:action :check-weather] [:action :move-to-quarters] [:action :rest-at-bed] [:action :wait-out-rain]]}

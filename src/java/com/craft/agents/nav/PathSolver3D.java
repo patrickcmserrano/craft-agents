@@ -13,7 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Motor A* 3D Zero-Allocation sobre VoxelAccessor com suporte nativo a PortalGroup (CA-024).
+ * Motor A* 3D Zero-Allocation sobre VoxelAccessor com suporte a PortalGroup,
+ * metas polimórficas (Goal3D) e restrições cinemáticas do Mineflayer (MovementCapabilities).
  */
 public final class PathSolver3D {
     private static final int[][] CARDINAL_DIRS = {
@@ -23,22 +24,26 @@ public final class PathSolver3D {
         {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
     };
 
-    public PathResult solveToRadius(
+    /**
+     * Resolve rota 3D guiada por um Goal3D arbitrário e capacidades cinemáticas completas.
+     */
+    public PathResult solve(
         VoxelAccessor world,
         int startX, int startY, int startZ,
-        int goalX, int goalY, int goalZ,
-        double acceptRadius,
-        MovementCosts costs,
+        Goal3D goal,
+        MovementCapabilities capabilities,
         int maxNodes
     ) {
         long startTime = System.nanoTime();
-        if (costs == null) {
-            costs = MovementCosts.defaults();
+        if (capabilities == null) {
+            capabilities = MovementCapabilities.defaults();
+        }
+        if (goal == null) {
+            goal = new GoalBlock(startX, startY, startZ);
         }
 
         long startPacked = PackedPos.pack(startX, startY, startZ);
-        double distStart = dist(startX, startY, startZ, goalX, goalY, goalZ);
-        if (distStart <= acceptRadius) {
+        if (goal.isSatisfied(startX, startY, startZ)) {
             List<PathNodeStep> steps = new ArrayList<>();
             steps.add(new PathNodeStep(startX, startY, startZ, PathNodeStep.StepAction.WALK, null));
             return new PathResult(PathResult.Status.SUCCESS, steps, 0.0, 1, 0L);
@@ -53,7 +58,7 @@ public final class PathSolver3D {
         Map<Long, PortalGroup> portalMap = new HashMap<>();
 
         gScores.put(startPacked, 0.0);
-        openSet.push(startPacked, distStart);
+        openSet.push(startPacked, goal.heuristic(startX, startY, startZ));
 
         int visitedNodes = 0;
         long bestEndPacked = -1L;
@@ -71,7 +76,7 @@ public final class PathSolver3D {
             int cy = PackedPos.unpackY(currentPacked);
             int cz = PackedPos.unpackZ(currentPacked);
 
-            if (dist(cx, cy, cz, goalX, goalY, goalZ) <= acceptRadius) {
+            if (goal.isSatisfied(cx, cy, cz)) {
                 bestEndPacked = currentPacked;
                 reached = true;
                 break;
@@ -83,30 +88,56 @@ public final class PathSolver3D {
             for (int[] d : CARDINAL_DIRS) {
                 int nx = cx + d[0];
                 int nz = cz + d[1];
+
+                // Passo no mesmo plano horizontal
                 evaluateNeighbor(world, cx, cy, cz, nx, cy, nz, currentPacked, currentG,
-                                 costs.walkCost(), PathNodeStep.StepAction.WALK,
-                                 goalX, goalY, goalZ, costs, openSet, closedSet, cameFrom, gScores, actions, portalMap);
+                                 capabilities.walkCost, PathNodeStep.StepAction.WALK,
+                                 goal, capabilities, openSet, closedSet, cameFrom, gScores, actions, portalMap);
 
                 // Step-up / Jump-up
-                evaluateNeighbor(world, cx, cy, cz, nx, cy + 1, nz, currentPacked, currentG,
-                                 costs.jumpUpCost(), PathNodeStep.StepAction.JUMP_UP,
-                                 goalX, goalY, goalZ, costs, openSet, closedSet, cameFrom, gScores, actions, portalMap);
+                // Regra Mineflayer: para saltar, é preciso headroom livre de 3 blocos na origem (cy, cy+1, cy+2 livres)
+                if (world.getCollisionType(cx, cy + 2, cz) != CollisionType.SOLID) {
+                    evaluateNeighbor(world, cx, cy, cz, nx, cy + 1, nz, currentPacked, currentG,
+                                     capabilities.jumpUpCost, PathNodeStep.StepAction.JUMP_UP,
+                                     goal, capabilities, openSet, closedSet, cameFrom, gScores, actions, portalMap);
+                }
 
-                // Drop-down
-                for (int drop = 1; drop <= costs.maxDropDown(); drop++) {
+                // Drop-down (descida de desnível segura)
+                for (int drop = 1; drop <= capabilities.maxDropDown; drop++) {
                     evaluateNeighbor(world, cx, cy, cz, nx, cy - drop, nz, currentPacked, currentG,
-                                     costs.walkCost() + (drop * 0.5), PathNodeStep.StepAction.DROP_DOWN,
-                                     goalX, goalY, goalZ, costs, openSet, closedSet, cameFrom, gScores, actions, portalMap);
+                                     capabilities.walkCost + (drop * 0.5), PathNodeStep.StepAction.DROP_DOWN,
+                                     goal, capabilities, openSet, closedSet, cameFrom, gScores, actions, portalMap);
                 }
             }
 
-            // 2. Vizinhos Diagonais
+            // 2. Vizinhos Diagonais (com verificação rigorosa de quinas / corner-cutting)
             for (int[] d : DIAGONAL_DIRS) {
                 int nx = cx + d[0];
                 int nz = cz + d[1];
+
+                // Verificação de quina: não pode cortar diagonal se houver obstáculo sólido ou portal nos lados
+                CollisionType s1Foot = world.getCollisionType(cx + d[0], cy, cz);
+                CollisionType s1Head = world.getCollisionType(cx + d[0], cy + 1, cz);
+                CollisionType s2Foot = world.getCollisionType(cx, cy, cz + d[1]);
+                CollisionType s2Head = world.getCollisionType(cx, cy + 1, cz + d[1]);
+
+                if (s1Foot == CollisionType.SOLID || s1Head == CollisionType.SOLID ||
+                    s2Foot == CollisionType.SOLID || s2Head == CollisionType.SOLID ||
+                    s1Foot == CollisionType.PORTAL || s2Foot == CollisionType.PORTAL) {
+                    continue;
+                }
+
+                // Em condução na guia (escortLeashed), exige margem de manobra adicional para evitar enrosco
+                if (capabilities.escortLeashed) {
+                    if (!capabilities.canStandOn(world, cx + d[0], cy - 1, cz) ||
+                        !capabilities.canStandOn(world, cx, cy - 1, cz + d[1])) {
+                        continue;
+                    }
+                }
+
                 evaluateNeighbor(world, cx, cy, cz, nx, cy, nz, currentPacked, currentG,
-                                 costs.diagonalCost(), PathNodeStep.StepAction.DIAGONAL,
-                                 goalX, goalY, goalZ, costs, openSet, closedSet, cameFrom, gScores, actions, portalMap);
+                                 capabilities.diagonalCost, PathNodeStep.StepAction.DIAGONAL,
+                                 goal, capabilities, openSet, closedSet, cameFrom, gScores, actions, portalMap);
             }
         }
 
@@ -116,7 +147,7 @@ public final class PathSolver3D {
             return new PathResult(PathResult.Status.NO_PATH, List.of(), 0.0, visitedNodes, elapsedMicros);
         }
 
-        // Reconstrói rota
+        // Reconstrói rota percorrida
         List<PathNodeStep> steps = new ArrayList<>();
         long curr = bestEndPacked;
         while (curr != startPacked && cameFrom.containsKey(curr)) {
@@ -134,6 +165,22 @@ public final class PathSolver3D {
         return new PathResult(PathResult.Status.SUCCESS, steps, totalCost, visitedNodes, elapsedMicros);
     }
 
+    /**
+     * Sobrecarga de compatibilidade retroativa para rotas com raio de aceitação euclidiano.
+     */
+    public PathResult solveToRadius(
+        VoxelAccessor world,
+        int startX, int startY, int startZ,
+        int goalX, int goalY, int goalZ,
+        double acceptRadius,
+        MovementCosts costs,
+        int maxNodes
+    ) {
+        MovementCapabilities caps = MovementCapabilities.fromCosts(costs);
+        Goal3D goal = new GoalNear(goalX, goalY, goalZ, acceptRadius);
+        return solve(world, startX, startY, startZ, goal, caps, maxNodes);
+    }
+
     private void evaluateNeighbor(
         VoxelAccessor world,
         int cx, int cy, int cz,
@@ -142,8 +189,8 @@ public final class PathSolver3D {
         double currentG,
         double moveCost,
         PathNodeStep.StepAction action,
-        int goalX, int goalY, int goalZ,
-        MovementCosts costs,
+        Goal3D goal,
+        MovementCapabilities capabilities,
         PrimitiveMinHeap openSet,
         LongHashSet closedSet,
         Map<Long, Long> cameFrom,
@@ -156,31 +203,28 @@ public final class PathSolver3D {
             return;
         }
 
-        // Verifica perigo (lava, fogo) no destino ou sob os pes
-        if (world.isHazard(nx, ny, nz) || world.isHazard(nx, ny - 1, nz)) {
+        // 1. Verifica perigo (lava, fogo, cacto, etc.) no destino ou sob os pés
+        if (capabilities.isHazard(world, nx, ny, nz) || capabilities.isHazard(world, nx, ny - 1, nz)) {
             return;
         }
 
-        // Suporte solido ou transitavel sob os pes
-        CollisionType floorCollision = world.getCollisionType(nx, ny - 1, nz);
-        if (floorCollision == CollisionType.SOLID || floorCollision == CollisionType.PORTAL) {
-            // OK
-        } else {
+        // 2. Suporte sólido ou transitável sob os pés (canStandOn valida colisão, altura e lista de bloqueio)
+        if (!capabilities.canStandOn(world, nx, ny - 1, nz)) {
             return;
         }
 
-        // Verifica espaco do corpo e da cabeca
+        // 3. Verifica espaço livre para o corpo e a cabeça
         CollisionType footCol = world.getCollisionType(nx, ny, nz);
         CollisionType headCol = world.getCollisionType(nx, ny + 1, nz);
 
         PortalGroup portal = null;
-        if (costs.allowPortals()) {
+        if (capabilities.allowPortals) {
             portal = PortalDetector.detectAt(world, nx, ny, nz);
         }
 
         if (portal != null && portal.canBotToggle()) {
             action = PathNodeStep.StepAction.TRAVERSE_PORTAL;
-            moveCost = costs.portalTraverseCost();
+            moveCost = capabilities.portalTraverseCost;
         } else {
             if (footCol == CollisionType.SOLID || headCol == CollisionType.SOLID) {
                 return;
@@ -196,15 +240,8 @@ public final class PathSolver3D {
             if (portal != null) {
                 portalMap.put(nPacked, portal);
             }
-            double fScore = tentativeG + dist(nx, ny, nz, goalX, goalY, goalZ);
+            double fScore = tentativeG + goal.heuristic(nx, ny, nz);
             openSet.updateOrPush(nPacked, fScore);
         }
-    }
-
-    private static double dist(int x1, int y1, int z1, int x2, int y2, int z2) {
-        double dx = x1 - x2;
-        double dy = y1 - y2;
-        double dz = z1 - z2;
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 }

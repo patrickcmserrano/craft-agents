@@ -94,7 +94,7 @@
     (let [route (fabric/build-sanctuary-route)
           quarters-stop (some #(when (= (:type %) :quarters) %) route)]
       (is (some? quarters-stop) "Rota do santuário deve conter a parada do quarto da Karlach")
-      (is (= [-129.0 65.0 194.0] (:pos quarters-stop)))
+      (is (= [-131.0 65.0 195.0] (:pos quarters-stop)))
       (let [steps (#'fabric/expand-route-microsteps quarters-stop)]
         (is (vector? steps))
         (is (seq steps))

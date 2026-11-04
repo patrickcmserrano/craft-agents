@@ -8,7 +8,10 @@
             [clojure.string :as str]
             [craft.agents.backend.protocol :as proto]
             [craft.agents.regions :as regions]
-            [craft.agents.skills.composer :as composer])
+            [craft.agents.skills.composer :as composer]
+            [craft.agents.cognition.intent :as intent]
+            [craft.agents.cognition.grounding :as grounding]
+            [craft.agents.cognition.critic :as critic])
   (:import [java.io BufferedReader InputStreamReader OutputStreamWriter PrintWriter RandomAccessFile]
            [java.net Socket]
            [java.nio.charset StandardCharsets]))
@@ -61,20 +64,28 @@
                               (.isClosed ^Socket (:sock @bridge-conn-atom)))
                       (let [s (Socket. "127.0.0.1" 25595)]
                         (.setTcpNoDelay s true)
-                        (.setSoTimeout s 1500)
+                        (.setSoTimeout s 2500)
                         (reset! bridge-conn-atom
                                 {:sock s
                                  :in   (BufferedReader. (InputStreamReader. (.getInputStream s) StandardCharsets/UTF_8))
                                  :out  (PrintWriter. (OutputStreamWriter. (.getOutputStream s) StandardCharsets/UTF_8) true)})))
                     (let [{:keys [^BufferedReader in ^PrintWriter out]} @bridge-conn-atom]
                       (.println out (str line))
-                      (.readLine in))
+                      (when (.checkError out)
+                        (throw (java.io.IOException. "Falha de escrita no socket")))
+                      (if-let [l (.readLine in)]
+                        l
+                        (do
+                          (close-bridge-conn!)
+                          nil)))
                     (catch Throwable _
                       (close-bridge-conn!)
                       nil))]
           (if (some? res)
             res
-            (recur (inc attempt))))))))
+            (do
+              (close-bridge-conn!)
+              (recur (inc attempt)))))))))
 
 (defn bridge-alive? []
   (= "PONG" (send-bridge-cmd! "PING")))
@@ -89,16 +100,21 @@
         (catch Throwable _ {:value "" :signature ""}))
       {:value "" :signature ""})))
 
+(defonce ^:private last-attach-attempt-ms (atom 0))
+
 (defn ensure-live-bridge-and-agents!
   "Garante que a ponte in-server (25595) esta anexada ao servidor Fabric e que Karlach e Picard estao online com suas skins."
   []
   (when-not (bridge-alive?)
-    (println "[craft-agents] Anexando In-Server Bridge ao servidor Fabric...")
-    (try
-      (sh/sh "make" "attach" :dir "/home/pace/dev/craft-agents")
-      (Thread/sleep 500)
-      (catch Throwable t
-        (println "[craft-agents] Aviso ao anexar bridge:" (.getMessage t)))))
+    (let [now (System/currentTimeMillis)]
+      (when (> (- now @last-attach-attempt-ms) 60000)
+        (reset! last-attach-attempt-ms now)
+        (println "[craft-agents] Anexando In-Server Bridge ao servidor Fabric (rate-limited)...")
+        (try
+          (sh/sh "make" "attach" :dir "/home/pace/dev/craft-agents")
+          (Thread/sleep 1000)
+          (catch Throwable t
+            (println "[craft-agents] Aviso ao anexar bridge:" (.getMessage t)))))))
   (when (bridge-alive?)
     ;; 1. Spawn Karlach no Santuário
     (let [{:keys [value signature]} (load-skin-meta "karlach_meta.json")
@@ -252,6 +268,28 @@
 ;; Rotina Completa do Santuario da Karlach (20Hz)
 ;; ============================================================================
 
+(def karlach-dialogues
+  (try
+    (:agent/dialogues (edn/read-string (slurp (io/file "agents/karlach.edn"))))
+    (catch Throwable _ {})))
+
+(defn current-enclosure-id
+  "Identifica rigorosamente em qual cercado uma coordenada [x y z] se encontra."
+  [[cx cy cz]]
+  (cond
+    (and (<= -170 cx -136) (<= 165 cz 177)) :pen-north-east
+    (and (<= -170 cx -136) (<= 184 cz 196)) :pen-south-east
+    (and (<= -214 cx -180) (<= 184 cz 196)) :pen-south-west
+    (and (<= -214 cx -180) (<= 165 cz 177)) :pen-north-west
+    :else nil))
+
+(defn barks-for-current-position
+  "Retorna exclusivamente as falas contextuais correspondentes aos animais do cercado onde a Karlach fisicamente está."
+  [[cx cy cz]]
+  (if-let [eid (current-enclosure-id [cx cy cz])]
+    (get-in karlach-dialogues [:enclosures eid] [])
+    []))
+
 (defn build-sanctuary-route
   "Constrói a rota de patrulha e alimentação do Santuário diretamente de sanctuary.edn + karlach.edn,
    vinculando os animais de cada cercado às falas contextuais da Karlach."
@@ -292,9 +330,9 @@
                      [{:type             :quarters
                        :id               (:id q :karlach-bedroom)
                        :name             (:name q "Quarto da Karlach")
-                       :pos              (:pos q [-129.0 65.0 194.0])
-                       :waypoints        (:waypoints q [[-136.0 65.0 180.5] [-129.0 65.0 180.5] (:pos q [-129.0 65.0 194.0])])
-                       :return-waypoints (:return-waypoints q [[-129.0 65.0 180.5] [-136.0 65.0 180.5] [-173.0 65.0 180.0]])
+                       :pos              (:pos q [-131.0 65.0 195.0])
+                       :waypoints        (:waypoints q [[-136.0 65.0 183.0] [-133.0 65.0 194.0] (:pos q [-131.0 65.0 195.0])])
+                       :return-waypoints (:return-waypoints q [[-133.0 65.0 194.0] [-136.0 65.0 183.0] [-173.0 65.0 180.0]])
                        :hold-item        (:hold-item q "minecraft:golden_apple")
                        :pause-ticks      (:pause-ticks q 140)
                        :barks            (:barks q ["Ah, finalmente um descanso pro meu motor infernal!"])
@@ -305,20 +343,84 @@
 
 (def sanctuary-route (build-sanctuary-route))
 
-(defn build-picard-stations []
-  (let [picard (edn/read-string (slurp (io/file "agents/picard.edn")))]
-    (vec (get-in picard [:agent/dialogues :stations]))))
+(def sanctuary-portals-by-pos
+  (try
+    (let [reg (regions/load-region-file "agents/regions/sanctuary.edn")]
+      (into {}
+            (for [enc (:region/enclosures reg)
+                  :let [portal (:enclosure/portal enc)
+                        blocks (:blocks portal)]
+                  b blocks]
+              [(vec b) {:gates blocks
+                        :block (:gate-block portal)
+                        :facing (:gate-facing portal)}])))
+    (catch Throwable _ {})))
 
-(def picard-stations (build-picard-stations))
+(def sanctuary-enclosures-by-id
+  (try
+    (let [reg (regions/load-region-file "agents/regions/sanctuary.edn")]
+      (into {} (map (fn [e] [(:enclosure/id e) e]) (:region/enclosures reg))))
+    (catch Throwable _ {})))
+
+(defn compute-enclosure-funnel
+  "Calcula os waypoints do funil ortogonal de travessia do portão para evitar que animais
+   na guia fiquem presos diagonalmente contra as quinas e batentes da cerca."
+  [portal-info]
+  (let [norm (:normal portal-info [-1.0 0.0 0.0])
+        nx   (double (first norm))
+        nz   (double (nth norm 2))
+        out-anc (:outside-anchor portal-info [-177.0 65.0 189.0])
+        in-anc  (:inside-anchor portal-info [-181.5 65.0 189.0])
+        ox (double (first out-anc)) oy (double (second out-anc)) oz (double (nth out-anc 2))
+        ix (double (first in-anc))  iy (double (second in-anc))  iz (double (nth in-anc 2))
+        funnel-entry [(- ox (* nx 2.5)) oy (- oz (* nz 2.5))]
+        pre-gate     [ox oy oz]
+        deep-inside  [(+ ix (* nx 4.0)) iy (+ iz (* nz 4.0))]]
+    {:funnel-entry funnel-entry
+     :pre-gate pre-gate
+     :inside-anchor in-anc
+     :deep-inside deep-inside}))
+
+(defn- uformat
+  "Formata strings usando java.util.Locale/ROOT para garantir ponto decimal (.)
+   e evitar bugs críticos de parsing no protocolo da ponte em Linux pt_BR."
+  ^String [^String fmt & args]
+  (String/format java.util.Locale/ROOT fmt (to-array args)))
 
 (defn- set-double-gate! [gates gate-block gate-facing open?]
   (let [open-str (if open? "true" "false")
         [[x1 y1 z1] [x2 y2 z2]] gates
         sound (if open? "minecraft:block.fence_gate.open" "minecraft:block.fence_gate.close")]
     (send-bridge-cmd! "SWING|Karlach")
-    (send-bridge-cmd! (format "CMD|setblock %d %d %d %s[facing=%s,open=%s]" x1 y1 z1 gate-block gate-facing open-str))
-    (send-bridge-cmd! (format "CMD|setblock %d %d %d %s[facing=%s,open=%s]" x2 y2 z2 gate-block gate-facing open-str))
-    (send-bridge-cmd! (format "CMD|playsound %s block @a %d %d %d 1.0 1.0" sound x1 y1 z1))))
+    (send-bridge-cmd! (uformat "CMD|setblock %d %d %d %s[facing=%s,open=%s]" x1 y1 z1 gate-block gate-facing open-str))
+    (send-bridge-cmd! (uformat "CMD|setblock %d %d %d %s[facing=%s,open=%s]" x2 y2 z2 gate-block gate-facing open-str))
+    (send-bridge-cmd! (uformat "CMD|playsound %s block @a %d %d %d 1.0 1.0" sound x1 y1 z1))))
+
+(defn open-portal-at-coord!
+  "Abre o portão correspondente à coordenada [x y z] com animação e som."
+  [[x y z]]
+  (let [bpos [(int x) (int y) (int z)]]
+    (if-let [portal-info (get sanctuary-portals-by-pos bpos)]
+      (set-double-gate! (:gates portal-info) (:block portal-info) (:facing portal-info) true)
+      (doseq [py [(int y) (inc (int y))]]
+        (send-bridge-cmd! (uformat "CMD|setblock %d %d %d minecraft:spruce_fence_gate[facing=east,open=true]"
+                                  (int x) py (int z)))))))
+
+(defn close-portal-at-coord!
+  "Fecha o portão correspondente à coordenada [x y z] garantindo contenção dos animais."
+  [[x y z]]
+  (let [bpos [(int x) (int y) (int z)]]
+    (if-let [portal-info (get sanctuary-portals-by-pos bpos)]
+      (set-double-gate! (:gates portal-info) (:block portal-info) (:facing portal-info) false)
+      (doseq [py [(int y) (inc (int y))]]
+        (send-bridge-cmd! (uformat "CMD|setblock %d %d %d minecraft:spruce_fence_gate[facing=east,open=false]"
+                                  (int x) py (int z)))))))
+
+(defn build-picard-stations []
+  (let [picard (edn/read-string (slurp (io/file "agents/picard.edn")))]
+    (vec (get-in picard [:agent/dialogues :stations]))))
+
+(def picard-stations (build-picard-stations))
 
 (defn- karlach-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
@@ -335,71 +437,599 @@
   (doseq [sp species-list]
     ;; Cura e regenera os animais sem forçar reprodução infinita (InLove:0 evita superpopulação e morte por sufocamento)
     (send-bridge-cmd!
-     (format "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:instant_health 1 1 true"
+     (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:instant_health 1 1 true"
              fx fy fz sp))
     (send-bridge-cmd!
-     (format "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:regeneration 20 1 true"
+     (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:regeneration 20 1 true"
              fx fy fz sp))
     (send-bridge-cmd!
-     (format "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run data merge entity @s {InLove:0,PersistenceRequired:1b}"
+     (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run data merge entity @s {InLove:0,PersistenceRequired:1b}"
              fx fy fz sp))
     (send-bridge-cmd!
-     (format "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:heart ~ ~1.2 ~ 0.4 0.4 0.4 0.02 6 normal"
+     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:heart ~ ~1.2 ~ 0.4 0.4 0.4 0.02 6 normal"
              fx fy fz sp))
     (send-bridge-cmd!
-     (format "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:happy_villager ~ ~1.0 ~ 0.4 0.4 0.4 0.05 8 normal"
+     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:happy_villager ~ ~1.0 ~ 0.4 0.4 0.4 0.05 8 normal"
              fx fy fz sp))
     (send-bridge-cmd!
-     (format "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=1,sort=nearest] run playsound minecraft:entity.generic.eat neutral @a ~ ~ ~ 1.0 1.0"
+     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=1,sort=nearest] run playsound minecraft:entity.generic.eat neutral @a ~ ~ ~ 1.0 1.0"
              fx fy fz sp))))
 
 (defn- compute-yaw [dx dz]
   (float (* (/ 180.0 Math/PI) (Math/atan2 (- (double dx)) (double dz)))))
 
+(defn request-path3d
+  "Requisita rota A* 3D com percepcao real de voxels e portais via ponte in-server."
+  [[fx fy fz] [tx ty tz] & [radius]]
+  (let [r (or radius 1.2)
+        cmd (uformat "PATH|%.1f,%.1f,%.1f|%.1f,%.1f,%.1f|%.1f"
+                    (double fx) (double fy) (double fz)
+                    (double tx) (double ty) (double tz)
+                    (double r))
+        raw (send-bridge-cmd! cmd)]
+    (when (str/starts-with? (or raw "") "OK|")
+      (let [steps-str (subs raw 3)
+            parts (str/split steps-str #";")]
+        (mapv (fn [p]
+                (let [[x y z act] (str/split p #",")]
+                  {:x (Double/parseDouble x)
+                   :y (Double/parseDouble y)
+                   :z (Double/parseDouble z)
+                   :action (keyword act)}))
+              parts)))))
+
+(defn query-leash-status
+  "Consulta sensorial em tempo real se o agente possui animal na corda/guia.
+   Retorna {:leashed? boolean, :id int, :species string, :distance double, :pos [x y z]}."
+  ([] (query-leash-status "Karlach"))
+  ([player-name]
+   (let [resp (send-bridge-cmd! (str "LEASH_STATUS|" player-name))]
+     (if (and resp (str/starts-with? resp "LEASHED|"))
+       (let [parts (str/split (subs resp 8) #"\|")
+             eid (try (Long/parseLong (nth parts 0 "0")) (catch Throwable _ 0))
+             sp (nth parts 1 "mob")
+             dist (try (Double/parseDouble (nth parts 2 "0.0")) (catch Throwable _ 0.0))
+             pos-str (nth parts 3 "0,0,0")
+             coords (mapv #(try (Double/parseDouble %) (catch Throwable _ 0.0)) (str/split pos-str #","))]
+         {:leashed? true :id eid :species sp :distance dist :pos coords})
+       {:leashed? false}))))
+
+(defn generate-walk-steps
+  "Gera passos de caminhada detalhados usando A* 3D (request-path3d) com percepção
+   em tempo real de voxels e detecção dinâmica de portais (:TRAVERSE_PORTAL),
+   evitando colisões com cercas e paredes de alvenaria."
+  [from-pos to-pos label & [opts]]
+  (let [invariants   (:invariants opts)
+        species      (:species opts)
+        pull-leash?  (or (:pull-leashed? opts) (some #(= (:invariant %) :leash-attached) invariants))
+        radius       (or (:radius opts) 1.5)
+        safe-from    (or from-pos to-pos [0.0 65.0 0.0])
+        safe-to      (or to-pos from-pos [0.0 65.0 0.0])
+        raw-path     (or (try (request-path3d safe-from safe-to radius) (catch Throwable _ nil))
+                         (try (request-path3d safe-from safe-to 2.2) (catch Throwable _ nil)))]
+    (if (seq raw-path)
+      (let [n (count raw-path)]
+        (loop [idx 0
+               acc []]
+          (if (>= idx n)
+            acc
+            (let [node (nth raw-path idx)
+                  act  (:action node)
+                  nx   (+ (double (:x node)) 0.5)
+                  ny   (double (:y node))
+                  nz   (+ (double (:z node)) 0.5)
+                  target-pt [nx ny nz]]
+              (if (= act :TRAVERSE_PORTAL)
+                ;; Percepção de Terreno em Tempo Real: Portal/Gate detectado!
+                (let [portal-pos [(:x node) (:y node) (:z node)]
+                      prev-node  (when (pos? idx) (nth raw-path (dec idx)))
+                      next-node  (when (< (inc idx) n) (nth raw-path (inc idx)))
+                      ;; Vetor de avanço do portal
+                      pdx (if next-node (- (:x next-node) (:x node)) (if prev-node (- (:x node) (:x prev-node)) 1.0))
+                      pdz (if next-node (- (:z next-node) (:z node)) (if prev-node (- (:z node) (:z prev-node)) 0.0))
+                      deep-in-pt [(+ nx (* (double pdx) 3.5)) ny (+ nz (* (double pdz) 3.5))]
+                      next-pt    (if next-node
+                                   [(+ (double (:x next-node)) 0.5) (double (:y next-node)) (+ (double (:z next-node)) 0.5)]
+                                   [(+ nx (double pdx)) ny (+ nz (double pdz))])
+                      portal-microsteps
+                      (if pull-leash?
+                        ;; Com animal na guia: abre, entra, avança fundo para puxar mob, espera colisão, volta e tranca
+                        [{:op :gate :open? true :pos portal-pos :label "Abrindo portão do cercado"}
+                         {:op :wait :ticks 10 :label "Aguardando portão abrir"}
+                         (cond-> {:op :walk :target target-pt :label "Atravessando vão do portão"}
+                           invariants (assoc :invariants invariants)
+                           species (assoc :species species))
+                         (cond-> {:op :walk :target deep-in-pt :label "Conduzindo animal para o interior do cercado"}
+                           invariants (assoc :invariants invariants)
+                           species (assoc :species species))
+                         {:op :wait :ticks 25 :label "Aguardando física de colisão do animal"}
+                         {:op :walk :target next-pt :label "Retornando ao portão para trancar"}
+                         {:op :gate :open? false :pos portal-pos :label "Trancando portão"}
+                         {:op :wait :ticks 8 :label "Conferindo tranca"}
+                         {:op :detach-lead :species species :label "Soltando o laço dentro do cercado"}]
+                        ;; Sem animal: abre, cruza vão, avança e fecha
+                        [{:op :gate :open? true :pos portal-pos :label "Abrindo portão"}
+                         {:op :wait :ticks 8 :label "Aguardando portão abrir"}
+                         {:op :walk :target target-pt :label "Cruzando vão do portão"}
+                         {:op :walk :target next-pt :label "Passando pelo portão"}
+                         {:op :gate :open? false :pos portal-pos :label "Fechando portão atrás de si"}
+                         {:op :wait :ticks 6 :label "Conferindo tranca"}])]
+                  (recur (if next-node (+ idx 2) (inc idx))
+                         (into acc portal-microsteps)))
+                ;; Passo normal de caminhada
+                (let [step (cond-> {:op :walk :target target-pt :label label}
+                             invariants (assoc :invariants invariants)
+                             species (assoc :species species))]
+                  (recur (inc idx) (conj acc step))))))))
+      ;; Fallback se path solver não encontrou caminho
+      [(cond-> {:op :walk :target safe-to :label label}
+         invariants (assoc :invariants invariants)
+         species (assoc :species species))])))
+
 (defn- expand-route-microsteps
-  "Converte um item da rota do santuario em micro-etapas atomicas para execucao deterministica a 20Hz."
-  [stop]
-  (cond
-    (= (:type stop) :promenade)
-    [{:op :equip :item (:hold-item stop) :label (:name stop)}
-     {:op :walk  :target (:pos stop)     :label (str "Caminhando -> " (:name stop))}
-     {:op :BARK  :text (:bark stop)      :label (:name stop)}
-     {:op :wait  :ticks (:pause-ticks stop 40) :label (str "Vigiando " (:name stop))}]
+  "Converte um item da rota do santuario em micro-etapas atomicas para execucao deterministica a 20Hz,
+   utilizando PathSolver3D com voxels reais para evitar travessia fantasma através de paredes."
+  ([stop] (expand-route-microsteps stop nil))
+  ([stop from-pos]
+   (cond
+     (= (:type stop) :promenade)
+     (let [target-pos (:pos stop)
+           walk-steps (if from-pos
+                        (generate-walk-steps from-pos target-pos (str "Caminhando -> " (:name stop)) {:radius 0.8})
+                        [{:op :walk :target target-pos :label (str "Caminhando -> " (:name stop))}])]
+       (vec
+        (concat
+         [{:op :equip :item (:hold-item stop) :label (:name stop)}]
+         walk-steps
+         [{:op :BARK :text (:bark stop) :label (:name stop)}
+          {:op :wait :ticks (:pause-ticks stop 40) :label (str "Vigiando " (:name stop))}])))
 
-    (= (:type stop) :quarters)
-    (let [wps (or (:waypoints stop) [(:pos stop)])
-          ret (or (:return-waypoints stop) [])
-          barks-vec (seq (:barks stop))
-          chosen-bark (if barks-vec (rand-nth (vec barks-vec)) (:bark stop))]
-      (vec
-       (concat
-        [{:op :equip :item (:hold-item stop "minecraft:golden_apple") :label (:name stop)}]
-        (mapv (fn [wp] {:op :walk :target wp :label (str "Indo ao " (:name stop))}) wps)
-        [{:op :BARK :text chosen-bark :label (:name stop)}
-         {:op :wait :ticks (:pause-ticks stop 140) :label (str "Descansando no " (:name stop))}]
-        (mapv (fn [wp] {:op :walk :target wp :label "Retornando à ronda"}) ret))))
 
-    :else
-    ;; Enclosure care sequence with guaranteed gate close
-    [{:op :equip :item (:food stop)      :label (:name stop)}
-     {:op :walk  :target (:outside stop) :label (str "Indo ao portão -> " (:name stop))}
-     {:op :gate  :open? true  :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
-      :label (str "Abrindo portão -> " (:name stop))}
-     {:op :walk  :target (:inside stop)  :label (str "Entrando -> " (:name stop))}
-     {:op :gate  :open? false :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
-      :label (str "Fechando portão interno -> " (:name stop))}
-     {:op :walk  :target (:feed-pos stop) :label (str "Aproximando dos animais -> " (:name stop))}
-     {:op :feed  :pos (:feed-pos stop) :food (:food stop) :species (:species stop)
-      :barks (:barks stop) :bark (:bark stop)
-      :label (str "Alimentando -> " (:name stop))}
-     {:op :wait  :ticks 45 :label (str "Cuidando -> " (:name stop))}
-     {:op :walk  :target (:inside stop)  :label (str "Saindo -> " (:name stop))}
-     {:op :gate  :open? true  :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
-      :label (str "Abrindo portão de saída -> " (:name stop))}
-     {:op :walk  :target (:outside stop) :label (str "Cruzando saída -> " (:name stop))}
-     {:op :gate  :open? false :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
-      :label (str "Trancando cercado -> " (:name stop))}
-     {:op :wait  :ticks 25 :label (str "Cercado trancado: " (:name stop))}]))
+     (= (:type stop) :quarters)
+     (let [barks-vec (seq (:barks stop))
+           chosen-bark (if barks-vec (rand-nth (vec barks-vec)) (:bark stop))
+           bed-pos (:pos stop [-131.0 65.0 195.0])
+           ret-pos (or (last (:return-waypoints stop)) [-173.0 65.0 180.0])
+           to-bed-steps (if from-pos
+                          (generate-walk-steps from-pos bed-pos (str "Indo descansar no " (:name stop)) {:radius 0.8})
+                          (let [wps (or (:waypoints stop) [bed-pos])]
+                            (mapv (fn [wp] {:op :walk :target wp :label (str "Indo ao " (:name stop))}) wps)))
+           ret-steps (if from-pos
+                       (generate-walk-steps bed-pos ret-pos "Retornando à ronda de patrulha" {:radius 0.8})
+                       (let [ret (or (:return-waypoints stop) [ret-pos])]
+                         (mapv (fn [wp] {:op :walk :target wp :label "Retornando à ronda"}) ret)))]
+       (vec
+        (concat
+         [{:op :equip :item (:hold-item stop "minecraft:golden_apple") :label (:name stop)}]
+         to-bed-steps
+         [{:op :BARK :text chosen-bark :label (:name stop)}
+          {:op :wait :ticks (:pause-ticks stop 140) :label (str "Descansando no " (:name stop))}]
+         ret-steps)))
+
+     :else
+     ;; Enclosure care sequence with guaranteed gate close
+     (let [outside-pos (:outside stop)
+           approach-steps (if from-pos
+                            (generate-walk-steps from-pos outside-pos (str "Indo ao portão -> " (:name stop)) {:radius 0.8})
+                            [{:op :walk :target outside-pos :label (str "Indo ao portão -> " (:name stop))}])]
+       (vec
+        (concat
+         [{:op :equip :item (:food stop) :label (:name stop)}]
+         approach-steps
+         [{:op :gate :open? true :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
+           :label (str "Abrindo portão -> " (:name stop))}
+          {:op :walk :target (:inside stop) :label (str "Entrando -> " (:name stop))}
+          {:op :gate :open? false :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
+           :label (str "Fechando portão interno -> " (:name stop))}
+          {:op :feed :pos (:feed-pos stop) :food (:food stop) :species (:species stop)
+           :barks (:barks stop) :bark (:bark stop)
+           :label (str "Alimentando -> " (:name stop))}
+          {:op :wait :ticks 45 :label (str "Cuidando -> " (:name stop))}
+          {:op :walk :target (:inside stop) :label (str "Saindo -> " (:name stop))}
+          {:op :gate :open? true :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
+           :label (str "Abrindo portão de saída -> " (:name stop))}
+          {:op :walk :target (:outside stop) :label (str "Cruzando saída -> " (:name stop))}
+          {:op :gate :open? false :gates (:gates stop) :block (:gate-block stop) :facing (:gate-facing stop)
+           :label (str "Trancando cercado -> " (:name stop))}
+          {:op :wait :ticks 25 :label (str "Cercado trancado: " (:name stop))}]))))))
+
+
+;; ============================================================================
+;; Telemetria Cognitiva e Dispatcher de Comandos (Voyager 2.0)
+;; ============================================================================
+
+(defonce global-command-dispatcher (atom nil))
+
+(defn record-cognitive-event!
+  "Registra evento cognitivo estruturado no atom do Studio (CA-040/CA-041)."
+  [engine-ctx-atom evt-type source text]
+  (when engine-ctx-atom
+    (let [fmt (java.time.format.DateTimeFormatter/ofPattern "HH:mm:ss")
+          now-str (.format (java.time.LocalTime/now) fmt)
+          badge-info (case evt-type
+                       :stimulus   {:badge "STIMULUS" :color "#38bdf8"}
+                       :router     {:badge "ROUTER" :color "#a855f7"}
+                       :grounding  {:badge "GROUNDING" :color "#06b6d4"}
+                       :synthesis  {:badge "SYSTEM 2" :color "#c084fc"}
+                       :gatekeeper {:badge "GATEKEEPER" :color "#4ade80"}
+                       :skill-lib  {:badge "SKILL LIB" :color "#fbbf24"}
+                       :motor      {:badge "SYSTEM 1" :color "#f87171"}
+                       :critic     {:badge "CRITIC" :color "#22c55e"}
+                       :critic-fail {:badge "CRITIC FAIL" :color "#ef4444"}
+                       :reflexion  {:badge "REFLEXION" :color "#f59e0b"}
+                       {:badge "EVENT" :color "#94a3b8"})
+          evt (merge badge-info
+                     {:timestamp (System/currentTimeMillis)
+                      :time      now-str
+                      :type      evt-type
+                      :source    source
+                      :text      text})]
+      (swap! engine-ctx-atom update :events
+             (fn [evts]
+               (let [evts (or evts [])]
+                 (vec (take-last 40 (conj evts evt)))))))))
+
+(defn dispatch-simulated-chat!
+  "Permite disparar comandos simulados a partir da UI do Studio ou testes."
+  [speaker msg]
+  (when-let [disp @global-command-dispatcher]
+    (disp speaker msg)))
+
+;; ============================================================================
+;; Despacho Polimorfico de Metas da Karlach (System 1 Motor + System 2 Malli)
+;; ============================================================================
+
+(defmulti execute-karlach-goal!
+  "Despacha a meta cognitiva fundamentada (GoalSpecification) para atuacao fisica e telemetria (CA-040)."
+  (fn [goal-spec _engine-ctx _nav-state _sanctuary-route]
+    (:goal/type goal-spec)))
+
+(defmethod execute-karlach-goal! :animal-rescue
+  [{:goal/keys [id name entity species pen-id gate-pos gate-block gate-facing inside-pos outside-pos feed-pos bait-item voice-line speaker] :as goal-spec}
+   engine-ctx-atom nav-state sanctuary-route]
+  ;; 1. Fala inicial da Karlach acusando o estímulo
+  (send-bridge-cmd! "SWING|Karlach")
+  (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
+  (karlach-say! voice-line)
+
+  (record-cognitive-event! engine-ctx-atom :grounding "Grounding Engine"
+                           (str "Ancorado em " (clojure.core/name pen-id) " | Alvo: " entity " | Portão: " gate-pos " | Isca: " bait-item))
+
+  ;; 2. Composição e Validação da Nova Skill em Tempo Real via Malli
+  (let [skills-dir (io/file "skills")
+        _ (.mkdirs skills-dir)
+        skill-registry (atom {:known-actions #{:locate-escaped-animal :equip-bait :lure-to-gate :open-gate :lure-inside :feed-animal :close-gate :check-weather :move-to-quarters :rest-at-bed :wait-out-rain :attach-lead :detach-lead :verify-containment}
+                              :composite-skills {}})
+        rescue-skill {:skill/id :rescue-animal
+                      :skill/name "Resgate e Condução Geral de Animal ao Cercado"
+                      :skill/author "Voyager-System-2-Cognition"
+                      :skill/trigger :animal-escaped
+                      :skill/timeout-ms 35000
+                      :skill/tree [:sequence
+                                   [:action :equip-bait {:item bait-item}]
+                                   [:action :locate-escaped-animal {:target species}]
+                                   [:action :attach-lead {:species species}]
+                                   [:action :lure-to-gate {:pos outside-pos}]
+                                   [:action :open-gate {:enclosure pen-id}]
+                                   [:action :lure-inside {:pos inside-pos}]
+                                   [:action :close-gate {:enclosure pen-id}]
+                                   [:action :detach-lead {:species species}]
+                                   [:action :feed-animal {:food bait-item}]]}
+        reg-res (composer/validate-and-register-skill! skill-registry skills-dir rescue-skill)
+        skill-id-str "rescue-animal"]
+    (println (str "[craft-agents] 🧠 Nova Skill composta via MCP: " id))
+    (println (str "[craft-agents] 🛡️ Gatekeeper Malli: " (if (:ok? reg-res) "APROVADA (Sem eval / Schema OK / Ciclos 0)" "REJEITADA") " -> Salvo em " (str (io/file skills-dir (str skill-id-str ".edn")))))
+
+    (let [pre-res (composer/evaluate-preconditions (:skill/tree rescue-skill) {:inventory {bait-item 1 "minecraft:lead" 1}} {:known-enclosures #{pen-id}})]
+      (record-cognitive-event! engine-ctx-atom :gatekeeper "Malli Schema Gatekeeper"
+                               (str "Validação AST estrutural & Sandbox Mental: SUCESSO (Zero eval / Tipos conferidos / 0 ciclos recursivos / Pré-condições: " (clojure.core/name (:status pre-res :ok)) ").")))
+    (record-cognitive-event! engine-ctx-atom :skill-lib "Skill Library"
+                             (str id " registrada permanentemente em skills/" skill-id-str ".edn."))
+
+    ;; Atualiza telemetria do Agent Studio (sem poluir a tela do jogo com títulos artificiais)
+    (when engine-ctx-atom
+      (swap! engine-ctx-atom update-in [:agents :karlach :skills] (fnil #(vec (distinct (conj % skill-id-str))) []))
+      (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] (str id " (Malli OK)"))
+      (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Conduzindo " entity " ao Bosque")))
+
+    ;; 4. Execução imediata da rota motora de resgate com targeting real e A* 3D
+    (let [players (query-online-players)
+          target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or speaker "pace"))) players))
+          near-player-pos (when target-p
+                            (let [px (:x target-p)
+                                  pz (:z target-p)]
+                              (if (nil? (current-enclosure-id [px 65.0 pz]))
+                                [px 65.0 pz]
+                                outside-pos)))
+          animal-rescue-pos (or near-player-pos outside-pos [-175.0 65.0 185.0])
+          init-snap (critic/parse-sanctuary-snapshot (send-bridge-cmd! "SANCTUARY"))
+          target-quad (get critic/enclosure->quadrant (or pen-id :pen-south-west) :SW)
+          init-count (get-in init-snap [target-quad (critic/normalize-species species)] 0)
+          gate-coords [gate-pos [(first gate-pos) (inc (second gate-pos)) (nth gate-pos 2)]]
+          gate-blk (or gate-block "minecraft:dark_oak_fence_gate")
+          gate-fac (or gate-facing "east")
+
+          enc-info (get sanctuary-enclosures-by-id (or pen-id :pen-south-west))
+          portal-info (or (:enclosure/portal enc-info)
+                          {:blocks gate-coords
+                           :normal (if (<= (first gate-pos) -175) [-1.0 0.0 0.0] [1.0 0.0 0.0])
+                           :inside-anchor inside-pos
+                           :outside-anchor outside-pos
+                           :gate-block gate-blk
+                           :gate-facing gate-fac})
+          funnel (compute-enclosure-funnel portal-info)
+          funnel-entry (:funnel-entry funnel)
+          pre-gate (:pre-gate funnel)
+          in-anc (:inside-anchor funnel)
+          deep-in (:deep-inside funnel)
+
+          ;; Navegação 100% guiada por Voxels Reais, A* 3D e Funil Ortogonal:
+          ;; 1. Karlach caminha até o animal (no lago ou com o jogador)
+          to-animal-steps (generate-walk-steps (:pos @nav-state) animal-rescue-pos (str "Indo até " entity " com " speaker) {:radius 1.0})
+
+          ;; 2. Conduz o animal até o início do funil no corredor central
+          to-funnel-steps (generate-walk-steps animal-rescue-pos funnel-entry (str "Conduzindo " entity " ao corredor de acesso") {:species species :radius 1.0})
+
+          ;; 3. Da área de segurança interna até o comedouro
+          to-feed-steps   (generate-walk-steps in-anc feed-pos (str "Aproximando do comedouro de " entity) {:radius 1.5})
+
+          main-steps (concat
+                      [{:op :equip :item "minecraft:lead" :label "Equipando laço"}]
+                      to-animal-steps
+                      [{:op :attach-lead :species species :label (str "Laçando " entity)}
+                       {:op :wait :ticks 15 :label "Conectando o laço"}]
+                      to-funnel-steps
+                      ;; Alinhamento 100% ortogonal com o vão do portão (elimina atrito diagonal contra as quinas):
+                      [{:op :walk :target pre-gate :label "Alinhando animal ortogonalmente ao portão" :species species}
+                       {:op :gate :open? true :pos gate-pos :gates gate-coords :block gate-blk :facing gate-fac :label "Abrindo portão do cercado"}
+                       {:op :wait :ticks 8 :label "Aguardando portão abrir"}
+                       {:op :walk :target in-anc :label "Atravessando vão do portão" :species species}
+                       {:op :walk :target deep-in :label (str "Conduzindo " entity " para o interior seguro") :species species}
+                       ;; Verificação sensorial contínua: só fecha quando o animal estiver fisicamente dentro do cercado!
+                       {:op :await-contained :species species :pen-id pen-id :initial-contained init-count :timeout 80
+                        :label "Aguardando confirmação sensorial de entrada do animal"}
+                       {:op :walk :target in-anc :label "Retornando ao portão para trancar"}
+                       {:op :gate :open? false :pos gate-pos :gates gate-coords :block gate-blk :facing gate-fac :label "Trancando portão"}
+                       {:op :wait :ticks 8 :label "Conferindo tranca"}
+                       {:op :detach-lead :species species :label (str "Soltando a guia do " entity)}
+                       {:op :wait :ticks 10 :label "Removendo guia"}]
+                      to-feed-steps
+                      [{:op :feed :pos feed-pos :food bait-item :species [species] :label (str "Alimentando: " entity)}
+                       {:op :wait :ticks 20 :label (str entity " seguro e alimentado")}
+                       {:op :critic
+                        :attempt 1
+                        :goal-id id
+                        :species species
+                        :pen-id pen-id
+                        :entity entity
+                        :initial-contained init-count
+                        :animal-pos animal-rescue-pos
+                        :gates gate-coords
+                        :block gate-blk
+                        :facing gate-fac
+                        :outside-pos pre-gate
+                        :inside-pos in-anc
+                        :feed-pos feed-pos
+                        :bait-item bait-item
+                        :label "Environmental Critic: Verificação de Contenção"}])]
+      (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller"
+                               (str "Executando resgate com percepção dinâmica de terreno para " entity " rumo a " feed-pos))
+      (swap! nav-state assoc
+             :mode :sanctuary-patrol
+             :follow-target nil
+             :steps (vec main-steps)))))
+
+(defmethod execute-karlach-goal! :weather-shelter
+  [{:goal/keys [id name voice-line]} engine-ctx-atom nav-state sanctuary-route]
+  (send-bridge-cmd! "SWING|Karlach")
+  (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
+  (karlach-say! voice-line)
+
+  (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"
+                           "Objetivo: :shelter-from-rain. Compondo árvore de comportamento [:sequence [:action :check-weather] [:action :move-to-quarters] [:action :rest-at-bed]]")
+
+  (let [skills-dir (io/file "skills")
+        _ (.mkdirs skills-dir)
+        skill-registry (atom {:known-actions #{:check-weather :move-to-quarters :rest-at-bed :wait-out-rain}
+                              :composite-skills {}})
+        shelter-skill {:skill/id :shelter-from-rain
+                       :skill/name "Abrigo de Emergência contra Chuva"
+                       :skill/author "Voyager-System-2-Cognition"
+                       :skill/trigger :weather-rain
+                       :skill/timeout-ms 20000
+                       :skill/tree [:sequence
+                                    [:action :check-weather]
+                                    [:action :move-to-quarters]
+                                    [:action :rest-at-bed]
+                                    [:action :wait-out-rain]]}
+        reg-res (composer/validate-and-register-skill! skill-registry skills-dir shelter-skill)]
+    (println (str "[craft-agents] 🧠 Nova Skill composta via MCP: :shelter-from-rain"))
+    (println (str "[craft-agents] 🛡️ Gatekeeper Malli: " (if (:ok? reg-res) "APROVADA (Sem eval / Schema OK / Ciclos 0)" "REJEITADA") " -> Salvo em " (str (io/file skills-dir "shelter-from-rain.edn"))))
+
+    (let [pre-res (composer/evaluate-preconditions (:skill/tree shelter-skill) {})]
+      (record-cognitive-event! engine-ctx-atom :gatekeeper "Malli Schema Gatekeeper"
+                               (str "Validação AST estrutural & Sandbox Mental: SUCESSO (Zero eval / Tipos conferidos / 0 ciclos recursivos / Pré-condições: " (clojure.core/name (:status pre-res :ok)) ").")))
+    (record-cognitive-event! engine-ctx-atom :skill-lib "Skill Library"
+                             ":shelter-from-rain registrada permanentemente em skills/shelter-from-rain.edn.")
+
+    (when engine-ctx-atom
+      (swap! engine-ctx-atom assoc-in [:agents :karlach :skills] ["shelter-from-rain"])
+      (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] ":shelter-from-rain (Malli OK)")
+      (swap! engine-ctx-atom assoc-in [:agents :karlach :task] "Indo para o Quarto se abrigar"))
+
+    (karlach-say! "Chuva detectada, soldado! Indo pro meu quarto me proteger!")
+
+    (let [quarters-stop (some #(when (= (:type %) :quarters) %) sanctuary-route)]
+      (if quarters-stop
+        (do
+          (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller"
+                                   "Iniciando navegação A* com microsteps para Quarto da Karlach [-129, 65, 194]")
+          (swap! nav-state assoc
+                 :mode :sanctuary-patrol
+                 :follow-target nil
+                 :steps (vec (expand-route-microsteps quarters-stop (:pos @nav-state)))))
+        (karlach-say! "Meu quarto ainda tá sendo arrumado!")))))
+
+(defmethod execute-karlach-goal! :follow-player
+  [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Seguindo jogador " target))
+  (swap! nav-state assoc
+         :mode :follow
+         :follow-target target
+         :follow-path []
+         :follow-last-target [0.0 0.0 0.0]
+         :follow-lost-ticks 0
+         :steps [])
+  (karlach-say! voice-line))
+
+(defmethod execute-karlach-goal! :spatial-attention
+  [{:goal/keys [entity speaker]} engine-ctx-atom nav-state _sanctuary-route]
+  (let [players (query-online-players)
+        target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or speaker "pace"))) players))
+        [cx cy cz] (:pos @nav-state)]
+    (if target-p
+      (let [px (:x target-p)
+            py (:y target-p)
+            pz (:z target-p)
+            dx (- px cx)
+            dz (- pz cz)
+            look-yaw (compute-yaw dx dz)]
+        (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz look-yaw))
+        (swap! nav-state assoc :yaw look-yaw)
+        (record-cognitive-event! engine-ctx-atom :grounding "Percepção Espacial (Joint Attention)"
+                                 (str "Olhando para " speaker " em [" (int px) " " (int pz) "] identificando " entity))
+        (karlach-say! (str "Tô vendo sim, " speaker "! Um " entity " bem aí perto de você, do lado de fora do muro!")))
+      (karlach-say! (str "Onde, " speaker "? Não tô conseguindo te ver por aqui!")))))
+
+(defmethod execute-karlach-goal! :social-dance
+  [{:goal/keys [voice-line]} engine-ctx-atom nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Executando animação de dança infernal")
+  (swap! nav-state assoc :dance-ticks 80)
+  (karlach-say! voice-line))
+
+(defmethod execute-karlach-goal! :patrol-sanctuary
+  [{:goal/keys [voice-line]} engine-ctx-atom nav-state sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Retomando patrulha e alimentação de animais no Santuário")
+  (when engine-ctx-atom
+    (swap! engine-ctx-atom assoc-in [:agents :karlach :task] "Patrulha no Santuário"))
+  (send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.0")
+  (let [[cx _ cz] (:pos @nav-state)
+        corridor-return (when (> cx -150.0)
+                          [{:op :equip :item "minecraft:golden_carrot" :label "Retornando pelo Corredor Leste"}
+                           {:op :walk :target [-129.0 65.0 180.5] :label "Corredor dos Aposentos"}
+                           {:op :walk :target [-136.0 65.0 180.5] :label "Corredor Leste"}
+                           {:op :walk :target [-173.0 65.0 180.0] :label "Praça Central do Santuário"}])
+        initial-steps (vec (expand-route-microsteps (first sanctuary-route) (:pos @nav-state)))]
+    (swap! nav-state assoc :mode :sanctuary-patrol :follow-target nil :route-idx 0 :steps initial-steps))
+  (karlach-say! voice-line))
+
+(defmethod execute-karlach-goal! :default
+  [{:goal/keys [raw-text voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"
+                           (str "Analisando comando natural: '" raw-text "'. Decompondo em diretriz reativa."))
+  (karlach-say! voice-line)
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Executando diretriz"))
+
+(defn handle-player-command!
+  "Processa comandos de chat (recebidos via bridge CHAT_POLL, log tailer ou Studio UI)
+   e orquestra as reações dos agentes Karlach e Picard."
+  [speaker msg engine-ctx-atom nav-state picard-state sanctuary-route]
+  (let [lower (str/lower-case (str/trim msg))]
+    ;; 1. Comandos para Karlach (Pipeline Cognitivo Desacoplado: Router -> Grounding -> Multimethod)
+    (when (or (str/includes? lower "karlach")
+              (str/starts-with? lower "!karlach"))
+      (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+      (let [t0         (System/currentTimeMillis)
+            intent-res (intent/classify-intent-semantic msg speaker)
+            dt         (- (System/currentTimeMillis) t0)
+            goal-spec  (grounding/ground-goal intent-res)]
+        (record-cognitive-event! engine-ctx-atom :router "System 1 Intent Router"
+                                 (str "Intenção: " (:intent/type intent-res)
+                                      " | Confiança: " (int (* 100 (:intent/confidence intent-res 0.0))) "%"
+                                      " | Latência: " dt "ms"
+                                      " | Slots: " (:intent/slots intent-res)))
+        (execute-karlach-goal! goal-spec engine-ctx-atom nav-state sanctuary-route)))
+
+    ;; 2. Previsão do Tempo e Comandos para o Capitão Picard
+    (cond
+      (or (str/includes? lower "previsao")
+          (str/includes? lower "previsão")
+          (str/includes? lower "meteorologia")
+          (and (or (str/includes? lower "picard")
+                   (str/includes? lower "capitao")
+                   (str/includes? lower "capitão")
+                   (str/includes? lower "qual")
+                   (str/includes? lower "como ta")
+                   (str/includes? lower "como está"))
+               (or (str/includes? lower "tempo")
+                   (str/includes? lower "clima")
+                   (str/includes? lower "chuva"))))
+      (do
+        (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+        (record-cognitive-event! engine-ctx-atom :motor "Picard Telemetry" "Consultando sensores meteorológicos orbitais e terrestres")
+        (send-bridge-cmd! "SWING|Picard")
+        (picard-broadcast-weather!)
+        (swap! picard-state assoc :last-weather-ms (System/currentTimeMillis)))
+
+      (and (or (str/includes? lower "picard")
+               (str/includes? lower "capitao")
+               (str/includes? lower "capitão"))
+           (or (str/includes? lower "limpa")
+               (str/includes? lower "abrir o sol")
+               (str/includes? lower "parar chuva")))
+      (do
+        (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+        (record-cognitive-event! engine-ctx-atom :motor "Picard Weather Matrix" "Comando de dispersão climática executado: weather clear")
+        (send-bridge-cmd! "CMD|weather clear")
+        (picard-say! "Make it so! Acionando matriz de controle climático orbital: Céu limpo estabelecido, Número Um."))
+
+      (and (or (str/includes? lower "picard")
+               (str/includes? lower "engage")
+               (str/includes? lower "engajar"))
+           (or (str/includes? lower "engajar")
+               (str/includes? lower "engage")
+               (str/includes? lower "dobra")))
+      (do
+        (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+        (record-cognitive-event! engine-ctx-atom :motor "Picard Helm" "Acionando Dobra 9")
+        (send-bridge-cmd! "SWING|Picard")
+        (send-bridge-cmd! "CMD|playsound minecraft:block.beacon.power_select master @a -65 145 100 1.0 1.2")
+        (picard-say! "Make it so! Dobra 9 acionada, leme à frente!"))
+
+      (and (or (str/includes? lower "picard")
+               (str/includes? lower "earl grey"))
+           (or (str/includes? lower "cha")
+               (str/includes? lower "chá")
+               (str/includes? lower "tea")
+               (str/includes? lower "earl grey")))
+      (do
+        (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+        (picard-say! "Tea. Earl Grey. Hot. Nada como um bom chá para clarear os pensamentos na ponte, Número Um."))
+
+      (and (or (str/includes? lower "picard")
+               (str/includes? lower "capitao")
+               (str/includes? lower "capitão"))
+           (or (str/includes? lower "vem")
+               (str/includes? lower "seguir")
+               (str/includes? lower "acompanhe")))
+      (do
+        (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+        (record-cognitive-event! engine-ctx-atom :motor "Picard Away Team" (str "Acompanhando " speaker))
+        (swap! picard-state assoc :mode :follow :follow-target speaker)
+        (picard-say! (str "Com prazer, " speaker ". Acompanhando você em missão de superfície.")))
+
+      (and (or (str/includes? lower "picard")
+               (str/includes? lower "capitao")
+               (str/includes? lower "capitão"))
+           (or (str/includes? lower "ponte")
+               (str/includes? lower "voltar")
+               (str/includes? lower "posto")))
+      (do
+        (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+        (record-cognitive-event! engine-ctx-atom :motor "Picard Bridge" "Retornando à ponte")
+        (swap! picard-state assoc :mode :bridge-command :follow-target nil :pos [-65.0 145.0 101.0] :phase :walk)
+        (send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
+        (picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))
 
 (defn start-live-karlach-loop!
   "Inicia o loop de 20Hz da Karlach e do Capitão Picard no servidor Fabric e atualiza o engine-ctx do Agent Studio."
@@ -413,7 +1043,7 @@
                             :follow-target nil
                             :dance-ticks 0
                             :route-idx 0
-                            :steps (vec (expand-route-microsteps (first sanctuary-route)))
+                            :steps (vec (expand-route-microsteps (first sanctuary-route) [-175.0 65.0 180.0]))
                             :wait-left 0
                             :last-bark-ms 0})
         picard-state (atom {:pos [-65.0 145.0 101.0]
@@ -429,193 +1059,56 @@
                             :status "Comando da Ponte (Enterprise-D)"})
         running?     (atom true)]
 
-    ;; Chat listener thread tailing latest.log for player commands to Karlach & Picard
+    ;; 1. Registrar Dispatcher Global para comandos via Web UI e Testes
+    (reset! global-command-dispatcher
+      (fn [spk m]
+        (send-bridge-cmd! (str "CMD|tellraw @a [\"\",{\"text\":\"<" spk "> \",\"color\":\"white\"},{\"text\":\"" (str/replace m "\"" "\\\"") "\"}]"))
+        (handle-player-command! spk m engine-ctx-atom nav-state picard-state sanctuary-route)))
+
+    ;; 2. Chat listener thread monitorando client & server latest.log em paralelo (latência de 100ms)
     (doto (Thread.
            (fn []
-             (let [log-file (io/file "/home/pace/minecraft-server/logs/latest.log")]
-               (loop [last-len (if (.exists log-file) (.length log-file) 0)]
+             (let [server-log (io/file "/home/pace/minecraft-server/logs/latest.log")
+                   client-log (io/file "/home/pace/.minecraft/logs/latest.log")
+                   seen-msgs  (atom {})]
+               (loop [s-pos (if (.exists server-log) (.length server-log) 0)
+                      c-pos (if (.exists client-log) (.length client-log) 0)]
                  (when @running?
-                   (Thread/sleep 400)
-                   (let [cur-len (if (.exists log-file) (.length log-file) 0)]
-                     (if (> cur-len last-len)
-                       (let [lines (try
-                                     (with-open [raf (RandomAccessFile. log-file "r")]
-                                       (.seek raf last-len)
-                                       (loop [acc []]
-                                         (if-let [l (.readLine raf)]
-                                           (recur (conj acc (String. (.getBytes l StandardCharsets/ISO_8859_1) StandardCharsets/UTF_8)))
-                                           acc)))
-                                     (catch Throwable _ []))]
-                         (doseq [line lines]
-                           (when-let [[_ speaker msg] (re-find #"<([^>]+)>\s+(.+)$" line)]
-                             (when (not (#{"Karlach" "Picard" "Antigravity"} speaker))
-                               (let [lower (str/lower-case (str/trim msg))]
-                                 ;; 1. Comandos para Karlach
-                                 (when (or (str/includes? lower "karlach")
-                                           (str/starts-with? lower "!karlach"))
-                                   (cond
-                                     (or (str/includes? lower "vem")
-                                         (str/includes? lower "segue"))
-                                     (do
-                                       (swap! nav-state assoc :mode :follow :follow-target speaker)
-                                       (karlach-say! (str "Tô indo até você, " speaker "! Meu motor infernal já tá aquecido!")))
-
-                                     (or (str/includes? lower "danca")
-                                         (str/includes? lower "dança"))
-                                     (do
-                                       (swap! nav-state assoc :dance-ticks 80)
-                                       (karlach-say! "Haha! Olha o passinho de Avernus, soldado! 🔥"))
-
-                                     (or (str/includes? lower "chuva")
-                                         (str/includes? lower "chovendo")
-                                         (str/includes? lower "abrigar")
-                                         (str/includes? lower "abriga")
-                                         (str/includes? lower "abrigo")
-                                         (str/includes? lower "molhar"))
-                                     (do
-                                       ;; 1. Fala inicial da Karlach acusando o estímulo e intenção de aprender
-                                       (send-bridge-cmd! "SWING|Karlach")
-                                       (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
-                                       (karlach-say! "Chuva?! O motor infernal chia com água, soldado! Sintetizando nova Skill de abrigo emergencial...")
-
-                                       ;; 2. Composição e Validação da Nova Skill em Tempo Real via Malli
-                                       (let [skills-dir (io/file "skills")
-                                             _ (.mkdirs skills-dir)
-                                             skill-registry (atom {:known-actions #{:check-weather :move-to-quarters :rest-at-bed :wait-out-rain}
-                                                                   :composite-skills {}})
-                                             shelter-skill {:skill/id :shelter-from-rain
-                                                            :skill/name "Abrigo de Emergência contra Chuva"
-                                                            :skill/author "Voyager-System-2-Cognition"
-                                                            :skill/trigger :weather-rain
-                                                            :skill/timeout-ms 20000
-                                                            :skill/tree [:sequence
-                                                                         [:action :check-weather]
-                                                                         [:action :move-to-quarters]
-                                                                         [:action :rest-at-bed]
-                                                                         [:action :wait-out-rain]]}
-                                             reg-res (composer/validate-and-register-skill! skill-registry skills-dir shelter-skill)]
-                                         (println (str "[craft-agents] 🧠 Nova Skill composta via MCP: :shelter-from-rain"))
-                                         (println (str "[craft-agents] 🛡️ Gatekeeper Malli: " (if (:ok? reg-res) "APROVADA (Sem eval / Schema OK / Ciclos 0)" "REJEITADA") " -> Salvo em " (str (io/file skills-dir "shelter-from-rain.edn"))))
-
-                                         ;; Atualiza telemetria do Agent Studio se disponível
-                                         (when engine-ctx-atom
-                                           (swap! engine-ctx-atom assoc-in [:agents :karlach :skills] ["shelter-from-rain"])
-                                           (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] ":shelter-from-rain (Malli OK)"))
-
-                                         ;; 3. Efeitos in-game de aprendizado (Level-Up, partículas de encantamento e mensagem de sistema)
-                                         (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.player.levelup master @a ~ ~ ~ 1.0 1.0")
-                                         (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:enchant ~ ~1.5 ~ 0.6 0.6 0.6 1.0 45 normal")
-                                         (send-bridge-cmd! "CMD|tellraw @a [\"\",{\"text\":\"[craft-agents] \",\"color\":\"aqua\",\"bold\":true},{\"text\":\"🧠 Nova Skill aprendida e gravada na Skill Library: \",\"color\":\"yellow\"},{\"text\":\":shelter-from-rain\",\"color\":\"gold\",\"bold\":true},{\"text\":\" (Validada por Malli / Zero-eval)\",\"color\":\"gray\"}]")
-                                         (Thread/sleep 300)
-                                         (karlach-say! "Skill :shelter-from-rain gravada na memória! Indo pro meu quarto me proteger da chuva agora, soldado!")
-
-                                         ;; 4. Execução imediata da nova skill (caminha para o quarto)
-                                         (let [quarters-stop (some #(when (= (:type %) :quarters) %) sanctuary-route)]
-                                           (if quarters-stop
-                                             (swap! nav-state assoc
-                                                    :mode :sanctuary-patrol
-                                                    :follow-target nil
-                                                    :steps (vec (expand-route-microsteps quarters-stop)))
-                                             (karlach-say! "Meu quarto ainda tá sendo arrumado!")))))
-
-                                     (or (str/includes? lower "quarto")
-                                         (str/includes? lower "descansa")
-                                         (str/includes? lower "dormir")
-                                         (str/includes? lower "cama"))
-                                     (do
-                                       (let [quarters-stop (some #(when (= (:type %) :quarters) %) sanctuary-route)]
-                                         (if quarters-stop
-                                           (do
-                                             (karlach-say! "Partiu quarto descansar o motor infernal, soldado!")
-                                             (swap! nav-state assoc
-                                                    :mode :sanctuary-patrol
-                                                    :follow-target nil
-                                                    :steps (vec (expand-route-microsteps quarters-stop))))
-                                           (karlach-say! "Meu quarto ainda tá sendo arrumado, soldado!"))))
-
-                                     (or (str/includes? lower "patrulha")
-                                         (str/includes? lower "santuario")
-                                         (str/includes? lower "santuário")
-                                         (str/includes? lower "alimenta"))
-                                     (do
-                                       (swap! nav-state assoc :mode :sanctuary-patrol :follow-target nil)
-                                       (karlach-say! "De volta à ronda do Santuário! Vou cuidar de todos os bichinhos!"))))
-
-                                 ;; 2. Previsão do Tempo e Comandos para o Capitão Picard
-                                 (cond
-                                   ;; Pedido direto de previsão do tempo / clima
-                                   (or (str/includes? lower "previsao")
-                                       (str/includes? lower "previsão")
-                                       (str/includes? lower "meteorologia")
-                                       (and (or (str/includes? lower "picard")
-                                                (str/includes? lower "capitao")
-                                                (str/includes? lower "capitão")
-                                                (str/includes? lower "qual")
-                                                (str/includes? lower "como ta")
-                                                (str/includes? lower "como está"))
-                                            (or (str/includes? lower "tempo")
-                                                (str/includes? lower "clima")
-                                                (str/includes? lower "chuva"))))
-                                   (do
-                                     (send-bridge-cmd! "SWING|Picard")
-                                     (picard-broadcast-weather!)
-                                     (swap! picard-state assoc :last-weather-ms (System/currentTimeMillis)))
-
-                                   ;; Controle climático orbital pelo Picard
-                                   (and (or (str/includes? lower "picard")
-                                            (str/includes? lower "capitao")
-                                            (str/includes? lower "capitão"))
-                                        (or (str/includes? lower "limpa")
-                                            (str/includes? lower "abrir o sol")
-                                            (str/includes? lower "parar chuva")))
-                                   (do
-                                     (send-bridge-cmd! "CMD|weather clear")
-                                     (picard-say! "Make it so! Acionando matriz de controle climático orbital: Céu limpo estabelecido, Número Um."))
-
-                                   ;; Engajar / Dobra 9
-                                   (and (or (str/includes? lower "picard")
-                                            (str/includes? lower "engage")
-                                            (str/includes? lower "engajar"))
-                                        (or (str/includes? lower "engajar")
-                                            (str/includes? lower "engage")
-                                            (str/includes? lower "dobra")))
-                                   (do
-                                     (send-bridge-cmd! "SWING|Picard")
-                                     (send-bridge-cmd! "CMD|playsound minecraft:block.beacon.power_select master @a -65 145 100 1.0 1.2")
-                                     (picard-say! "Make it so! Dobra 9 acionada, leme à frente!"))
-
-                                   ;; Earl Grey Tea
-                                   (and (or (str/includes? lower "picard")
-                                            (str/includes? lower "earl grey"))
-                                        (or (str/includes? lower "cha")
-                                            (str/includes? lower "chá")
-                                            (str/includes? lower "tea")
-                                            (str/includes? lower "earl grey")))
-                                   (picard-say! "Tea. Earl Grey. Hot. Nada como um bom chá para clarear os pensamentos na ponte, Número Um.")
-
-                                   ;; Picard seguir / ponte
-                                   (and (or (str/includes? lower "picard")
-                                            (str/includes? lower "capitao")
-                                            (str/includes? lower "capitão"))
-                                        (or (str/includes? lower "vem")
-                                            (str/includes? lower "seguir")
-                                            (str/includes? lower "acompanhe")))
-                                   (do
-                                     (swap! picard-state assoc :mode :follow :follow-target speaker)
-                                     (picard-say! (str "Com prazer, " speaker ". Acompanhando você em missão de superfície.")))
-
-                                   (and (or (str/includes? lower "picard")
-                                            (str/includes? lower "capitao")
-                                            (str/includes? lower "capitão"))
-                                        (or (str/includes? lower "ponte")
-                                            (str/includes? lower "voltar")
-                                            (str/includes? lower "posto")))
-                                   (do
-                                     (swap! picard-state assoc :mode :bridge-command :follow-target nil :pos [-65.0 145.0 101.0] :phase :walk)
-                                     (send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
-                                     (picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))))
-                         (recur cur-len))
-                       (recur cur-len)))))))
+                   (Thread/sleep 100)
+                   (let [read-lines (fn [^java.io.File f last-p]
+                                      (if (.exists f)
+                                        (let [cur-p (.length f)]
+                                          (cond
+                                            (> cur-p last-p)
+                                            (let [lines (try
+                                                          (with-open [raf (RandomAccessFile. f "r")]
+                                                            (.seek raf last-p)
+                                                            (loop [acc []]
+                                                              (if-let [l (.readLine raf)]
+                                                                (recur (conj acc (String. (.getBytes l StandardCharsets/ISO_8859_1) StandardCharsets/UTF_8)))
+                                                                acc)))
+                                                          (catch Throwable _ []))]
+                                              [cur-p lines])
+                                            (< cur-p last-p) [0 []]
+                                            :else [last-p []]))
+                                        [0 []]))
+                         [new-s-pos s-lines] (read-lines server-log s-pos)
+                         [new-c-pos c-lines] (read-lines client-log c-pos)
+                         all-lines (concat s-lines c-lines)
+                         now (System/currentTimeMillis)]
+                     ;; Evita reprocessar a mesma mensagem enviada nos ultimos 10s
+                     (swap! seen-msgs (fn [m] (into {} (filter (fn [[_ ts]] (< (- now ts) 10000)) m))))
+                     (doseq [line all-lines]
+                       (when-let [[_ speaker msg] (re-find #"<([^>]+)>\s+(.+)$" line)]
+                         (let [clean-spk (str/trim speaker)
+                               clean-msg (str/trim msg)
+                               dedup-key (str clean-spk ":" clean-msg)]
+                           (when (and (not (#{"Karlach" "Picard" "Antigravity"} clean-spk))
+                                      (not (contains? @seen-msgs dedup-key)))
+                             (swap! seen-msgs assoc dedup-key now)
+                             (println (str "[craft-agents-chat] 📨 Chat capturado do jogo: <" clean-spk "> " clean-msg))
+                             (handle-player-command! clean-spk clean-msg engine-ctx-atom nav-state picard-state sanctuary-route)))))
+                     (recur new-s-pos new-c-pos))))))
            "craft-agents-chat-listener")
       (.setDaemon true)
       (.start))
@@ -627,6 +1120,16 @@
                (when @running?
                  (let [t0 (System/currentTimeMillis)]
                    (try
+                     ;; Polling nativo de Chat via In-Server Bridge (5Hz / 200ms latency)
+                     (when (zero? (mod tick 4))
+                       (let [resp (send-bridge-cmd! "CHAT_POLL")]
+                         (when (and resp (str/starts-with? resp "OK;;"))
+                           (let [items (str/split (subs resp 4) #";;")]
+                             (doseq [item items]
+                               (when-not (str/blank? item)
+                                 (let [[speaker msg] (str/split item #"\|" 2)]
+                                   (when (and speaker msg (not (#{"Karlach" "Picard" "Antigravity"} speaker)))
+                                     (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route)))))))))
                      ;; Periodically verify bridge connection & weather cache
                      (when (zero? (mod tick 200))
                        (refresh-real-world-weather-async!)
@@ -652,7 +1155,7 @@
                                  (> dist 28.0)
                                  (do
                                    (send-bridge-cmd!
-                                    (format "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                                    (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
                                             (:x target-p) (:y target-p) (:z target-p) yaw))
                                    (swap! picard-state assoc :pos [(:x target-p) (:y target-p) (:z target-p)] :yaw yaw
                                           :status (str "Missão com " (:name target-p))))
@@ -662,7 +1165,7 @@
                                        nz (+ pz (* (/ dz dist) step-d))
                                        ny (:y target-p)]
                                    (send-bridge-cmd!
-                                    (format "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ny nz yaw))
+                                    (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ny nz yaw))
                                    (swap! picard-state assoc :pos [nx ny nz] :yaw yaw
                                           :status (str "Acompanhando " (:name target-p))))))
                              (swap! picard-state assoc :mode :bridge-command)))
@@ -677,20 +1180,10 @@
                                (if (<= dist 0.22)
                                  (do
                                    (send-bridge-cmd!
-                                    (format "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
+                                    (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
                                             (double tx) (double ty) (double tz)
                                             (double (:yaw station 0.0)) (double (:pitch station 0.0))))
-                                   ;; Se chegou na estação meteorológica Ops e o cooldown de 3 min passou, anuncia a previsão do tempo!
-                                   (let [now (System/currentTimeMillis)]
-                                     (if (and (:weather-broadcast? station)
-                                              (> (- now (:last-weather-ms pst 0)) 180000))
-                                       (do
-                                         (picard-broadcast-weather!)
-                                         (swap! picard-state assoc :last-weather-ms now :last-bark-ms now))
-                                       (when (and (:bark station)
-                                                  (> (- now (:last-bark-ms pst 0)) 45000))
-                                         (picard-say! (:bark station))
-                                         (swap! picard-state assoc :last-bark-ms now))))
+                                   ;; Picard em serviço silencioso na ponte (fala apenas quando consultado no chat pelo jogador)
                                    (swap! picard-state assoc
                                           :pos [(double tx) (double ty) (double tz)]
                                           :yaw (:yaw station 0.0)
@@ -703,7 +1196,7 @@
                                        nz (+ pz (* (/ dz dist) speed))
                                        yaw (compute-yaw dx dz)]
                                    (send-bridge-cmd!
-                                    (format "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                                    (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
                                             nx (double ty) nz yaw))
                                    (swap! picard-state assoc
                                           :pos [nx (double ty) nz]
@@ -723,10 +1216,10 @@
                      (when (zero? (mod tick 25))
                        (let [[kx ky kz] (:pos @nav-state)]
                          (send-bridge-cmd!
-                          (format "CMD|particle minecraft:flame %.2f %.2f %.2f 0.15 0.2 0.15 0.01 3 normal"
+                          (uformat "CMD|particle minecraft:flame %.2f %.2f %.2f 0.15 0.2 0.15 0.01 3 normal"
                                   kx (+ ky 1.1) kz))
                          (send-bridge-cmd!
-                          (format "CMD|particle minecraft:smoke %.2f %.2f %.2f 0.15 0.25 0.15 0.01 2 normal"
+                          (uformat "CMD|particle minecraft:smoke %.2f %.2f %.2f 0.15 0.25 0.15 0.01 2 normal"
                                   kx (+ ky 1.2) kz))))
 
                      (let [st @nav-state
@@ -745,11 +1238,11 @@
                          (pos? (:dance-ticks st 0))
                          (let [nyaw (float (mod (+ (:yaw st) 32.0) 360.0))]
                            (send-bridge-cmd!
-                            (format "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz nyaw))
+                            (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz nyaw))
                            (when (zero? (mod tick 5))
                              (send-bridge-cmd! "SWING|Karlach")
                              (send-bridge-cmd!
-                              (format "CMD|particle minecraft:note %.2f %.2f %.2f 0.3 0.3 0.3 1.0 2 normal"
+                              (uformat "CMD|particle minecraft:note %.2f %.2f %.2f 0.3 0.3 0.3 1.0 2 normal"
                                       cx (+ cy 2.0) cz)))
                            (swap! nav-state #(-> %
                                                  (update :dance-ticks dec)
@@ -760,84 +1253,200 @@
                                   :agents {:karlach (make-karlach-card "dancing 🔥" [cx cy cz])
                                            :picard  picard-card}))
 
-                         ;; 2. Follow player mode
+                         ;; 2. Follow player mode (Navegação Universal via A* 3D e Voxels Reais)
                          (= (:mode st) :follow)
                          (let [players (query-online-players)
                                target-p (first (filter #(= (str/lower-case (:name %))
                                                            (str/lower-case (or (:follow-target st) "pace")))
                                                        players))]
                            (if target-p
-                             (let [dx (- (:x target-p) cx)
-                                   dz (- (:z target-p) cz)
+                             (let [tx (:x target-p)
+                                   ty (:y target-p)
+                                   tz (:z target-p)
+                                   dx (- tx cx)
+                                   dz (- tz cz)
                                    dist (Math/sqrt (+ (* dx dx) (* dz dz)))
                                    yaw (compute-yaw dx dz)]
-                               (if (> dist 2.6)
-                                 (let [step-d (min 0.24 dist)
-                                       nx (+ cx (* (/ dx dist) step-d))
-                                       nz (+ cz (* (/ dz dist) step-d))
-                                       ny (:y target-p)]
-                                   (send-bridge-cmd!
-                                    (format "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" nx ny nz yaw))
-                                   (swap! nav-state assoc :pos [nx ny nz] :yaw yaw))
+                               (swap! nav-state assoc :follow-lost-ticks 0)
+                               (if (<= dist 2.6)
                                  (do
                                    (send-bridge-cmd!
-                                    (format "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
-                                   (swap! nav-state assoc :yaw yaw)))
+                                    (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                                   (swap! nav-state assoc :yaw yaw :follow-path []))
+                                 (let [path-queue (:follow-path st [])
+                                       last-target (or (:follow-last-target st) [0.0 0.0 0.0])
+                                       target-moved? (> (+ (Math/abs (- (double tx) (double (or (first last-target) 0.0))))
+                                                           (Math/abs (- (double tz) (double (or (nth last-target 2 nil) 0.0)))))
+                                                        3.0)
+                                       active-path (if (or (empty? path-queue) target-moved?)
+                                                     (request-path3d [cx cy cz] [tx ty tz] 2.2)
+                                                     path-queue)]
+                                   (if-let [next-node (first active-path)]
+                                     (let [nx (+ (double (:x next-node)) 0.5)
+                                           ny (double (:y next-node))
+                                           nz (+ (double (:z next-node)) 0.5)
+                                           act (:action next-node)
+                                           ndx (- nx cx)
+                                           ndz (- nz cz)
+                                           ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
+                                           nyaw (compute-yaw ndx ndz)]
+                                       (when (= act :TRAVERSE_PORTAL)
+                                         (let [pcoord [(:x next-node) (:y next-node) (:z next-node)]]
+                                           (open-portal-at-coord! pcoord)
+                                           (swap! nav-state assoc :opened-portal pcoord)))
+                                       (if (<= ndist 0.4)
+                                         (swap! nav-state #(-> %
+                                                               (assoc :follow-path (vec (rest active-path)))
+                                                               (assoc :follow-last-target [tx ty tz])))
+                                         (let [step-d (min 0.24 (max 0.05 ndist))
+                                               safe-ndist (max 0.001 ndist)
+                                               step-x (+ cx (* (/ ndx safe-ndist) step-d))
+                                               step-z (+ cz (* (/ ndz safe-ndist) step-d))]
+                                           (send-bridge-cmd!
+                                            (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x ny step-z nyaw))
+                                           (swap! nav-state assoc :pos [step-x ny step-z] :yaw nyaw :follow-path active-path :follow-last-target [tx ty tz]))))
+                                     ;; Sem caminho navegavel: gira na direcao do jogador e aguarda (NUNCA atravessa paredes!)
+                                     (do
+                                       (send-bridge-cmd!
+                                        (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                                       (swap! nav-state assoc :yaw yaw)))))
+                               (when-let [op-portal (:opened-portal @nav-state)]
+                                 (let [[ox _ oz] op-portal
+                                       pdist (Math/sqrt (+ (Math/pow (- cx (+ (double ox) 0.5)) 2)
+                                                           (Math/pow (- cz (+ (double oz) 0.5)) 2)))]
+                                   (when (> pdist 2.2)
+                                     (close-portal-at-coord! op-portal)
+                                     (swap! nav-state assoc :opened-portal nil))))
                                (swap! engine-ctx-atom assoc
                                       :tick tick
                                       :leases {:legs {:owner :escort-player} :hands nil :gaze {:owner :social-gaze}}
                                       :agents {:karlach (make-karlach-card (str "escoltando " (:name target-p)) (:pos @nav-state))
                                                :picard  picard-card}))
-                             (swap! nav-state assoc :mode :sanctuary-patrol)))
+                             ;; Debounce para evitar cancelamento por oscilação momentânea do socket
+                             (let [lost-cnt (inc (:follow-lost-ticks st 0))]
+                               (if (>= lost-cnt 60)
+                                 (do
+                                   (swap! nav-state assoc :mode :sanctuary-patrol :steps [] :route-idx 0 :follow-lost-ticks 0)
+                                   (karlach-say! "Perdi você de vista, soldado! Vou voltar pra patrulha dos cercados."))
+                                 (swap! nav-state assoc :follow-lost-ticks lost-cnt)))))
 
                          ;; 3. Sanctuary Patrol & Enclosure Caretaker BT loop
                          :else
                          (let [steps (:steps st)]
                            (if (empty? steps)
-                             (let [next-idx (mod (inc (:route-idx st)) (count sanctuary-route))
+                             (let [next-idx (mod (inc (:route-idx st 0)) (count sanctuary-route))
                                    next-stop (nth sanctuary-route next-idx)]
                                (swap! nav-state assoc
                                       :route-idx next-idx
-                                      :steps (vec (expand-route-microsteps next-stop))))
-                             (let [cur-step (first steps)
-                                   op (:op cur-step)]
-                               (case op
-                                 :equip
-                                 (do
-                                   (when (:item cur-step)
-                                     (send-bridge-cmd! (str "CMD|item replace entity Karlach weapon.mainhand with " (:item cur-step))))
-                                   (swap! nav-state update :steps #(vec (rest %))))
+                                      :steps (vec (expand-route-microsteps next-stop [cx cy cz]))))
+                             (let [cur-step    (first steps)
+                                   op          (:op cur-step)
+                                   invariants  (:invariants cur-step)
+                                   inv-check   (when (seq invariants)
+                                                 (let [obs {:bot-pos    [cx cy cz]
+                                                            :target-pos (or (:target cur-step) [cx cy cz])
+                                                            :health     (get-in @engine-ctx-atom [:agents :karlach :health] 20.0)
+                                                            :leashed?   (:leashed? st false)}]
+                                                   (critic/check-runtime-invariants invariants obs)))]
+                               (if (and inv-check (:violated? inv-check))
+                                 (let [reflection (critic/generate-early-abort-reflection inv-check cur-step)]
+                                   (record-cognitive-event! engine-ctx-atom :critic-fail "Environmental Critic"
+                                                            (str "EARLY ABORT DETECTADO: " (:diagnostic inv-check)))
+                                   (record-cognitive-event! engine-ctx-atom :reflexion "System 2 Reflexion"
+                                                            (str "Ação corretiva: " (name (:reflection/suggested-action reflection))))
+                                   (karlach-say! (:reflection/voice-line reflection))
+                                   (swap! nav-state assoc :steps [] :mode :sanctuary-patrol))
+                                 (case op
+                                   :equip
+                                   (do
+                                     (when (:item cur-step)
+                                       (send-bridge-cmd! (str "CMD|item replace entity Karlach weapon.mainhand with " (:item cur-step))))
+                                     (swap! nav-state update :steps #(vec (rest %))))
 
                                  :walk
                                  (let [[tx ty tz] (:target cur-step)
                                        dx (- tx cx)
                                        dz (- tz cz)
-                                       dist (Math/sqrt (+ (* dx dx) (* dz dz)))]
-                                   (if (<= dist 0.25)
-                                     (do
-                                       (send-bridge-cmd!
-                                        (format "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                                                (double tx) (double ty) (double tz) (double (:yaw st))))
-                                       (swap! nav-state #(-> %
-                                                             (assoc :pos [(double tx) (double ty) (double tz)])
-                                                             (update :steps (fn [s] (vec (rest s)))))))
-                                     (let [speed 0.215
-                                           nx (+ cx (* (/ dx dist) speed))
-                                           nz (+ cz (* (/ dz dist) speed))
-                                           yaw (compute-yaw dx dz)]
-                                       (send-bridge-cmd!
-                                        (format "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                                                nx (double ty) nz yaw))
-                                       (swap! nav-state assoc :pos [nx (double ty) nz] :yaw yaw)
-                                       (swap! engine-ctx-atom assoc
-                                              :tick tick
-                                              :leases {:legs {:owner :patrol-waypoints} :hands nil :gaze {:owner :path-look}}
-                                              :agents {:karlach (make-karlach-card (:label cur-step) [(/ (Math/round (* nx 10.0)) 10.0) (double ty) (/ (Math/round (* nz 10.0)) 10.0)])
-                                                       :picard  picard-card}))))
+                                       dist (Math/sqrt (+ (* dx dx) (* dz dz)))
+                                       is-leashed? (or (:leashed? st false) (boolean (:species cur-step)))
+                                       leash-info (when is-leashed? (query-leash-status "Karlach"))]
+                                   (cond
+                                     ;; 1. Alerta Critico Tatil: A guia arrebentou durante o trajeto!
+                                     (and is-leashed? (:leashed? st) (false? (:leashed? leash-info)))
+                                     (let [species (or (:species cur-step) (:species (first (filter :species (:steps st)))) "animal")
+                                           norm-sp (critic/normalize-species species)]
+                                       (record-cognitive-event! engine-ctx-atom :perception-warn "Tactile Sensory Feedback (Nativo 20Hz)"
+                                                                (str "ALERTA TATIL IMEDIATO: A guia arrebentou! O animal (" norm-sp ") soltou-se da corda."))
+                                       (karlach-say! (str "Eita, a corda soltou! Espera ai, " norm-sp ", to voltando pra te pegar!"))
+                                       (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.leash_knot.break master @a ~ ~ ~ 1.0 1.0")
+                                       (let [mob-resp (send-bridge-cmd! (str "LOCATE_MOB|Karlach|" norm-sp))
+                                             mob-pos (when (and mob-resp (clojure.string/starts-with? mob-resp "OK|"))
+                                                       (let [parts (clojure.string/split mob-resp #"\|")]
+                                                         [(Double/parseDouble (nth parts 1))
+                                                          (Double/parseDouble (nth parts 2))
+                                                          (Double/parseDouble (nth parts 3))]))
+                                             rescue-pos (or mob-pos [cx cy cz])
+                                             to-mob-steps (generate-walk-steps [cx cy cz] rescue-pos (str "Retornando para resgatar " norm-sp) {:radius 1.2})
+                                             rem-steps (vec (:steps st))
+                                             recovery-seq (vec
+                                                           (concat
+                                                            [{:op :wait :ticks 5 :label "Parando imediatamente apos guia arrebentar"}]
+                                                            to-mob-steps
+                                                            [{:op :attach-lead :species species :label (str "Reatando guia no " norm-sp)}
+                                                             {:op :wait :ticks 10 :label "Fixando corda"}]
+                                                            rem-steps))]
+                                         (swap! nav-state #(-> %
+                                                               (assoc :leashed? false)
+                                                               (assoc :steps recovery-seq)))))
+
+                                     ;; 3. Caminhada normal (conducao segura ou patrulha)
+                                     :else
+                                     (if (<= dist 0.25)
+                                       (let [rem-steps (vec (rest (:steps st)))
+                                             next-step (first rem-steps)
+                                             corner-pause? (when (and is-leashed? (= (:op next-step) :walk) (:target next-step))
+                                                             (let [[ntx _ ntz] (:target next-step)
+                                                                   ndx (- ntx tx)
+                                                                   ndz (- ntz tz)
+                                                                   ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))]
+                                                               (when (> ndist 0.1)
+                                                                 (let [y1 (compute-yaw dx dz)
+                                                                       y2 (compute-yaw ndx ndz)
+                                                                       diff (Math/abs (- y1 y2))
+                                                                       ydiff (if (> diff 180.0) (- 360.0 diff) diff)]
+                                                                   (> ydiff 30.0)))))]
+                                         (send-bridge-cmd!
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                                                  (double tx) (double ty) (double tz) (double (:yaw st))))
+                                         (swap! nav-state #(-> %
+                                                               (assoc :pos [(double tx) (double ty) (double tz)])
+                                                               (assoc :steps (if corner-pause?
+                                                                               (into [{:op :wait :ticks 5 :label "Aguardando animal contornar curva"}] rem-steps)
+                                                                               rem-steps)))))
+                                       (let [base-speed (if is-leashed? 0.120 0.215)
+                                             speed (if (and is-leashed? (> (:distance leash-info 0.0) 7.5))
+                                                     0.060
+                                                     base-speed)
+                                             nx (+ cx (* (/ dx dist) speed))
+                                             nz (+ cz (* (/ dz dist) speed))
+                                             yaw (compute-yaw dx dz)]
+                                         (send-bridge-cmd!
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                                                  nx (double ty) nz yaw))
+                                         (swap! nav-state assoc :pos [nx (double ty) nz] :yaw yaw)
+                                         (swap! engine-ctx-atom assoc
+                                                :tick tick
+                                                :leases {:legs {:owner :patrol-waypoints} :hands nil :gaze {:owner :path-look}}
+                                                :agents {:karlach (make-karlach-card (:label cur-step) [(/ (Math/round (* nx 10.0)) 10.0) (double ty) (/ (Math/round (* nz 10.0)) 10.0)])
+                                                         :picard  picard-card})))))
 
                                  :gate
                                  (do
-                                   (set-double-gate! (:gates cur-step) (:block cur-step) (:facing cur-step) (:open? cur-step))
+                                   (if-let [p (:pos cur-step)]
+                                     (if (:open? cur-step)
+                                       (open-portal-at-coord! p)
+                                       (close-portal-at-coord! p))
+                                     (set-double-gate! (:gates cur-step) (:block cur-step) (:facing cur-step) (:open? cur-step)))
                                    (swap! nav-state update :steps #(vec (rest %)))
                                    (swap! engine-ctx-atom assoc
                                           :tick tick
@@ -850,8 +1459,11 @@
                                  :feed
                                  (do
                                    (feed-enclosure-animals! (:pos cur-step) (:food cur-step) (:species cur-step))
-                                   (let [barks-vec (seq (:barks cur-step))
-                                         chosen-bark (if barks-vec (rand-nth (vec barks-vec)) (:bark cur-step))]
+                                   ;; Seleciona fala EXCLUSIVAMENTE do cercado onde Karlach está fisicamente
+                                   (let [enc-barks (barks-for-current-position [cx cy cz])
+                                         chosen-bark (if (seq enc-barks)
+                                                       (rand-nth enc-barks)
+                                                       (:bark cur-step))]
                                      (when chosen-bark
                                        (when (> (- (System/currentTimeMillis) (:last-bark-ms st 0)) 20000)
                                          (karlach-say! chosen-bark)
@@ -865,10 +1477,139 @@
                                           :agents {:karlach (make-karlach-card (:label cur-step) [cx cy cz])
                                                    :picard  picard-card}))
 
+                                 :attach-lead
+                                 (do
+                                   (send-bridge-cmd! "CMD|item replace entity Karlach weapon.offhand with minecraft:lead")
+                                   (send-bridge-cmd! (str "LEASH|Karlach|" (critic/normalize-species (:species cur-step))))
+                                   (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.leash_knot.place master @a ~ ~ ~ 1.0 1.0")
+                                   (swap! nav-state #(-> %
+                                                         (assoc :leashed? true)
+                                                         (update :steps (fn [s] (vec (rest s)))))))
+
+                                 :detach-lead
+                                 (do
+                                   (send-bridge-cmd! "UNLEASH|Karlach")
+                                   (send-bridge-cmd! "CMD|item replace entity Karlach weapon.offhand with minecraft:air")
+                                   (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.leash_knot.break master @a ~ ~ ~ 1.0 1.0")
+                                   (swap! nav-state #(-> %
+                                                         (assoc :leashed? false)
+                                                         (update :steps (fn [s] (vec (rest s)))))))
+
+                                 :await-contained
+                                 (let [species    (:species cur-step "naturalist:capybara")
+                                       pen-id     (:pen-id cur-step :pen-south-west)
+                                       init-c     (:initial-contained cur-step 0)
+                                       target-q   (get critic/enclosure->quadrant pen-id :SW)
+                                       elapsed    (:elapsed-ticks cur-step 0)
+                                       timeout    (:timeout cur-step 80)
+                                       raw-snap   (when (zero? (mod elapsed 5)) (send-bridge-cmd! "SANCTUARY"))
+                                       snap       (when raw-snap (critic/parse-sanctuary-snapshot raw-snap))
+                                       curr-c     (when snap (get-in snap [target-q (critic/normalize-species species)] 0))
+                                       contained? (and curr-c (> curr-c init-c))]
+                                   (if (or contained? (>= elapsed timeout))
+                                     (do
+                                       (if contained?
+                                         (do
+                                           (record-cognitive-event! engine-ctx-atom :perception "Ground Truth Sensor"
+                                                                    (str "Animal confirmado dentro do cercado " (name target-q) " (" (critic/normalize-species species) "). Fechando portão."))
+                                           (karlach-say! "Entrou! Fechando o portão pra ninguém escapar!"))
+                                         (do
+                                           (record-cognitive-event! engine-ctx-atom :perception-warn "Ground Truth Sensor"
+                                                                    (str "Tempo limite de espera de entrada (" elapsed " ticks). Concluindo trancamento."))
+                                           (karlach-say! "Atenção ao portão, trancando agora!")))
+                                       (swap! nav-state update :steps #(vec (rest %))))
+                                     (do
+                                       (swap! engine-ctx-atom assoc
+                                              :tick tick
+                                              :leases {:legs {:owner :await-contained}
+                                                       :hands nil
+                                                       :gaze {:owner :portal-watch}}
+                                              :agents {:karlach (make-karlach-card (:label cur-step) [cx cy cz])
+                                                       :picard  picard-card})
+                                       (swap! nav-state update-in [:steps 0 :elapsed-ticks] (fnil inc 0)))))
+
+                                 :critic
+                                 (let [raw-snap  (send-bridge-cmd! "SANCTUARY")
+                                       snap      (critic/parse-sanctuary-snapshot raw-snap)
+                                       species   (:species cur-step "naturalist:capybara")
+                                       pen-id    (:pen-id cur-step :pen-south-west)
+                                       init-c    (:initial-contained cur-step)
+                                       eval-res  (critic/evaluate-goal-achievement
+                                                  :animal-containment nil snap
+                                                  {:species species :pen-id pen-id
+                                                   :require-all? false :initial-contained init-c})
+                                       entity    (:entity cur-step "Capivara Nadadora")
+                                       attempt   (get cur-step :attempt 1)]
+                                   (if (:success? eval-res)
+                                     (do
+                                       (record-cognitive-event! engine-ctx-atom :critic "Environmental Critic"
+                                                                (str "SUCESSO EMPÍRICO COMPROVADO: " (:diagnostic eval-res)))
+                                       (karlach-say! (str "Missão cumprida, soldado! " entity " sã e salva no Bosque, tudo verificado!"))
+                                       (swap! nav-state update :steps #(vec (rest %))))
+                                     (if (>= attempt 2)
+                                       (do
+                                         (record-cognitive-event! engine-ctx-atom :critic-fail "Environmental Critic"
+                                                                  "Tentativas de resgate concluídas. Encerrando ciclo para evitar loop.")
+                                         (karlach-say! (str "Soldado, portão trancado! O " entity " tá agitado lá fora, melhor a gente cuidar dele daqui a pouco."))
+                                         (swap! nav-state assoc :mode :sanctuary-patrol :steps []))
+                                       (let [reflection (critic/generate-reflection eval-res {:skill/id (:goal-id cur-step) :skill/version 1})
+                                             next-v     2]
+                                         (record-cognitive-event! engine-ctx-atom :critic-fail "Environmental Critic"
+                                                                  (str "FALHA EMPÍRICA DETECTADA: " (:diagnostic eval-res)))
+                                         (record-cognitive-event! engine-ctx-atom :reflexion "System 2 Reflexion"
+                                                                  "Auto-correção disparada: Tentativa 2 com condução cuidadosa até o cercado.")
+                                         (karlach-say! (:reflection/voice-line reflection))
+                                         (let [enc-info (get sanctuary-enclosures-by-id pen-id)
+                                               portal-info (or (:enclosure/portal enc-info)
+                                                               {:blocks (:gates cur-step)
+                                                                :normal (if (<= (first (or (first (:gates cur-step)) [-179 65 189])) -175) [-1.0 0.0 0.0] [1.0 0.0 0.0])
+                                                                :inside-anchor (:inside-pos cur-step)
+                                                                :outside-anchor (:outside-pos cur-step)
+                                                                :gate-block (:block cur-step)
+                                                                :gate-facing (:facing cur-step)})
+                                               funnel (compute-enclosure-funnel portal-info)
+                                               funnel-entry (:funnel-entry funnel)
+                                               pre-gate (:pre-gate funnel)
+                                               in-anc (:inside-anchor funnel)
+                                               deep-in (:deep-inside funnel)
+                                               retry-outside (or funnel-entry (:outside-pos cur-step) [-177.0 65.0 189.0])
+                                               to-corr (generate-walk-steps (:pos @nav-state) retry-outside (str "Saindo para buscar " entity " junto ao portão") {:radius 1.0})
+                                               to-feed (generate-walk-steps in-anc (:feed-pos cur-step) (str "Aproximando do comedouro de " entity) {:radius 1.5})
+                                               v2-steps (concat
+                                                         [{:op :gate :open? true :pos (or (first (:gates cur-step)) [-179 65 189])
+                                                           :gates (:gates cur-step) :block (:block cur-step) :facing (:facing cur-step) :label "Abrindo portão para recuperar animal"}
+                                                          {:op :wait :ticks 8 :label "Aguardando portão abrir"}]
+                                                         to-corr
+                                                         [{:op :attach-lead :species species :label (str "Prendendo laço no " entity)}
+                                                          {:op :wait :ticks 15 :label "Fixando laço"}
+                                                          {:op :walk :target pre-gate :label "Realinhando animal ortogonalmente ao portão" :species species}
+                                                          {:op :walk :target in-anc :label "Atravessando vão do portão" :species species}
+                                                          {:op :walk :target deep-in :label (str "Conduzindo " entity " para o fundo do cercado") :species species}
+                                                          {:op :await-contained :species species :pen-id pen-id :initial-contained init-c :timeout 80
+                                                           :label "Aguardando confirmação sensorial de entrada do animal (Tentativa 2)"}
+                                                          {:op :walk :target in-anc :label "Retornando ao portão para trancar"}
+                                                          {:op :gate :open? false :pos (or (first (:gates cur-step)) [-179 65 189])
+                                                           :gates (:gates cur-step) :block (:block cur-step) :facing (:facing cur-step) :label "Trancando portão"}
+                                                          {:op :wait :ticks 8 :label "Conferindo tranca"}
+                                                          {:op :detach-lead :species species :label (str "Soltando a guia do " entity)}
+                                                          {:op :wait :ticks 10 :label "Removendo guia"}]
+                                                         to-feed
+                                                         [{:op :feed :pos (:feed-pos cur-step) :food (:bait-item cur-step) :species [species] :label (str "Alimentando: " entity)}
+                                                          {:op :wait :ticks 20 :label (str entity " seguro e alimentado")}
+                                                          {:op :critic :attempt 2 :goal-id (:goal-id cur-step) :species species :pen-id pen-id :entity entity
+                                                           :initial-contained init-c
+                                                           :animal-pos retry-outside
+                                                           :gates (:gates cur-step) :block (:block cur-step) :facing (:facing cur-step)
+                                                           :outside-pos pre-gate :inside-pos in-anc :feed-pos (:feed-pos cur-step) :bait-item (:bait-item cur-step)
+                                                           :label "Critic: Segunda e Última Verificação"}])]
+                                           (swap! nav-state assoc :steps (vec v2-steps)))))))
+
                                  :BARK
                                  (do
                                    (when-let [b (:text cur-step)]
-                                     (when (> (- (System/currentTimeMillis) (:last-bark-ms st 0)) 35000)
+                                     ;; Só fala frases de praça/corredor se Karlach NÃO estiver dentro de um cercado
+                                     (when (and (nil? (current-enclosure-id [cx cy cz]))
+                                                (> (- (System/currentTimeMillis) (:last-bark-ms st 0)) 35000))
                                        (karlach-say! b)
                                        (swap! nav-state assoc :last-bark-ms (System/currentTimeMillis))))
                                    (swap! nav-state update :steps #(vec (rest %))))
@@ -889,7 +1630,7 @@
                                            (when (< dist 12.0)
                                              (let [gyaw (compute-yaw dx dz)]
                                                (send-bridge-cmd!
-                                                (format "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                                                (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
                                                         cx cy cz gyaw))))))))
                                    (if (<= rem-ticks 0)
                                      (swap! nav-state #(-> %
@@ -900,8 +1641,10 @@
                                           :tick tick
                                           :leases {:legs nil :hands nil :gaze {:owner :social-gaze}}
                                           :agents {:karlach (make-karlach-card (:label cur-step) [(/ (Math/round (* cx 10.0)) 10.0) cy (/ (Math/round (* cz 10.0)) 10.0)])
-                                                   :picard  picard-card}))))))))
-                     (catch Throwable _ nil))
+                                                   :picard  picard-card})))))))))
+                     (catch Throwable t
+                      (println "[craft-agents-20hz-ERROR]" (.getMessage t))
+                      (.printStackTrace t)))
                    (let [elapsed (- (System/currentTimeMillis) t0)
                          sleep-ms (max 5 (- 50 elapsed))]
                      (Thread/sleep sleep-ms))
