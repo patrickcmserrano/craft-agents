@@ -998,8 +998,8 @@ public final class SyntheticPlayerFactory {
                     if (getEntById != null) {
                         Object target = getEntById.invoke(world, targetId);
                         if (target != null) {
-                            float cd = SyntheticCombat.getAttackCooldown(player);
-                            SyntheticCombat.runAttackOnServer(server, player, target);
+                            float cd = SyntheticTacticalCombat.getAttackCooldown(player);
+                            SyntheticTacticalCombat.runAttackOnServer(server, player, target);
                             return String.format(java.util.Locale.ROOT, "OK|%d|%.2f", targetId, cd);
                         }
                     }
