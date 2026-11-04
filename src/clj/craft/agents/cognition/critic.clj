@@ -63,12 +63,18 @@
             matches)))
 
 (def species->pt
-  {"Capybara" {:singular "capivara" :plural "capivaras" :article "todas as capivaras"}
-   "Deer"     {:singular "cervo"    :plural "cervos"    :article "todos os cervos"}
-   "Elephant" {:singular "elefante" :plural "elefantes" :article "todos os elefantes"}
-   "Giraffe"  {:singular "girafa"   :plural "girafas"   :article "todas as girafas"}
-   "Zebra"    {:singular "zebra"    :plural "zebras"    :article "todas as zebras"}
-   "Mammoth"  {:singular "mamute"   :plural "mamutes"   :article "todos os mamutes"}})
+  {"Capybara"  {:singular "capivara"  :plural "capivaras"  :article "todas as capivaras"}
+   "Deer"      {:singular "cervo"     :plural "cervos"     :article "todos os cervos"}
+   "Elephant"  {:singular "elefante"  :plural "elefantes"  :article "todos os elefantes"}
+   "Giraffe"   {:singular "girafa"    :plural "girafas"    :article "todas as girafas"}
+   "Zebra"     {:singular "zebra"     :plural "zebras"     :article "todas as zebras"}
+   "Mammoth"   {:singular "mamute"    :plural "mamutes"    :article "todos os mamutes"}
+   "Fox"       {:singular "raposa"    :plural "raposas"    :article "todas as raposas"}
+   "Armadillo" {:singular "tatu"      :plural "tatus"      :article "todos os tatus"}
+   "Duck"      {:singular "pato"      :plural "patos"      :article "todos os patos"}
+   "Tortoise"  {:singular "tartaruga" :plural "tartarugas" :article "todas as tartarugas"}
+   "Hedgehog"  {:singular "ouriço"    :plural "ouriços"    :article "todos os ouriços"}
+   "Panda"     {:singular "panda"     :plural "pandas"     :article "todos os pandas"}})
 
 (defn evaluate-animal-containment
   "Avalia o estado empírico de contenção do animal após a tentativa de resgate."
@@ -80,6 +86,7 @@
          min-contained      (get opts :min-contained 1)
          norm-species       (normalize-species species-id)
          target-quad        (get enclosure->quadrant target-enclosure-id :SW)
+         enc-title          (get quadrant->name target-quad (str "Cercado (" (name target-quad) ")"))
          all-quads          #{:NE :NW :SE :SW :OUT}
          other-quads        (disj all-quads target-quad)
          escaped-list       (reduce (fn [acc q]
@@ -105,10 +112,10 @@
         :diagnostic        (if (zero? total-escaped)
                              (str "Sucesso comprovado no mundo real: "
                                   (get-in species->pt [norm-species :article] (str "todos os " (str/lower-case norm-species) "s"))
-                                  " (" target-count ") estão contidos no Bosque (" (name target-quad) ").")
+                                  " (" target-count ") estão contidos no " enc-title ".")
                              (str "Sucesso comprovado no mundo real: "
                                   (get-in species->pt [norm-species :singular] (str/lower-case norm-species))
-                                  " resgatado e seguro no Bosque (" (name target-quad) ", total contidos: " target-count ")."))}
+                                  " resgatado e seguro no " enc-title " (total contidos: " target-count ")."))}
        {:success?           false
         :verdict            :goal-failed
         :escaped-count      total-escaped
@@ -119,7 +126,7 @@
                                    (get-in species->pt [norm-species :plural] (str (str/lower-case norm-species) "s"))
                                    (get-in species->pt [norm-species :singular] (str/lower-case norm-species)))
                                  (if (> total-escaped 1) " continuam" " continua")
-                                 " fora do Bosque (" (str/join ", " (map #(str (:count %) " em " (name (:quadrant %))) escaped-list)) ").")}))))
+                                 " fora do " enc-title " (" (str/join ", " (map #(str (:count %) " em " (name (:quadrant %))) escaped-list)) ").")}))))
 
 (defn generate-reflection
   "Gera o relatório de Reflexion para que o System 2 sintetize a próxima iteração da skill."

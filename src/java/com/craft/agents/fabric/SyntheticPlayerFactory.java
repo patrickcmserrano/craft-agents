@@ -505,6 +505,7 @@ public final class SyntheticPlayerFactory {
                         double.class, double.class, double.class, double.class, double.class, double.class)
                         .newInstance(-240.0, 58.0, 135.0, -120.0, 85.0, 230.0);
                 Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
+                Class<?> mobClass = Class.forName("net.minecraft.class_1308", true, cl);
                 List<?> ents = (List<?>) overworld.getClass()
                         .getMethod("method_8335", entClass, boxClass)
                         .invoke(overworld, null, box);
@@ -529,6 +530,9 @@ public final class SyntheticPlayerFactory {
                     else if (ex >= -215.0 && ex <= -178.5 && ez >= 164.0 && ez <= 178.0) pen = "NW";
                     else pen = "OUT";
                     String key = pen + ":" + sName;
+                    if (mobClass.isInstance(e)) {
+                        counts.put(key, counts.getOrDefault(key, 0) + 1);
+                    }
 
                     String customName = "";
                     try {

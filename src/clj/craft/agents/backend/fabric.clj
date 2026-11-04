@@ -402,9 +402,7 @@
   (let [bpos [(int x) (int y) (int z)]]
     (if-let [portal-info (get sanctuary-portals-by-pos bpos)]
       (set-double-gate! (:gates portal-info) (:block portal-info) (:facing portal-info) true)
-      (doseq [py [(int y) (inc (int y))]]
-        (send-bridge-cmd! (uformat "CMD|setblock %d %d %d minecraft:spruce_fence_gate[facing=east,open=true]"
-                                  (int x) py (int z)))))))
+      (send-bridge-cmd! (uformat "TOGGLE_PORTAL|%d|%d|%d|true" (int x) (int y) (int z))))))
 
 (defn close-portal-at-coord!
   "Fecha o portão correspondente à coordenada [x y z] garantindo contenção dos animais."
@@ -412,9 +410,7 @@
   (let [bpos [(int x) (int y) (int z)]]
     (if-let [portal-info (get sanctuary-portals-by-pos bpos)]
       (set-double-gate! (:gates portal-info) (:block portal-info) (:facing portal-info) false)
-      (doseq [py [(int y) (inc (int y))]]
-        (send-bridge-cmd! (uformat "CMD|setblock %d %d %d minecraft:spruce_fence_gate[facing=east,open=false]"
-                                  (int x) py (int z)))))))
+      (send-bridge-cmd! (uformat "TOGGLE_PORTAL|%d|%d|%d|false" (int x) (int y) (int z))))))
 
 (defn build-picard-stations []
   (let [picard (edn/read-string (slurp (io/file "agents/picard.edn")))]
@@ -543,10 +539,11 @@
                            invariants (assoc :invariants invariants)
                            species (assoc :species species))
                          {:op :wait :ticks 25 :label "Aguardando física de colisão do animal"}
+                         {:op :detach-lead :species species :label "Soltando o laço dentro do cercado"}
+                         {:op :wait :ticks 10 :label "Removendo guia"}
                          {:op :walk :target next-pt :label "Retornando ao portão para trancar"}
                          {:op :gate :open? false :pos portal-pos :label "Trancando portão"}
-                         {:op :wait :ticks 8 :label "Conferindo tranca"}
-                         {:op :detach-lead :species species :label "Soltando o laço dentro do cercado"}]
+                         {:op :wait :ticks 8 :label "Conferindo tranca"}]
                         ;; Sem animal: abre, cruza vão, avança e fecha
                         [{:op :gate :open? true :pos portal-pos :label "Abrindo portão"}
                          {:op :wait :ticks 8 :label "Aguardando portão abrir"}
@@ -730,7 +727,8 @@
     (when engine-ctx-atom
       (swap! engine-ctx-atom update-in [:agents :karlach :skills] (fnil #(vec (distinct (conj % skill-id-str))) []))
       (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] (str id " (Malli OK)"))
-      (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Conduzindo " entity " ao Bosque")))
+      (let [enc-title (or (:enclosure/name (get sanctuary-enclosures-by-id (or pen-id :pen-south-west))) "Cercado")]
+        (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Conduzindo " entity " ao " enc-title))))
 
     ;; 4. Execução imediata da rota motora de resgate com targeting real e A* 3D
     (let [norm-sp (critic/normalize-species (or species entity))
@@ -795,11 +793,11 @@
                        ;; Verificação sensorial contínua: só fecha quando o animal estiver fisicamente dentro do cercado!
                        {:op :await-contained :species species :pen-id pen-id :initial-contained init-count :timeout 80
                         :label "Aguardando confirmação sensorial de entrada do animal"}
+                       {:op :detach-lead :species species :label (str "Soltando a guia do " entity)}
+                       {:op :wait :ticks 10 :label "Removendo guia"}
                        {:op :walk :target in-anc :label "Retornando ao portão para trancar"}
                        {:op :gate :open? false :pos gate-pos :gates gate-coords :block gate-blk :facing gate-fac :label "Trancando portão"}
-                       {:op :wait :ticks 8 :label "Conferindo tranca"}
-                       {:op :detach-lead :species species :label (str "Soltando a guia do " entity)}
-                       {:op :wait :ticks 10 :label "Removendo guia"}]
+                       {:op :wait :ticks 8 :label "Conferindo tranca"}]
                       to-feed-steps
                       [{:op :feed :pos feed-pos :food bait-item :species [species] :label (str "Alimentando: " entity)}
                        {:op :wait :ticks 20 :label (str entity " seguro e alimentado")}
@@ -1575,7 +1573,10 @@
                                      (do
                                        (record-cognitive-event! engine-ctx-atom :critic "Environmental Critic"
                                                                 (str "SUCESSO EMPÍRICO COMPROVADO: " (:diagnostic eval-res)))
-                                       (karlach-say! (str "Missão cumprida, soldado! " entity " sã e salva no Bosque, tudo verificado!"))
+                                       (let [enc-title (or (:enclosure/name (get sanctuary-enclosures-by-id pen-id))
+                                                           (get critic/quadrant->name (get critic/enclosure->quadrant pen-id :SW))
+                                                           "cercado")]
+                                         (karlach-say! (str "Missão cumprida, soldado! " entity " sã e salva no " enc-title ", tudo verificado!")))
                                        (swap! nav-state update :steps #(vec (rest %))))
                                      (if (>= attempt 2)
                                        (do
@@ -1618,12 +1619,12 @@
                                                           {:op :walk :target deep-in :label (str "Conduzindo " entity " para o fundo do cercado") :species species}
                                                           {:op :await-contained :species species :pen-id pen-id :initial-contained init-c :timeout 80
                                                            :label "Aguardando confirmação sensorial de entrada do animal (Tentativa 2)"}
+                                                          {:op :detach-lead :species species :label (str "Soltando a guia do " entity)}
+                                                          {:op :wait :ticks 10 :label "Removendo guia"}
                                                           {:op :walk :target in-anc :label "Retornando ao portão para trancar"}
                                                           {:op :gate :open? false :pos (or (first (:gates cur-step)) [-179 65 189])
                                                            :gates (:gates cur-step) :block (:block cur-step) :facing (:facing cur-step) :label "Trancando portão"}
-                                                          {:op :wait :ticks 8 :label "Conferindo tranca"}
-                                                          {:op :detach-lead :species species :label (str "Soltando a guia do " entity)}
-                                                          {:op :wait :ticks 10 :label "Removendo guia"}]
+                                                          {:op :wait :ticks 8 :label "Conferindo tranca"}]
                                                          to-feed
                                                          [{:op :feed :pos (:feed-pos cur-step) :food (:bait-item cur-step) :species [species] :label (str "Alimentando: " entity)}
                                                           {:op :wait :ticks 20 :label (str entity " seguro e alimentado")}
