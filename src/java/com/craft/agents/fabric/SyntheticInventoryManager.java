@@ -86,6 +86,17 @@ public final class SyntheticInventoryManager {
                 } catch (Throwable ignored) {}
                 if (isRemoved) continue;
 
+                // Verifica se a entidade tem pickup delay ativo (ex: acabou de ser dropada por Karlach ou player)
+                boolean cannotPickup = false;
+                try {
+                    cannotPickup = (Boolean) e.getClass().getMethod("method_6975").invoke(e); // cannotPickup()
+                } catch (Throwable ignored) {
+                    try {
+                        cannotPickup = (Boolean) e.getClass().getMethod("cannotPickup").invoke(e);
+                    } catch (Throwable ignored2) {}
+                }
+                if (cannotPickup) continue;
+
                 Object stack = null;
                 try {
                     stack = e.getClass().getMethod("method_6983").invoke(e); // getStack
@@ -244,12 +255,19 @@ public final class SyntheticInventoryManager {
 
             Method getStackMethod = null;
             Method setStackMethod = null;
+            Class<?> itemStackClass = Class.forName("net.minecraft.class_1799", true, cl);
+            Object emptyStack = itemStackClass.getField("field_8037").get(null); // ItemStack.EMPTY
+
             for (Method m : inventory.getClass().getMethods()) {
                 if (("method_5438".equals(m.getName()) || "getStack".equals(m.getName())) && m.getParameterCount() == 1) {
                     getStackMethod = m;
                 }
-                if (("method_5441".equals(m.getName()) || "setStack".equals(m.getName())) && m.getParameterCount() == 2) {
+                if (m.getParameterCount() == 2
+                        && m.getParameterTypes()[0] == int.class
+                        && m.getParameterTypes()[1] == itemStackClass
+                        && m.getReturnType() == void.class) {
                     setStackMethod = m;
+                    System.out.println("[FOUND_SET_STACK] " + m.getName());
                 }
             }
 
@@ -257,13 +275,10 @@ public final class SyntheticInventoryManager {
             Object itemReg = regClass.getField("field_41178").get(null);
             Method getIdMethod = itemReg.getClass().getMethod("method_10221", Object.class);
 
-            Class<?> itemStackClass = Class.forName("net.minecraft.class_1799", true, cl);
-            Object emptyStack = itemStackClass.getField("field_8037").get(null); // ItemStack.EMPTY
-
             Method dropItemMethod = null;
             for (Method m : playerEntity.getClass().getMethods()) {
                 if (("method_7328".equals(m.getName()) || "dropItem".equals(m.getName()))
-                        && m.getParameterCount() == 2
+                        && m.getParameterCount() >= 2
                         && m.getParameterTypes()[0] == itemStackClass) {
                     dropItemMethod = m;
                     break;
@@ -299,15 +314,45 @@ public final class SyntheticInventoryManager {
                     droppedCount += count;
                     droppedSummary.put(itemId, droppedSummary.getOrDefault(itemId, 0) + count);
 
-                    if (dropItemMethod != null) {
+                    // Cria cópia do ItemStack antes de esvaziar o slot
+                    Object stackCopy = null;
+                    try {
+                        stackCopy = stack.getClass().getMethod("method_7972").invoke(stack); // copy()
+                    } catch (Throwable ignored) {
                         try {
-                            dropItemMethod.invoke(playerEntity, stack, false);
-                        } catch (Throwable ignored) {}
+                            stackCopy = stack.getClass().getMethod("copy").invoke(stack);
+                        } catch (Throwable ignored2) {
+                            stackCopy = stack;
+                        }
+                    }
+
+                    if (dropItemMethod != null && stackCopy != null) {
+                        try {
+                            Object itemEntity = null;
+                            if (dropItemMethod.getParameterCount() == 2) {
+                                itemEntity = dropItemMethod.invoke(playerEntity, stackCopy, false);
+                            } else if (dropItemMethod.getParameterCount() == 3) {
+                                itemEntity = dropItemMethod.invoke(playerEntity, stackCopy, false, false);
+                            }
+                            if (itemEntity != null) {
+                                try {
+                                    itemEntity.getClass().getMethod("method_6977", int.class).invoke(itemEntity, 60); // setPickupDelay(60 ticks = 3s)
+                                } catch (Throwable ignored) {
+                                    try {
+                                        itemEntity.getClass().getMethod("setPickupDelay", int.class).invoke(itemEntity, 60);
+                                    } catch (Throwable ignored2) {}
+                                }
+                            }
+                        } catch (Throwable t) {
+                            System.out.println("[DROP_ERROR] Erro ao dropar ItemEntity: " + t);
+                        }
                     }
                     if (setStackMethod != null) {
                         try {
                             setStackMethod.invoke(inventory, i, emptyStack);
-                        } catch (Throwable ignored) {}
+                        } catch (Throwable t) {
+                            System.out.println("[DROP_ERROR] Erro ao esvaziar slot " + i + ": " + t);
+                        }
                     }
                 }
             }

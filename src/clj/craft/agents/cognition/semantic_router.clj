@@ -223,7 +223,15 @@
               "me da os itens"
               "passa os minerios"
               "descarrega o inventario"
-              "joga o loot no chao"]}
+              "joga o loot no chao"
+              "karlach dropa seus itens"
+              "dropa seus itens"
+              "dropa os itens"
+              "dropa seus minerios"
+              "libera o loot"
+              "libera o loot mule"
+              "me passa o loot"
+              "me da o que voce pegou"]}
 
    {:id :dialogue
     :description "Diálogo aberto, saudações gerais e perguntas de conversa"

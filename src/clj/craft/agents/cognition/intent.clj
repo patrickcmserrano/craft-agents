@@ -137,11 +137,11 @@
 
 ;; Consulta e inspeção de inventário
 (def ^:private inventory-pattern
-  #"(inventario|mochila|loot|saque|itens|recursos|o que voce pegou|quanto minerio|o que tem|que voce tem|carregando)")
+  #"(inventario\w*|mochila\w*|loot|saque|itens?|recursos?|o que voce pegou|quanto minerio|o que tem|que voce tem|carregando)")
 
 ;; Ejeção e entrega de itens
 (def ^:private drop-pattern
-  #"(dropa\w*|entreg\w*|me da\w*|passa\w*|larga\w*|descarreg\w*|despej\w*|joga fora|joga no chao)")
+  #"(dropa\w*|entreg\w*|me da\w*|passa\w*|larga\w*|descarreg\w*|despej\w*|joga fora|joga no chao|libera\w*)")
 
 (defn extract-mining-target
   "Extrai o alvo específico de mineração ou bloco a partir do texto normalizado (NFD)."
@@ -270,20 +270,9 @@
                              :target/speaker speaker}
        :intent/raw-text     raw-text}
 
-      ;; 5.2 Mineração Cooperativa & Escavação
-      (or (and (= :mining-cooperation routed-type) (not has-follow)) has-mining)
-      (let [target-filter (extract-mining-target norm)]
-        {:intent/type         :mining-cooperation
-         :intent/confidence   (max 0.95 (double router-conf))
-         :intent/route-method :semantic-vector
-         :intent/anchor       (:intent/anchor router-match)
-         :intent/slots        (cond-> {:target/action  "mining"
-                                       :target/speaker speaker}
-                                target-filter (assoc :target/filter target-filter))
-         :intent/raw-text     raw-text})
-
-      ;; 5.3 Ejeção de Saque / Dropar Minérios
+      ;; 5.2.1 Ejeção de Saque / Dropar Minérios (Prioridade sobre mineração se contiver verbo de drop/entrega)
       (or (= :drop-inventory routed-type)
+          has-drop
           (and has-drop (or has-inventory has-mining (re-find #"(minerios?|itens?|loot|tudo|saque|ferro|ouro|carvao|diamante)" norm))))
       {:intent/type         :drop-inventory
        :intent/confidence   (max 0.95 (double router-conf))
@@ -294,7 +283,7 @@
                              :target/speaker speaker}
        :intent/raw-text     raw-text}
 
-      ;; 5.4 Inspeção de Inventário e Mochila
+      ;; 5.2.2 Inspeção de Inventário e Mochila
       (or (= :inventory-inspection routed-type)
           (and has-inventory (re-find #"(mostr\w*|ve\w*|olh\w*|o que|quant\w*|tem|carreg\w*|abre)" norm)))
       {:intent/type         :inventory-inspection
@@ -304,6 +293,20 @@
        :intent/slots        {:target/action  "inspect-inventory"
                              :target/speaker speaker}
        :intent/raw-text     raw-text}
+
+      ;; 5.2.3 Mineração Cooperativa & Escavação (apenas quando não é pedido de entrega/drop)
+      (and (not has-drop)
+           (not= :drop-inventory routed-type)
+           (or (and (= :mining-cooperation routed-type) (not has-follow)) has-mining))
+      (let [target-filter (extract-mining-target norm)]
+        {:intent/type         :mining-cooperation
+         :intent/confidence   (max 0.95 (double router-conf))
+         :intent/route-method :semantic-vector
+         :intent/anchor       (:intent/anchor router-match)
+         :intent/slots        (cond-> {:target/action  "mining"
+                                       :target/speaker speaker}
+                                target-filter (assoc :target/filter target-filter))
+         :intent/raw-text     raw-text})
 
       ;; 6. Seguir o Jogador (apenas se não for comando de captura de animal)
       (or (= :follow-player routed-type) has-follow)
