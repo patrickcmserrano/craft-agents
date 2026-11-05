@@ -571,10 +571,13 @@
                                 entries))})))
        {:slots-used 0 :items {}}))))
 
+(defonce ^:private last-drop-ms (atom 0))
+
 (defn drop-inventory-items!
   "Ejeta itens do inventário no mundo (loot sharing com jogador humano)."
   ([player-name] (drop-inventory-items! player-name "all"))
   ([player-name filter-str]
+   (reset! last-drop-ms (System/currentTimeMillis))
    (let [cmd (str "DROP_ITEMS|" player-name "|" (or filter-str ""))
          resp (send-bridge-cmd! cmd)]
      (if (and resp (str/starts-with? resp "OK|"))
@@ -1654,6 +1657,11 @@
                           (uformat "CMD|particle minecraft:smoke %.2f %.2f %.2f 0.15 0.25 0.15 0.01 2 normal"
                                   kx (+ ky 1.2) kz))))
 
+                     ;; Coleta passiva de drops a 2Hz (a cada 10 ticks = 500ms num raio de 5.0m, pausando 5s apos drop)
+                     (when (and (zero? (mod tick 10))
+                                (> (- (System/currentTimeMillis) @last-drop-ms) 5000))
+                       (collect-nearby-drops! "Karlach" 5.0))
+
                      (let [st @nav-state
                            [cx cy cz] (:pos st)
                            picard-card (let [[px py pz] (:pos @picard-state)]
@@ -1896,7 +1904,7 @@
                                                  (send-bridge-cmd!
                                                   (uformat "CMD|playsound minecraft:block.deepslate.break master @a %.1f %.1f %.1f 1.0 1.0"
                                                           (double bx) (double by) (double bz)))
-                                                 (collect-nearby-drops! "Karlach" 4.0)))
+                                                 (collect-nearby-drops! "Karlach" 6.0)))
                                              (swap! nav-state #(-> %
                                                                    (assoc :active-mining nil)
                                                                    (update :mining-blocks-broken (fnil inc 0)))))
@@ -1904,6 +1912,7 @@
                                            (swap! nav-state assoc-in [:active-mining :ticks] cur-ticks)))))
                                    ;; Se não tiver bloco ativo, busca o próximo minério exposto a cada 5 ticks
                                    (when (zero? (mod tick 5))
+                                     (collect-nearby-drops! "Karlach" 6.0)
                                      (let [filter-str (or (:mining-filter st) "")
                                            ores (locate-nearby-ores "Karlach" 12.0 filter-str)
                                            unreach (:unreachable-ores st #{})

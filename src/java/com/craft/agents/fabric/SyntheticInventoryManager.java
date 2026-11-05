@@ -40,6 +40,7 @@ public final class SyntheticInventoryManager {
 
             Class<?> entClass = Class.forName("net.minecraft.class_1297", true, cl);
             Class<?> itemEntClass = Class.forName("net.minecraft.class_1542", true, cl); // ItemEntity
+            Class<?> itemStackClass = Class.forName("net.minecraft.class_1799", true, cl);
 
             List<?> ents = (List<?>) world.getClass()
                     .getMethod("method_8335", entClass, boxClass)
@@ -61,13 +62,15 @@ public final class SyntheticInventoryManager {
             Method insertStackMethod = null;
             if (inventory != null) {
                 for (Method m : inventory.getClass().getMethods()) {
-                    if (("method_7399".equals(m.getName()) || "insertStack".equals(m.getName()))
-                            && m.getParameterCount() == 1) {
+                    if (("method_7394".equals(m.getName()) || "method_7399".equals(m.getName()) || "insertStack".equals(m.getName()))
+                            && m.getParameterCount() == 1
+                            && m.getParameterTypes()[0] == itemStackClass) {
                         insertStackMethod = m;
                         break;
                     }
                 }
             }
+            System.out.println("[COLLECT_DEBUG] ents count=" + ents.size() + " insertStackMethod=" + insertStackMethod);
 
             Class<?> regClass = Class.forName("net.minecraft.class_7923", true, cl);
             Object itemReg = regClass.getField("field_41178").get(null);
@@ -95,6 +98,7 @@ public final class SyntheticInventoryManager {
                         cannotPickup = (Boolean) e.getClass().getMethod("cannotPickup").invoke(e);
                     } catch (Throwable ignored2) {}
                 }
+                System.out.println("[COLLECT_DEBUG] found ItemEntity cannotPickup=" + cannotPickup);
                 if (cannotPickup) continue;
 
                 Object stack = null;
