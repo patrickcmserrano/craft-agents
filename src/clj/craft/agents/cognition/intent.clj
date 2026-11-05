@@ -192,6 +192,18 @@
     (re-find #"\b(esse|este|aqui|na minha frente|na frente|onde eu to olhando|na mira|apont\w*)\b" norm-text) "crosshair"
     :else nil))
 
+;; Ensinar e sintetizar novas skills via chat (aprenda, ensina, nova skill, crie a skill)
+(def ^:private teach-pattern
+  #"\b(aprend\w*|ensin\w*|nova skill|novo comando|criar skill|crie a skill)\b")
+
+(defn extract-teach-instruction
+  "Extrai o payload da instrução de aprendizado de skill removendo menções e prefixos."
+  [raw-text]
+  (let [stripped (str/replace raw-text #"(?i)^[!/]?(karlach|picard)[,\s:]*" "")]
+    (if-let [m (re-find #"(?i)\b(?:aprend\w*|ensin\w*|nova skill|novo comando|criar skill|crie a skill)[,\s:]*(.*)$" stripped)]
+      (str/trim (second m))
+      (str/trim stripped))))
+
 ;; ----------------------------------------------------------------------------
 ;; Classificador Semântico Híbrido (System 1 - Vetorial + Morfológico < 1ms)
 ;; ----------------------------------------------------------------------------
@@ -206,6 +218,7 @@
         router-match (router/match-intent raw-text)
         routed-type  (:intent/type router-match)
         router-conf  (:intent/confidence router-match 0.70)
+        has-teach    (boolean (re-find teach-pattern norm))
         has-rescue   (boolean (re-find rescue-pattern norm))
         has-escape   (boolean (re-find escape-pattern norm))
         has-return   (boolean (re-find return-pattern norm))
@@ -224,6 +237,17 @@
         has-sit      (boolean (re-find sit-pattern norm))
         has-stand    (boolean (re-find stand-pattern norm))]
     (cond
+      ;; 0.0 Ensinar Nova Skill Dinâmica (Voyager Sistema 2)
+      has-teach
+      {:intent/type         :teach-skill
+       :intent/confidence   0.99
+       :intent/route-method :chat-synthesizer
+       :intent/anchor       "aprenda nova skill"
+       :intent/slots        {:skill/instruction (extract-teach-instruction raw-text)
+                             :target/action     "teach-skill"
+                             :target/speaker    speaker}
+       :intent/raw-text     raw-text}
+
       ;; 0. Teleporte Intencional Direto ("karlach, teleportar pra ca", "da tp aqui")
       (or (= :teleport-to-player routed-type) has-teleport)
       {:intent/type         :teleport-to-player

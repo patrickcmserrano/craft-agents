@@ -217,9 +217,22 @@
        :goal/voice-line (str "De pé e pronta pro combate, " speaker "! Qual é o plano agora? 🔥")
        :goal/speaker    speaker}
 
-      ;; Fallback
-      {:goal/id         :natural-dialogue
-       :goal/type       :dialogue
-       :goal/raw-text   (:intent/raw-text intent-result)
-       :goal/voice-line (str "Tô na escuta, " speaker "! Pode falar que eu tô atenta.")
-       :goal/speaker    speaker})))
+      :teach-skill
+      {:goal/id          :teach-skill
+       :goal/type        :teach-skill
+       :goal/raw-text    (:intent/raw-text intent-result)
+       :goal/instruction (get-in intent-result [:intent/slots :skill/instruction])
+       :goal/speaker     speaker}
+
+      ;; Fallback / Dynamic Skill Route
+      (if (= (:intent/route-method intent-result) :dynamic-skill-route)
+        {:goal/id       itype
+         :goal/type     :execute-dynamic-skill
+         :goal/skill-id itype
+         :goal/raw-text (:intent/raw-text intent-result)
+         :goal/speaker  speaker}
+        {:goal/id         :natural-dialogue
+         :goal/type       :dialogue
+         :goal/raw-text   (:intent/raw-text intent-result)
+         :goal/voice-line (str "Tô na escuta, " speaker "! Pode falar que eu tô atenta.")
+         :goal/speaker    speaker}))))

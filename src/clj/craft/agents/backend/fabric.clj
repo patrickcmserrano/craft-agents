@@ -1421,6 +1421,104 @@
     (karlach-say! (or voice-line (str "De pé e pronta pro combate, " (or speaker "soldado") "! 🔥")))
     (send-bridge-cmd! "CMD|playsound minecraft:entity.player.attack.sweep master @a ~ ~ ~ 0.5 1.2")))
 
+(defmethod execute-karlach-goal! :teach-skill
+  [{:goal/keys [instruction speaker]} engine-ctx-atom _nav-state _sanctuary-route]
+  (let [skills-dir (io/file "skills")
+        _ (.mkdirs skills-dir)
+        skill-reg (atom {:known-actions composer/default-known-actions
+                         :composite-skills {}})
+        synth-res (composer/synthesize-and-register-skill-from-chat! skill-reg skills-dir instruction speaker)]
+    (if (:ok? synth-res)
+      (let [sid   (:skill-id synth-res)
+            sname (:skill-name synth-res)
+            sdef  (:skill-def synth-res)]
+        (send-bridge-cmd! "SWING|Karlach")
+        (send-bridge-cmd! "CMD|playsound minecraft:entity.player.levelup master @a ~ ~ ~ 1.0 1.2")
+        (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"
+                                 (str "Nova skill sintetizada do chat: '" sname "' -> " (pr-str (:skill/tree sdef))))
+        (record-cognitive-event! engine-ctx-atom :gatekeeper "Malli Schema Gatekeeper"
+                                 (str "Skill " sid " APROVADA: Schema BTNode OK / Ciclos 0 / Ações conhecidas conferidas."))
+        (record-cognitive-event! engine-ctx-atom :skill-lib "Skill Library"
+                                 (str sid " persistida permanentemente em skills/" (clojure.core/name sid) ".edn."))
+        (when engine-ctx-atom
+          (swap! engine-ctx-atom update-in [:agents :karlach :skills] (fnil #(vec (distinct (conj % (clojure.core/name sid)))) []))
+          (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] (str sid " (Chat OK)")))
+        (karlach-say! (str "Entendido, " (or speaker "soldado") "! Nova habilidade '" sname "' aprendida e gravada na minha memória! 🔥 Experimente dizer '" sname "' quando quiser que eu execute!")))
+      (let [reason (:reason synth-res)
+            msg    (or (:message synth-res) (str reason))]
+        (send-bridge-cmd! "CMD|playsound minecraft:block.note_block.bass master @a ~ ~ ~ 1.0 0.8")
+        (karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como '!karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))
+
+(defmethod execute-karlach-goal! :execute-dynamic-skill
+  [{:goal/keys [skill-id speaker]} engine-ctx-atom nav-state sanctuary-route]
+  (let [skills-dir (io/file "skills")
+        skill-file (io/file skills-dir (str (clojure.core/name skill-id) ".edn"))]
+    (if (.exists skill-file)
+      (let [skill-def  (try (edn/read-string (slurp skill-file)) (catch Throwable _ nil))
+            skill-tree (:skill/tree skill-def)
+            skill-name (or (:skill/name skill-def) (clojure.core/name skill-id))]
+        (record-cognitive-event! engine-ctx-atom :skill-lib "Execução de Skill Aprendida"
+                                 (str "Iniciando AST da skill " skill-id ": " (pr-str skill-tree)))
+        (karlach-say! (str "Executando habilidade aprendida '" skill-name "', " (or speaker "soldado") "! 🔥"))
+        (send-bridge-cmd! "SWING|Karlach")
+        (send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
+        (let [actions (composer/extract-actions-with-args skill-tree)]
+          (doseq [{:keys [action args]} actions]
+            (case action
+              :social-dance
+              (execute-karlach-goal! {:goal/type :social-dance :goal/voice-line "Olha o passinho de vitória! 🔥"}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :sit-furniture
+              (execute-karlach-goal! {:goal/type :sit-furniture :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :stand-up
+              (execute-karlach-goal! {:goal/type :stand-up :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :patrol-sanctuary
+              (execute-karlach-goal! {:goal/type :patrol-sanctuary :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :breed-animals
+              (execute-karlach-goal! {:goal/type :breed-animals :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :follow-player
+              (execute-karlach-goal! {:goal/type :follow-player :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :bodyguard
+              (execute-karlach-goal! {:goal/type :bodyguard :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :mining-cooperation
+              (execute-karlach-goal! {:goal/type :mining-cooperation :goal/speaker speaker :goal/filter (:target args "diamond")}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :drop-inventory
+              (execute-karlach-goal! {:goal/type :drop-inventory :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :teleport-to-player
+              (execute-karlach-goal! {:goal/type :teleport-to-player :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :move-to-quarters
+              (execute-karlach-goal! {:goal/type :weather-shelter :goal/speaker speaker}
+                                     engine-ctx-atom nav-state sanctuary-route)
+
+              :say-message
+              (karlach-say! (or (:text args) "Comando concluído com sucesso, soldado!"))
+
+              :play-sound
+              (send-bridge-cmd! (str "CMD|playsound " (:sound args "minecraft:entity.experience_orb.pickup") " master @a ~ ~ ~ 1.0 1.0"))
+
+              ;; Fallback p/ ações genéricas
+              (record-cognitive-event! engine-ctx-atom :motor "Ação Dinâmica" (str "Executando ação composta: " action " com args: " (pr-str args)))))))
+      (karlach-say! (str "Não encontrei os registros da skill " skill-id " no meu córtex, " (or speaker "soldado") "!")))))
+
 (defmethod execute-karlach-goal! :default
   [{:goal/keys [raw-text voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
   (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"

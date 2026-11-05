@@ -267,3 +267,43 @@
           g-up (grounding/ground-goal r-up)]
       (is (= :stand-up (:intent/type r-up)))
       (is (= :stand-up (:goal/type g-up))))))
+
+(deftest test-chat-skill-teaching-and-dynamic-synthesis
+  (testing "Reconhecimento de intenção de ensinar nova skill via chat"
+    (let [r1 (intent/classify-intent-semantic "!karlach aprenda danca-e-senta: dance e sente no sofa" "pace")
+          g1 (grounding/ground-goal r1)]
+      (is (= :teach-skill (:intent/type r1)))
+      (is (= "danca-e-senta: dance e sente no sofa" (get-in r1 [:intent/slots :skill/instruction])))
+      (is (= :teach-skill (:goal/type g1)))
+      (is (= "danca-e-senta: dance e sente no sofa" (:goal/instruction g1))))
+
+    (let [r2 (intent/classify-intent-semantic "karlach ensina a descansar: va para o quarto e durma" "pace")
+          g2 (grounding/ground-goal r2)]
+      (is (= :teach-skill (:intent/type r2)))
+      (is (= "a descansar: va para o quarto e durma" (get-in r2 [:intent/slots :skill/instruction])))
+      (is (= :teach-skill (:goal/type g2)))))
+
+  (testing "Síntese e registro dinâmico no Gatekeeper Malli a partir de instrução do chat"
+    (let [tmp-dir    (clojure.java.io/file (System/getProperty "java.io.tmpdir") (str "chat-skills-" (System/nanoTime)))
+          tmp-routes (clojure.java.io/file (System/getProperty "java.io.tmpdir") (str "chat-routes-" (System/nanoTime)))
+          _ (.mkdirs tmp-dir)
+          _ (.mkdirs tmp-routes)
+          reg (atom {:known-actions craft.agents.skills.composer/default-known-actions})]
+      (try
+        (let [synth (craft.agents.skills.composer/synthesize-and-register-skill-from-chat!
+                     reg tmp-dir "danca-e-senta: dance e sente no sofa" "pace" {:routes-dir (.getPath tmp-routes)})]
+          (is (:ok? synth))
+          (is (= :danca-e-senta (:skill-id synth)))
+          (is (= [:sequence [:action :social-dance] [:action :sit-furniture]]
+                 (get-in synth [:skill-def :skill/tree])))
+          (is (.exists (clojure.java.io/file tmp-dir "danca-e-senta.edn"))))
+
+        (let [synth-edn (craft.agents.skills.composer/synthesize-and-register-skill-from-chat!
+                         reg tmp-dir "custom-combo: [:sequence [:action :stand-up] [:action :social-dance]]" "pace" {:routes-dir (.getPath tmp-routes)})]
+          (is (:ok? synth-edn))
+          (is (= :custom-combo (:skill-id synth-edn)))
+          (is (= [:sequence [:action :stand-up] [:action :social-dance]]
+                 (get-in synth-edn [:skill-def :skill/tree]))))
+        (finally
+          (doseq [f (reverse (file-seq tmp-dir))] (.delete f))
+          (doseq [f (reverse (file-seq tmp-routes))] (.delete f)))))))

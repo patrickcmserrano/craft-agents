@@ -31,33 +31,44 @@
             deps        (get graph start-node #{})]
         (boolean (some #(has-cycle? graph % new-visited new-stack) deps))))))
 
+(def default-known-actions
+  "Catálogo completo de primitivas de ação suportadas pelo motor de jogo (CA-037, CA-040)."
+  #{:locate-escaped-animal :equip-bait :lure-to-gate :open-gate :lure-inside :feed-animal :close-gate
+    :check-weather :move-to-quarters :rest-at-bed :wait-out-rain :attach-lead :detach-lead :verify-containment
+    :sit-furniture :stand-up :social-dance :follow-player :patrol-sanctuary :teleport-to-player
+    :drop-inventory :breed-animals :mining-cooperation :bodyguard :say-message :play-sound :move-to
+    :traverse-portal :feed-nearby})
+
 (defn validate-and-register-skill!
   "Valida sub-arvore proposta por IA (schema, acoes conhecidas, ausencia de recursao ciclica, timeouts) e salva EDN (CA-037)."
-  [skill-registry skills-dir skill-def]
+  [skill-registry skills-dir skill-def & [{:keys [routes-dir] :or {routes-dir "agents/routes"}}]]
   (let [skill-id       (:skill/id skill-def)
         tree           (:skill/tree skill-def)
-        known-actions  (:known-actions @skill-registry #{})
+        known-actions  (let [ka (:known-actions @skill-registry)]
+                         (if (seq ka) ka default-known-actions))
         comps          (:composite-skills @skill-registry {})
         called-actions (extract-action-calls tree)
         all-allowed    (into known-actions (keys comps))
         unknowns       (remove all-allowed called-actions)]
-    (if (seq unknowns)
-      {:ok? false :reason :UNKNOWN_ACTION :unknowns (vec unknowns)}
-      (let [comp-graph (reduce-kv (fn [m k v]
-                                    (assoc m k (extract-action-calls v)))
-                                  {}
-                                  (assoc comps skill-id tree))
-            cycle?     (has-cycle? comp-graph skill-id #{} #{})]
-        (if cycle?
-          {:ok? false :reason :CYCLIC_DEPENDENCY}
-          (do
-            (let [f (io/file skills-dir (str (name skill-id) ".edn"))]
-              (spit f (pr-str skill-def)))
-            (swap! skill-registry assoc-in [:composite-skills skill-id] tree)
-            (try
-              (router/auto-register-skill-route! skill-def {:persist? true :routes-dir "agents/routes"})
-              (catch Throwable _ nil))
-            {:ok? true :skill-id skill-id}))))))
+    (if-not (schemas/valid-bt-node? tree)
+      {:ok? false :reason :INVALID_SCHEMA :message "Árvore não atende ao schema Malli schemas/BTNode"}
+      (if (seq unknowns)
+        {:ok? false :reason :UNKNOWN_ACTION :unknowns (vec unknowns)}
+        (let [comp-graph (reduce-kv (fn [m k v]
+                                      (assoc m k (extract-action-calls v)))
+                                    {}
+                                    (assoc comps skill-id tree))
+              cycle?     (has-cycle? comp-graph skill-id #{} #{})]
+          (if cycle?
+            {:ok? false :reason :CYCLIC_DEPENDENCY}
+            (do
+              (let [f (io/file skills-dir (str (name skill-id) ".edn"))]
+                (spit f (pr-str skill-def)))
+              (swap! skill-registry assoc-in [:composite-skills skill-id] tree)
+              (try
+                (router/auto-register-skill-route! skill-def {:persist? true :routes-dir routes-dir})
+                (catch Throwable _ nil))
+              {:ok? true :skill-id skill-id})))))))
 
 ;; ----------------------------------------------------------------------------
 ;; Skill-RAG: Recuperação de Habilidades Semelhantes (P2.1)
@@ -116,7 +127,7 @@
 ;; Sandbox Mental / Verificação Estática de Pré-condições (P2.3)
 ;; ----------------------------------------------------------------------------
 
-(defn- extract-actions-with-args
+(defn extract-actions-with-args
   "Extrai todas as chamadas de ação da árvore com seus respectivos argumentos."
   [node]
   (let [acc (atom [])]
@@ -180,3 +191,186 @@
              :else nil))
          actions)
         {:valid? true :status :preconditions-met})))
+
+;; ----------------------------------------------------------------------------
+;; Chat Skill Synthesizer: Aprendizado Dinâmico via Chat (CA-037, CA-040)
+;; ----------------------------------------------------------------------------
+
+(defn slugify
+  "Gera identificador slug seguro a partir de texto."
+  [s]
+  (if (seq s)
+    (-> s
+        str/lower-case
+        (str/replace #"[áàâãä]" "a")
+        (str/replace #"[éèêë]" "e")
+        (str/replace #"[íìîï]" "i")
+        (str/replace #"[óòôõö]" "o")
+        (str/replace #"[úùûü]" "u")
+        (str/replace #"[ç]" "c")
+        (str/replace #"[^a-z0-9\-]+" "-")
+        (str/replace #"^[\-]+|[\-]+$" ""))
+    "custom-skill"))
+
+(defn parse-instruction-name-and-body
+  "Extrai o nome sugerido da skill e o corpo (instruções ou EDN) do texto."
+  [raw-instruction]
+  (let [trimmed (str/trim (or raw-instruction ""))]
+    (cond
+      ;; 1. Se começa direto com vetor EDN [:sequence ...]
+      (str/starts-with? trimmed "[")
+      {:name nil :body trimmed}
+
+      ;; 2. Se tem separador de dois-pontos "nome: corpo"
+      (str/includes? trimmed ":")
+      (let [[n & rest-body] (str/split trimmed #":\s*" 2)
+            clean-name (-> n
+                           (str/replace #"(?i)^(a|o|pra|para)\s+" "")
+                           str/trim)
+            body (str/trim (or (first rest-body) ""))]
+        {:name (if (empty? clean-name) nil clean-name)
+         :body body})
+
+      ;; 3. Se começa com "a <palavra> <resto>"
+      (re-find #"(?i)^(?:a|pra|para)\s+([a-zA-Z0-9_\-]+)\s+(.+)$" trimmed)
+      (let [[_ n b] (re-find #"(?i)^(?:a|pra|para)\s+([a-zA-Z0-9_\-]+)\s+(.+)$" trimmed)]
+        {:name n :body b})
+
+      ;; 4. Fallback
+      :else
+      {:name nil :body trimmed})))
+
+(defn step->action-node
+  "Mapeia um fragmento de texto ou verbo em um nó de ação Malli [:action ...]."
+  [step-str speaker]
+  (let [norm (-> step-str
+                 str/lower-case
+                 (str/replace #"[áàâãä]" "a")
+                 (str/replace #"[éèêë]" "e")
+                 (str/replace #"[íìîï]" "i")
+                 (str/replace #"[óòôõö]" "o")
+                 (str/replace #"[úùûü]" "u")
+                 (str/replace #"[ç]" "c")
+                 str/trim)]
+    (cond
+      ;; Se for vetor EDN direto
+      (str/starts-with? norm "[")
+      (try (let [v (edn/read-string step-str)]
+             (when (vector? v) v))
+           (catch Throwable _ nil))
+
+      ;; Sentar / Sofá / Assento
+      (re-find #"sofa|sent[ae]|assent[ae]|cadeira" norm)
+      [:action :sit-furniture]
+
+      ;; Levantar / De pé
+      (re-find #"levant[ae]|de pe" norm)
+      [:action :stand-up]
+
+      ;; Dança / Passinho
+      (re-find #"dan[c]|dance|dança|passinho" norm)
+      [:action :social-dance]
+
+      ;; Reproduzir Gatos / Cuidar dos Gatos
+      (re-find #"gat|felin" norm)
+      [:action :breed-animals {:target "Cat"}]
+
+      ;; Reproduzir outros animais
+      (re-find #"animais|reproduz|cruz|filhot" norm)
+      [:action :breed-animals {:target "animals"}]
+
+      ;; Patrulhar / Ronda
+      (re-find #"patrulh|rond|vigia" norm)
+      [:action :patrol-sanctuary]
+
+      ;; Seguir jogador
+      (re-find #"sig[ae]|segui|vem com|acompanh" norm)
+      [:action :follow-player {:speaker speaker}]
+
+      ;; Guarda-costas / Proteger
+      (re-find #"proteg|guard|defend|costas" norm)
+      [:action :bodyguard {:speaker speaker}]
+
+      ;; Minerar
+      (re-find #"miner|picaret|escav|diamant" norm)
+      [:action :mining-cooperation {:target "diamond"}]
+
+      ;; Quarto / Cama / Descansar
+      (re-find #"quart|dorm|cam[ae]|descans" norm)
+      [:action :move-to-quarters]
+
+      ;; Acolher chuva
+      (re-find #"abrig|chuv|tempest" norm)
+      [:action :move-to-quarters]
+
+      ;; Drop / Entregar itens
+      (re-find #"drop|larg|entreg|jog.*loot|item" norm)
+      [:action :drop-inventory {:speaker speaker}]
+
+      ;; Teleporte
+      (re-find #"teleport|fend|tp" norm)
+      [:action :teleport-to-player {:speaker speaker}]
+
+      ;; Falar / Dizer
+      (re-find #"fal[ae]|dig[ae]" norm)
+      [:action :say-message {:text "Comando executado com sucesso!"}]
+
+      :else nil)))
+
+(defn parse-natural-or-edn-tree
+  "Converte a instrução textual ou EDN numa árvore AST válida de Behavior Tree."
+  [body suggested-name speaker]
+  (let [trimmed (str/trim (or body ""))]
+    (if (empty? trimmed)
+      {:ok? false :reason :EMPTY_BODY :message "Corpo da instrução está vazio"}
+      ;; Tentativa 1: Parse direto de EDN se começar com '['
+      (if (str/starts-with? trimmed "[")
+        (try
+          (let [parsed (edn/read-string trimmed)]
+            (if (schemas/valid-bt-node? parsed)
+              (let [tree (if (= (first parsed) :sequence) parsed [:sequence parsed])
+                    name (or suggested-name (str "skill-" (System/currentTimeMillis)))]
+                {:ok? true :tree tree :name name})
+              {:ok? false :reason :INVALID_SCHEMA :message "Vetor EDN fornecido não atende ao schema Malli BTNode"}))
+          (catch Throwable e
+            {:ok? false :reason :EDN_SYNTAX_ERROR :message (str "Erro de sintaxe EDN: " (.getMessage e))}))
+        ;; Tentativa 2: Parse de passos em Linguagem Natural
+        (let [raw-steps (str/split trimmed #"(?i)\s*(?:,|;|\be\b|\bdepois\b|\bentao\b|\bentão\b|\bthen\b|\band\b)\s*")
+              clean-steps (filter #(not (str/blank? %)) raw-steps)
+              actions     (keep #(step->action-node % speaker) clean-steps)]
+          (if (seq actions)
+            (let [tree (into [:sequence] actions)
+                  skill-name (or suggested-name
+                                 (slugify (first clean-steps))
+                                 "nova-skill")]
+              {:ok? true :tree tree :name skill-name})
+            {:ok? false
+             :reason :UNRECOGNIZED_STEPS
+             :message (str "Não foi possível reconhecer ações válidas em: '" trimmed "'")}))))))
+
+(defn synthesize-and-register-skill-from-chat!
+  "Sintetizador do Sistema 2 para Linguagem Natural via Chat (CA-037/CA-040).
+   Converte a instrução do chat numa árvore Malli segura, valida, salva em skills/
+   e registra a nova rota no Semantic Router."
+  [skill-registry skills-dir raw-instruction speaker & [{:keys [routes-dir] :or {routes-dir "agents/routes"}}]]
+  (let [{:keys [name body]} (parse-instruction-name-and-body raw-instruction)]
+    (if (empty? body)
+      {:ok? false :reason :EMPTY_INSTRUCTION :message "Instrução de skill vazia"}
+      (let [ast-res (parse-natural-or-edn-tree body name speaker)]
+        (if-not (:ok? ast-res)
+          ast-res
+          (let [slug     (slugify (:name ast-res))
+                skill-id (keyword slug)
+                skill-def {:skill/id         skill-id
+                           :skill/name       (str "Habilidade " (:name ast-res))
+                           :skill/author     (str "Player-" (or speaker "pace"))
+                           :skill/trigger    :chat-command
+                           :skill/timeout-ms 30000
+                           :skill/tree       (:tree ast-res)}
+                reg-res (validate-and-register-skill! skill-registry skills-dir skill-def {:routes-dir routes-dir})]
+            (if (:ok? reg-res)
+              {:ok?        true
+               :skill-id   skill-id
+               :skill-name (:name ast-res)
+               :skill-def  skill-def}
+              reg-res)))))))
