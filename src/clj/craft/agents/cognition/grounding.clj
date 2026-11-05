@@ -94,6 +94,21 @@
        :goal/speaker    speaker
        :goal/voice-line (str "Tô vendo sim, " speaker "! Um belo de um " entity " bem aí perto de você!")}
 
+      :breed-animals
+      (let [enc       (find-enclosure-for-entity entity species)
+            pen-id    (:enclosure/id enc :pen-north-east)
+            food      (if (or (= species "minecraft:cat") (= species "Cat")) "minecraft:cod" (or (:enclosure/food enc) "minecraft:apple"))
+            voice-msg (str "Pode deixar, " speaker "! Ativando modo de reprodução de gatos em AFK! 🔥 🐱 Vou manter nossos bichanos sempre com peixe fresco, soltos pra namorar e cheios de corações pra lotar o Santuário de filhotinhos enquanto você estiver AFK! 🐟 💕")]
+        {:goal/id         :breed-animals
+         :goal/type       :breed-animals
+         :goal/name       (str "Reprodução de " entity " em AFK")
+         :goal/entity     entity
+         :goal/species    species
+         :goal/pen-id     pen-id
+         :goal/bait-item  food
+         :goal/voice-line voice-msg
+         :goal/speaker    speaker})
+
       :weather-shelter
       {:goal/id         :shelter-from-rain
        :goal/type       :weather-shelter

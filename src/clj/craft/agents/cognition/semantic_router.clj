@@ -184,6 +184,19 @@
               "vai cuidar dos gatos"
               "da peixe pros gatos"]}
 
+   {:id :breed-animals
+    :description "Reproduzir, cruzar ou procriar animais e gatos em modo AFK"
+    :anchors ["reproduz os gatos em afk"
+              "quero que reproduza os gatos"
+              "cruza os gatos"
+              "procria os gatinhos"
+              "reproduzir gatos"
+              "bota os gatos pra reproduzir"
+              "faz os gatinhos namorarem"
+              "reproduzir animais em afk"
+              "procriar os bichinhos"
+              "cruzar os animais"]}
+
    {:id :bodyguard
     :description "Modo guarda-costas, proteção pessoal, escolta armada e combate a hostis"
     :anchors ["ativa o modo guarda costas"

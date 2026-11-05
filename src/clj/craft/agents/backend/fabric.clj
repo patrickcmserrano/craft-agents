@@ -465,16 +465,26 @@
       (when is-cat?
         (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:cod")
         (send-bridge-cmd! "SWING|Karlach"))
-      ;; Cura e regenera os animais sem forçar reprodução infinita (InLove:0 evita superpopulação e morte por sufocamento)
+      ;; Cura e regenera os animais
       (send-bridge-cmd!
        (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:instant_health 1 1 true"
                fx fy fz sp))
       (send-bridge-cmd!
        (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:regeneration 20 1 true"
                fx fy fz sp))
-      (send-bridge-cmd!
-       (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run data merge entity @s {InLove:0,PersistenceRequired:1b}"
-               fx fy fz sp))
+      (if is-cat?
+        (do
+          ;; 1. Reprodução AFK para gatos adultos (Age: 0): coloca InLove:600 e Sitting:0b (limite de segurança de 18 gatos por recinto)
+          (send-bridge-cmd!
+           (uformat "CMD|execute positioned %.1f %.1f %.1f if entity @e[type=cat,distance=..25,limit=18] as @e[type=cat,distance=..25,nbt={Age:0}] run data merge entity @s {InLove:600,Sitting:0b,PersistenceRequired:1b}"
+                   fx fy fz))
+          ;; 2. Aceleração de crescimento para gatinhos filhotes (Age < 0) com peixe fresco
+          (send-bridge-cmd!
+           (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=cat,distance=..25,nbt={Age:-1..}] run data modify entity @s Age set value -200"
+                   fx fy fz)))
+        (send-bridge-cmd!
+         (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run data merge entity @s {InLove:0,PersistenceRequired:1b}"
+                 fx fy fz sp)))
       (send-bridge-cmd!
        (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:heart ~ ~1.2 ~ 0.4 0.4 0.4 0.02 6 normal"
                fx fy fz sp))
@@ -1367,6 +1377,33 @@
       (let [item-list (str/join ", " (map (fn [[iid c]] (str c "x " (str/replace iid #"minecraft:" ""))) items))]
         (karlach-say! (str "Aqui está o saque da expedição, " target "! Ejetando [" item-list "]! Todo seu, soldado! 🔥 💎")))
       (karlach-say! (str "Não tenho nenhum recurso solto pra dropar agora, " target "! Minha mochila tá limpa.")))))
+
+(defmethod execute-karlach-goal! :breed-animals
+  [{:goal/keys [speaker voice-line]} engine-ctx-atom nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :action "Reprodução de Animais em AFK"
+                           "Ativando protocolo de reprodução e procriação de gatos no Santuário")
+  (when engine-ctx-atom
+    (swap! engine-ctx-atom assoc-in [:agents :karlach :task] "Reprodução de Gatos em AFK (Cupido Felino)"))
+  (send-bridge-cmd! "SWING|Karlach")
+  (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:cod")
+  (send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
+  (karlach-say! (or voice-line (str "Pode deixar, " (or speaker "soldado") "! Ativando reprodução de gatos em AFK! 🔥 🐱")))
+  ;; Pulso imediato de reprodução para gatos próximos à Karlach
+  (let [[cx cy cz] (:pos @nav-state [-175.0 65.0 180.0])]
+    (send-bridge-cmd!
+     (uformat "CMD|execute positioned %.1f %.1f %.1f if entity @e[type=cat,distance=..35,limit=18] as @e[type=cat,distance=..35,nbt={Age:0}] run data merge entity @s {InLove:600,Sitting:0b,PersistenceRequired:1b}"
+             cx cy cz))
+    (send-bridge-cmd!
+     (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=cat,distance=..35] run effect give @s minecraft:regeneration 10 1 true"
+             cx cy cz))
+    (send-bridge-cmd!
+     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=cat,distance=..35,limit=6,sort=nearest] run particle minecraft:heart ~ ~1.0 ~ 0.5 0.5 0.5 0.05 10 normal"
+             cx cy cz))
+    (send-bridge-cmd!
+     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=cat,distance=..35,limit=2,sort=nearest] run playsound minecraft:entity.cat.purr neutral @a ~ ~ ~ 1.0 1.0"
+             cx cy cz)))
+  ;; Garante modo de patrulha do santuário ativo para alimentar e reproduzir ciclicamente em AFK
+  (swap! nav-state assoc :mode :sanctuary-patrol :follow-target nil))
 
 (defmethod execute-karlach-goal! :sit-furniture
   [{:goal/keys [speaker voice-line]} engine-ctx-atom _nav-state _sanctuary-route]

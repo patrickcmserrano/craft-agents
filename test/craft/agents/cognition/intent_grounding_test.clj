@@ -103,7 +103,16 @@
       (is (= "minecraft:cod" (:goal/bait-item g1)))
       (is (clojure.string/includes? (:goal/voice-line g1) "peixe fresco"))
       (is (= :patrol-sanctuary (:intent/type r2)))
-      (is (clojure.string/includes? (:goal/voice-line g2) "peixinho fresco pros nossos gatinhos")))))
+      (is (clojure.string/includes? (:goal/voice-line g2) "peixinho fresco pros nossos gatinhos"))))
+
+  (testing "Comando de reprodução de gatos em AFK"
+    (let [r (intent/classify-intent-semantic "karlach, reproduz os gatos em afk" "pace")
+          g (grounding/ground-goal r)]
+      (is (= :breed-animals (:intent/type r)))
+      (is (= "minecraft:cat" (get-in r [:intent/slots :target/species])))
+      (is (= :breed-animals (:goal/type g)))
+      (is (= "minecraft:cod" (:goal/bait-item g)))
+      (is (clojure.string/includes? (:goal/voice-line g) "reprodução de gatos em AFK")))))
 
 (deftest test-semantic-router-vector-mechanics
   (testing "Similaridade de cosseno e subword n-grams"

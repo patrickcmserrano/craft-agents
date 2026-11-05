@@ -136,6 +136,10 @@
 (def ^:private patrol-pattern
   #"\b(patrulh\w*|rond\w*|trabalh\w*|aliment\w*|cuid\w*|rotin\w*|posto|afazer\w*)\b")
 
+;; Reprodução de animais e procriação em AFK
+(def ^:private breed-pattern
+  #"\b(reproduz\w*|procri\w*|cruz\w*|namor\w*|acasal\w*|breed\w*|filhote\w*|filhotinho\w*)\b")
+
 ;; Dança e expressões sociais
 (def ^:private dance-pattern
   #"\b(danc\w*|bail\w*|ging\w*|avernus|passinho)\b")
@@ -209,6 +213,7 @@
         has-follow   (boolean (re-find follow-pattern norm))
         has-stop     (boolean (re-find stop-pattern norm))
         has-patrol   (boolean (re-find patrol-pattern norm))
+        has-breed    (boolean (re-find breed-pattern norm))
         has-dance    (boolean (re-find dance-pattern norm))
         has-weather  (boolean (re-find weather-pattern norm))
         has-bodyguard (boolean (re-find bodyguard-pattern norm))
@@ -277,6 +282,19 @@
        :intent/slots        {:target/entity   (:entity animal "Cervo Real")
                              :target/species  (:species animal "naturalist:deer")
                              :target/action   "look-and-identify"
+                             :target/speaker  speaker}
+       :intent/raw-text     raw-text}
+
+      ;; 2.1 Reprodução de Animais / Gatos em AFK ("reproduz os gatos em afk", "cruza os gatos")
+      (or (= :breed-animals routed-type)
+          (and has-breed (or animal (re-find #"\b(gato|gatos|gatinho|gatinhos|bicho|animal|afk)\b" norm))))
+      {:intent/type         :breed-animals
+       :intent/confidence   (max 0.95 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/entity   (:entity animal "Gatos")
+                             :target/species  (:species animal "minecraft:cat")
+                             :target/action   "breed-afk"
                              :target/speaker  speaker}
        :intent/raw-text     raw-text}
 
