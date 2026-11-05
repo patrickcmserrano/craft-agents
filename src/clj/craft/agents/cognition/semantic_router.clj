@@ -131,6 +131,9 @@
               "pode parar por aqui"
               "chega de me seguir fica aqui"
               "descansa agora valeu"
+              "descansa"
+              "descansar"
+              "valeu"
               "espera ai quietinha"
               "para de me acompanhar"
               "dispensada por hoje obrigado"
@@ -232,6 +235,33 @@
               "libera o loot mule"
               "me passa o loot"
               "me da o que voce pegou"]}
+
+   {:id :sit-furniture
+    :description "Sentar em sofás, cadeiras, bancos ou descansar em mobílias próximas"
+    :anchors ["senta no sofa"
+              "senta aqui comigo"
+              "senta no sofa"
+              "senta aqui"
+              "vem sentar aqui"
+              "pode sentar"
+              "senta do meu lado"
+              "senta na cadeira"
+              "senta ai"
+              "senta no banco"
+              "senta no sofa branco"
+              "senta"]}
+
+   {:id :stand-up
+    :description "Levantar do assento, ficar de pé ou sair do sofá"
+    :anchors ["pode levantar"
+              "levanta do sofa"
+              "fica de pe"
+              "fica em pe"
+              "levanta dai"
+              "bora levantar"
+              "levanta mule"
+              "levanta"
+              "sai do sofa"]}
 
    {:id :dialogue
     :description "Diálogo aberto, saudações gerais e perguntas de conversa"

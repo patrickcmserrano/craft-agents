@@ -215,3 +215,33 @@
       (is (= "crosshair" (:goal/filter g-look)))
       (is (or (re-find #"frente" (:goal/voice-line g-look))
               (re-find #"mira" (:goal/voice-line g-look)))))))
+
+(deftest test-furniture-sit-and-stand-intent-and-grounding
+  (testing "Comandos naturais para Karlach sentar no sofá ou cadeira"
+    (let [r1 (intent/classify-intent-semantic "karlach, senta aqui" "pace")
+          g1 (grounding/ground-goal r1)]
+      (is (= :sit-furniture (:intent/type r1)))
+      (is (= :sit-furniture (:goal/type g1)))
+      (is (re-find #"sofá" (:goal/voice-line g1))))
+
+    (let [r2 (intent/classify-intent-semantic "karlach senta no sofa" "pace")
+          g2 (grounding/ground-goal r2)]
+      (is (= :sit-furniture (:intent/type r2)))
+      (is (= :sit-furniture (:goal/type g2))))
+
+    (let [r3 (intent/classify-intent-semantic "karlach, senta do meu lado" "pace")
+          g3 (grounding/ground-goal r3)]
+      (is (= :sit-furniture (:intent/type r3)))
+      (is (= :sit-furniture (:goal/type g3)))))
+
+  (testing "Comandos naturais para Karlach levantar"
+    (let [r-stand (intent/classify-intent-semantic "karlach, levanta dai" "pace")
+          g-stand (grounding/ground-goal r-stand)]
+      (is (= :stand-up (:intent/type r-stand)))
+      (is (= :stand-up (:goal/type g-stand)))
+      (is (re-find #"pronta" (:goal/voice-line g-stand))))
+
+    (let [r-up (intent/classify-intent-semantic "karlach, pode levantar" "pace")
+          g-up (grounding/ground-goal r-up)]
+      (is (= :stand-up (:intent/type r-up)))
+      (is (= :stand-up (:goal/type g-up))))))

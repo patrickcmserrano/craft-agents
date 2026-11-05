@@ -141,7 +141,15 @@
 
 ;; Ejeção e entrega de itens
 (def ^:private drop-pattern
-  #"(dropa\w*|entreg\w*|me da\w*|passa\w*|larga\w*|descarreg\w*|despej\w*|joga fora|joga no chao|libera\w*)")
+  #"\b(dropa\w*|entreg\w*|me da\w*|passa\w*|larga\w*|descarreg\w*|despej\w*|joga fora|joga no chao|libera\w*)\b")
+
+;; Sentar em assentos e mobilias
+(def ^:private sit-pattern
+  #"\b(sent\w*|assent\w*|sofa\w*|cadeira\w*|poltrona\w*|banco\w*)\b")
+
+;; Levantar de assentos e ficar de pe
+(def ^:private stand-pattern
+  #"\b(levant\w*|desmont\w*|em pe|de pe|sai do sofa)\b")
 
 (defn extract-mining-target
   "Extrai o alvo específico de mineração ou bloco a partir do texto normalizado (NFD)."
@@ -190,7 +198,9 @@
         has-mining   (boolean (re-find mining-pattern norm))
         has-inventory (boolean (re-find inventory-pattern norm))
         has-drop     (boolean (re-find drop-pattern norm))
-        has-teleport (boolean (re-find teleport-pattern norm))]
+        has-teleport (boolean (re-find teleport-pattern norm))
+        has-sit      (boolean (re-find sit-pattern norm))
+        has-stand    (boolean (re-find stand-pattern norm))]
     (cond
       ;; 0. Teleporte Intencional Direto ("karlach, teleportar pra ca", "da tp aqui")
       (or (= :teleport-to-player routed-type) has-teleport)
@@ -199,6 +209,29 @@
        :intent/route-method :semantic-vector
        :intent/anchor       (:intent/anchor router-match)
        :intent/slots        {:target/action  "teleport-to-player"
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
+
+      ;; 0.1 Levantar do Assento / Ficar de Pe
+      (and (not has-stop)
+           (or (= :stand-up routed-type) has-stand))
+      {:intent/type         :stand-up
+       :intent/confidence   (max 0.95 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  "stand-up"
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
+
+      ;; 0.2 Sentar em Mobilia / Sofa / Cadeira
+      (and (not has-stop)
+           (or (= :sit-furniture routed-type)
+               (and has-sit (not has-stand))))
+      {:intent/type         :sit-furniture
+       :intent/confidence   (max 0.95 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  "sit-furniture"
                              :target/speaker speaker}
        :intent/raw-text     raw-text}
 

@@ -1331,6 +1331,22 @@
         (karlach-say! (str "Aqui está o saque da expedição, " target "! Ejetando [" item-list "]! Todo seu, soldado! 🔥 💎")))
       (karlach-say! (str "Não tenho nenhum recurso solto pra dropar agora, " target "! Minha mochila tá limpa.")))))
 
+(defmethod execute-karlach-goal! :sit-furniture
+  [{:goal/keys [speaker voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :action "Ação de Mobília / Sentar no Sofá"
+                           (str "Karlach buscando assento livre próximo para sentar"))
+  (karlach-say! (or voice-line (str "Sentando aqui no sofá para descansar um pouco, " (or speaker "soldado") "! 🔥")))
+  (let [res (send-bridge-cmd! "SIT|Karlach")]
+    (record-cognitive-event! engine-ctx-atom :motor "Assento Ocupado" (str "Bridge SIT response: " res))
+    (send-bridge-cmd! "CMD|playsound minecraft:block.wool.place master @a ~ ~ ~ 0.8 1.0")))
+
+(defmethod execute-karlach-goal! :stand-up
+  [{:goal/keys [speaker voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
+  (let [res (send-bridge-cmd! "STAND|Karlach")]
+    (record-cognitive-event! engine-ctx-atom :action "Levantar do Sofá" (str "Bridge STAND response: " res))
+    (karlach-say! (or voice-line (str "De pé e pronta pro combate, " (or speaker "soldado") "! 🔥")))
+    (send-bridge-cmd! "CMD|playsound minecraft:entity.player.attack.sweep master @a ~ ~ ~ 0.5 1.2")))
+
 (defmethod execute-karlach-goal! :default
   [{:goal/keys [raw-text voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
   (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"

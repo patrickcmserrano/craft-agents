@@ -181,6 +181,18 @@
        :goal/voice-line (str "Loot saindo do forno, " speaker "! Pegando o saque pra você!")
        :goal/speaker    speaker}
 
+      :sit-furniture
+      {:goal/id         :sit-furniture
+       :goal/type       :sit-furniture
+       :goal/voice-line (str "Ah, uma pausa bem merecida! Sentando aqui do seu lado no sofá, " speaker "! 🔥")
+       :goal/speaker    speaker}
+
+      :stand-up
+      {:goal/id         :stand-up
+       :goal/type       :stand-up
+       :goal/voice-line (str "De pé e pronta pro combate, " speaker "! Qual é o plano agora? 🔥")
+       :goal/speaker    speaker}
+
       ;; Fallback
       {:goal/id         :natural-dialogue
        :goal/type       :dialogue

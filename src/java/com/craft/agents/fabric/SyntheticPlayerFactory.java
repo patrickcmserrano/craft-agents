@@ -1094,6 +1094,39 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            if ("SIT".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                int sx = parts.length >= 5 ? Integer.parseInt(parts[2]) : Integer.MIN_VALUE;
+                int sy = parts.length >= 5 ? Integer.parseInt(parts[3]) : Integer.MIN_VALUE;
+                int sz = parts.length >= 5 ? Integer.parseInt(parts[4]) : Integer.MIN_VALUE;
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticSeatManager.sit(server, player, sx, sy, sz, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("STAND".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticSeatManager.stand(server, player, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("IS_SITTING".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticSeatManager.isSitting(player, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
             return "ERR|UNKNOWN_OP";
         } catch (Throwable t) {
             return "ERR|" + t.getMessage();
