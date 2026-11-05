@@ -70,8 +70,6 @@ public final class SyntheticInventoryManager {
                     }
                 }
             }
-            System.out.println("[COLLECT_DEBUG] ents count=" + ents.size() + " insertStackMethod=" + insertStackMethod);
-
             Class<?> regClass = Class.forName("net.minecraft.class_7923", true, cl);
             Object itemReg = regClass.getField("field_41178").get(null);
             Method getIdMethod = itemReg.getClass().getMethod("method_10221", Object.class);
@@ -98,7 +96,6 @@ public final class SyntheticInventoryManager {
                         cannotPickup = (Boolean) e.getClass().getMethod("cannotPickup").invoke(e);
                     } catch (Throwable ignored2) {}
                 }
-                System.out.println("[COLLECT_DEBUG] found ItemEntity cannotPickup=" + cannotPickup);
                 if (cannotPickup) continue;
 
                 Object stack = null;
@@ -303,8 +300,12 @@ public final class SyntheticInventoryManager {
                 Object idObj = getIdMethod.invoke(itemReg, itemObj);
                 String itemId = idObj != null ? idObj.toString() : "";
 
-                // Não dropa picareta ou machado principal de trabalho
-                if (itemId.contains("pickaxe") || itemId.contains("axe") || itemId.contains("shield")) {
+                // Não dropa ferramentas, armas, armaduras ou equipamentos essenciais
+                if (itemId.contains("pickaxe") || itemId.contains("axe") || itemId.contains("sword")
+                        || itemId.contains("shovel") || itemId.contains("hoe") || itemId.contains("shield")
+                        || itemId.contains("mace") || itemId.contains("bow") || itemId.contains("helmet")
+                        || itemId.contains("chestplate") || itemId.contains("leggings") || itemId.contains("boots")
+                        || itemId.contains("totem")) {
                     continue;
                 }
 

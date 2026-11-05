@@ -122,7 +122,8 @@
       (send-bridge-cmd! "CMD|gamemode survival Karlach")
       (send-bridge-cmd! "CMD|effect give Karlach minecraft:resistance infinite 4 true")
       (send-bridge-cmd! "CMD|effect give Karlach minecraft:fire_resistance infinite 1 true")
-      (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:apple")
+      (send-bridge-cmd! "CMD|item replace entity Karlach hotbar.0 with minecraft:netherite_pickaxe[enchantments={levels:{\"minecraft:efficiency\":5,\"minecraft:unbreaking\":3,\"minecraft:fortune\":3}}]")
+      (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe[enchantments={levels:{\"minecraft:efficiency\":5,\"minecraft:unbreaking\":3,\"minecraft:fortune\":3}}]")
       (println "[craft-agents] 🔥 Karlach Server-Native conectada:" resp))
 
     ;; 2. Spawn Capitão Picard na Ponte da USS Enterprise-D

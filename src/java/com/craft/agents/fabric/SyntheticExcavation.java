@@ -59,11 +59,16 @@ public final class SyntheticExcavation {
 
             Method getStackMethod = null;
             Method setStackMethod = null;
+            Class<?> itemStackClass = Class.forName("net.minecraft.class_1799", true, cl);
             for (Method m : inventory.getClass().getMethods()) {
                 if (("method_5438".equals(m.getName()) || "getStack".equals(m.getName())) && m.getParameterCount() == 1) {
                     getStackMethod = m;
                 }
-                if (("method_5441".equals(m.getName()) || "setStack".equals(m.getName())) && m.getParameterCount() == 2) {
+                if (("method_5447".equals(m.getName()) || "method_7367".equals(m.getName()) || "setStack".equals(m.getName()))
+                        && m.getParameterCount() == 2
+                        && m.getParameterTypes()[0] == int.class
+                        && m.getParameterTypes()[1] == itemStackClass
+                        && m.getReturnType() == void.class) {
                     setStackMethod = m;
                 }
             }
