@@ -34,14 +34,20 @@
 (defn build-telemetry-frame
   "Monta frame compacto de telemetria (arvore ativa, leases, rota A*, blackboard, feed cognitivo e skills) p/ broadcast WebSocket (CA-040)."
   [engine-ctx]
-  (let [ctx (if (instance? clojure.lang.IDeref engine-ctx) @engine-ctx engine-ctx)]
+  (let [ctx (if (instance? clojure.lang.IDeref engine-ctx) @engine-ctx engine-ctx)
+        online-players (try (fabric/query-online-players) (catch Throwable _ []))
+        weather-info   (try (fabric/query-minecraft-weather) (catch Throwable _ {:clock "12:00" :phase "Dia" :sky "Céu Limpo"}))
+        karlach-inv    (try (fabric/inspect-inventory "Karlach") (catch Throwable _ {:slots-used 0 :items {}}))]
     {:tick      (:tick ctx 0)
      :timestamp (System/currentTimeMillis)
      :agents    (:agents ctx {})
      :leases    (:leases ctx {})
      :resources (:resources ctx {})
      :events    (:events ctx [])
-     :skills    (load-skill-library)}))
+     :skills    (load-skill-library)
+     :players   online-players
+     :weather   weather-info
+     :inventory {:karlach karlach-inv}}))
 
 (defn- serve-file [path content-type]
   (if-let [res (io/resource path)]

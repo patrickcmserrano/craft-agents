@@ -14,10 +14,12 @@
           <span class="brand-icon">⚡</span>
           <div>
             <h1>Craft Agents Studio</h1>
-            <p class="subtitle">Arquitetura Voyager 2.0 Nativa JVM | Síntese de Skills em Tempo Real & Validação Malli</p>
+            <p class="subtitle">Arquitetura Voyager 2.0 Nativa JVM | Cognição Tri-Temporal, Mineração & Escolta Ativa</p>
           </div>
         </div>
         <div class="header-badges">
+          <span class="weather-badge" id="weather-badge">🌤️ Carregando clima...</span>
+          <span class="players-badge" id="players-badge">👥 0 jogadores</span>
           <span class="status-badge" id="conn-status"><span class="dot"></span> CONECTANDO...</span>
           <span class="server-tick-badge" id="server-tick">Tick: --</span>
         </div>
@@ -27,41 +29,131 @@
     <!-- Quick Action / In-Game Chat Simulator Bar -->
     <section class="action-card">
       <div class="action-header">
-        <span class="action-title">🎮 Gatilhos Cognitivos & Chat In-Game (Latência Zero)</span>
-        <span class="action-hint">Dispara estímulos diretamente para a cognição dos agentes e chat do servidor</span>
+        <div class="action-title-group">
+          <span class="action-title">🎮 Painel de Ações & Chat In-Game (Latência Zero)</span>
+          <span class="action-hint">Dispara estímulos e diretrizes para a cognição da Karlach e do Picard</span>
+        </div>
+        <!-- Speaker Selector -->
+        <div class="speaker-selector-wrapper">
+          <label for="speaker-select">Falando como:</label>
+          <select id="speaker-select" class="speaker-select">
+            <option value="pace" selected>pace (Admin)</option>
+            <option value="Lizzie">Lizzie</option>
+            <option value="custom">Outro...</option>
+          </select>
+          <input type="text" id="speaker-custom" class="speaker-custom-input" placeholder="Seu nick..." style="display:none;" />
+        </div>
       </div>
-      <div class="quick-buttons">
-        <button id="btn-shelter" class="btn btn-warning">🌧️ Karlach, está chovendo, vá se abrigar! (Aprender Skill)</button>
-        <button id="btn-rescue" class="btn btn-warning">🐾 Karlach, a capivarinha tá fora da grade, conduz ela pra dentro!</button>
-        <button id="btn-patrol" class="btn btn-success">☀️ Karlach, volta pra patrulha no Santuário!</button>
-        <button id="btn-dance" class="btn btn-danger">💃 Karlach, dança o passinho de Avernus 🔥</button>
-        <button id="btn-picard-weather" class="btn btn-info">📡 Picard: Boletim Meteorológico Orbital</button>
+
+      <!-- Action Category Tabs -->
+      <div class="action-tabs">
+        <button class="tab-btn active" data-category="sanctuary">🐾 Santuário & Gatos</button>
+        <button class="tab-btn" data-category="mining">⛏️ Mineração & Saque</button>
+        <button class="tab-btn" data-category="social">🛋️ Convívio & Combate</button>
+        <button class="tab-btn" data-category="picard">🖖 Capitão Picard</button>
       </div>
+
+      <!-- Quick Action Buttons per Category -->
+      <div class="quick-buttons-container">
+        <!-- 1. Santuário & Gatos -->
+        <div class="quick-buttons-group active" id="group-sanctuary">
+          <button class="btn btn-cat" data-msg="karlach, reproduz os gatos em afk">🐱 Karlach, reproduz os gatos em AFK! 💕</button>
+          <button class="btn btn-warning" data-msg="karlach, cuida dos gatos">🐟 Karlach, cuida dos gatos com peixe!</button>
+          <button class="btn btn-success" data-msg="karlach, volta pra patrulha no santuario!">☀️ Karlach, patrulhar o Santuário</button>
+          <button class="btn btn-warning" data-msg="karlach, a capivarinha filhote está fora da grade, conduz ela pra dentro!">🐾 Karlach, resgata a capivara!</button>
+          <button class="btn btn-info" data-msg="karlach, está chovendo, vá se abrigar!">🌧️ Karlach, vá se abrigar da chuva!</button>
+          <button class="btn btn-danger" data-msg="karlach, dança o passinho de avernus!">💃 Karlach, passinho de Avernus 🔥</button>
+        </div>
+
+        <!-- 2. Mineração & Saque -->
+        <div class="quick-buttons-group" id="group-mining">
+          <button class="btn btn-mining" data-msg="karlach, minera comigo!">⛏️ Karlach, minera comigo! (Modo Cooperativo)</button>
+          <button class="btn btn-mining" data-msg="karlach, minera ferro e carvao">⛏️ Karlach, minera ferro e carvão!</button>
+          <button class="btn btn-mining" data-msg="karlach, minera diamante">💎 Karlach, minera veios de diamante!</button>
+          <button class="btn btn-primary" data-msg="karlach, o que você tem na mochila?">🎒 Karlach, checar inventário</button>
+          <button class="btn btn-gold" data-msg="karlach, dropa os minérios!">💎 Karlach, dropa os minérios pra mim!</button>
+          <button class="btn btn-gold" data-msg="karlach, dropa o ouro do seu inventário">🪙 Karlach, dropa o ouro!</button>
+        </div>
+
+        <!-- 3. Convívio & Combate -->
+        <div class="quick-buttons-group" id="group-social">
+          <button class="btn btn-guard" data-msg="karlach, me protege contra os monstros">🛡️ Karlach, me protege! (Guarda-Costas)</button>
+          <button class="btn btn-sofa" data-msg="karlach, senta no sofá">🛋️ Karlach, senta no sofá para descansar</button>
+          <button class="btn btn-primary" data-msg="karlach, fica de pé">🧍 Karlach, fica de pé!</button>
+          <button class="btn btn-purple" data-msg="karlach, vem de teleporte pra ca">🌀 Karlach, teleporta direto pra cá!</button>
+          <button class="btn btn-info" data-msg="karlach, vem comigo!">🤝 Karlach, me segue!</button>
+          <button class="btn btn-secondary" data-msg="karlach, descansa um pouco">🛑 Karlach, descansa / pausar</button>
+        </div>
+
+        <!-- 4. Capitão Picard -->
+        <div class="quick-buttons-group" id="group-picard">
+          <button class="btn btn-info" data-msg="picard, como está o tempo?">📡 Picard: Boletim Meteorológico Orbital</button>
+          <button class="btn btn-purple" data-msg="picard, engajar dobra 9!">🚀 Picard: Engajar Dobra 9!</button>
+          <button class="btn btn-warning" data-msg="picard, um cha earl grey quente">☕ Picard: Tea. Earl Grey. Hot.</button>
+          <button class="btn btn-primary" data-msg="picard, vem comigo em missao">🖖 Picard: Acompanhe em missão de superfície</button>
+          <button class="btn btn-secondary" data-msg="picard, retornar a ponte">🛰️ Picard: Retornar à ponte da Enterprise</button>
+        </div>
+      </div>
+
+      <!-- Live Chat Simulator Form -->
       <form id="chat-form" class="chat-form">
-        <input type="text" id="chat-input" placeholder="Digite uma mensagem para o chat do Minecraft (ex: 'karlach, vem cá', 'picard, engajar dobra 9')..." autocomplete="off" />
-        <button type="submit" class="btn btn-primary" id="btn-send">Enviar Comando</button>
+        <input type="text" id="chat-input" placeholder="Digite uma mensagem ou comando natural em português (ex: 'karlach, minera tudo', 'picard, engajar dobra 9')..." autocomplete="off" />
+        <button type="submit" class="btn btn-primary" id="btn-send">Enviar Comando ⚡</button>
       </form>
     </section>
 
     <!-- Main Dashboard Grid -->
     <div class="dashboard-grid">
-      <!-- Coluna Esquerda: Agentes, Leases, Radar -->
+      <!-- Coluna Esquerda: Agentes, Jogadores, Leases, Radar -->
       <div class="grid-col">
+        <!-- Agentes no Servidor -->
         <section class="panel-card" id="bt-live-tree">
-          <h3>🤖 Agentes no Servidor</h3>
+          <div class="panel-header">
+            <h3>🤖 Agentes Server-Native Ativos</h3>
+            <span class="badge badge-pulse">20 Hz Zero-GC</span>
+          </div>
           <div class="agent-cards" id="agent-cards-container">Carregando telemetria...</div>
         </section>
 
+        <!-- Jogadores Online no Servidor -->
+        <section class="panel-card" id="players-panel">
+          <div class="panel-header">
+            <h3>👥 Jogadores no Servidor</h3>
+            <span id="player-count-badge" class="badge badge-info">0 players</span>
+          </div>
+          <div class="players-list" id="players-list-container">
+            <p style="color:#94a3b8">Verificando jogadores conectados...</p>
+          </div>
+        </section>
+
+        <!-- Actuator Leases -->
         <section class="panel-card" id="actuator-leases">
-          <h3>🔒 Actuator Leases (Arbitragem de Concorrência)</h3>
+          <div class="panel-header">
+            <h3>🔒 Actuator Leases (Arbitragem de Concorrência)</h3>
+            <span class="badge badge-success">Posse Exclusiva</span>
+          </div>
           <div class="leases-grid" id="leases-container"></div>
         </section>
 
+        <!-- Radar 3D -->
         <section class="panel-card">
           <div class="panel-header">
-            <h3>🧭 Radar Espacial 3D (PathSolver3D)</h3>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <h3>🧭 Radar Espacial 3D (PathSolver3D)</h3>
+            </div>
+            <div class="radar-controls">
+              <button class="btn-xs active" id="radar-view-sanctuary">🌿 Santuário</button>
+              <button class="btn-xs" id="radar-view-karlach">🎯 Foco Karlach</button>
+              <button class="btn-xs" id="radar-view-picard">🖖 Enterprise-D</button>
+            </div>
           </div>
-          <canvas id="astar-radar" width="460" height="260"></canvas>
+          <canvas id="astar-radar" width="460" height="270"></canvas>
+          <div class="radar-legend" id="radar-legend">
+            <span>🔴 Karlach</span>
+            <span>🔵 Picard</span>
+            <span>🟢 Jogadores</span>
+            <span>🚪 Portais A*</span>
+          </div>
         </section>
       </div>
 
@@ -73,15 +165,22 @@
             <h3>🧠 Voyager Skill Library</h3>
             <span class="badge badge-success">🛡️ Malli Gatekeeper: Ativo</span>
           </div>
-          <p class="panel-desc">Skills compostas e validadas dinamicamente pelo Sistema 2 sem <code>eval()</code> inseguro.</p>
+          <p class="panel-desc">Skills compostas e validadas dinamicamente pelo Sistema 2 com gramática formal e sem <code>eval()</code>.</p>
           <div id="skills-list" class="skills-list"></div>
         </section>
 
         <!-- Live Cognitive Feed -->
         <section class="panel-card" id="cognitive-feed-panel">
           <div class="panel-header">
-            <h3>📜 Feed Cognitivo em Tempo Real (Sistema 2 & Motor)</h3>
-            <div style="display:flex;align-items:center;gap:8px;">
+            <h3>📜 Feed Cognitivo em Tempo Real (Sistema 1 & 2)</h3>
+            <div class="feed-actions">
+              <div class="feed-filters">
+                <button class="feed-filter-btn active" data-filter="all">Todos</button>
+                <button class="feed-filter-btn" data-filter="stimulus">Estímulos</button>
+                <button class="feed-filter-btn" data-filter="router">Router</button>
+                <button class="feed-filter-btn" data-filter="motor">Motor</button>
+                <button class="feed-filter-btn" data-filter="critic">Critic</button>
+              </div>
               <button id="btn-clear-feed" class="btn-sm" title="Limpar histórico do feed">🗑️ Limpar</button>
               <span class="live-pill"><span class="live-dot"></span> LIVE</span>
             </div>

@@ -1,10 +1,15 @@
-// Craft Agents Studio — Voyager 2.0 Native JVM Frontend (CA-040 / CA-041)
+// Craft Agents Studio — Voyager 2.0 Native JVM Frontend (CA-040 / CA-041 / CA-056)
 
 let wsInstance = null;
 let lastEventsJson = "";
 let lastSkillsJson = "";
 let lastAgentsJson = "";
 let lastLeasesJson = "";
+let lastPlayersJson = "";
+let activeFeedFilter = "all";
+let activeRadarView = "sanctuary"; // "sanctuary", "karlach", "picard"
+let currentSpeaker = localStorage.getItem("craft_agents_speaker") || "pace";
+let latestTelemetry = null;
 
 export function connectStudioSocket(url) {
   const host = window.location.host || "localhost:8095";
@@ -71,21 +76,31 @@ async function fetchStatus() {
   }
 }
 
-export async function sendChatMessage(message, speaker = "pace") {
+export async function sendChatMessage(message, speaker = null) {
   if (!message || !message.trim()) return;
+  const chosenSpeaker = speaker || getSelectedSpeaker();
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ speaker: speaker, message: message.trim() })
+      body: JSON.stringify({ speaker: chosenSpeaker, message: message.trim() })
     });
     if (res.ok) {
-      console.log("[Studio] Comando enviado com sucesso:", message);
+      console.log(`[Studio] [${chosenSpeaker}] Comando enviado:`, message);
       setTimeout(fetchStatus, 150);
     }
   } catch (e) {
     console.error("[Studio] Erro ao enviar comando:", e);
   }
+}
+
+function getSelectedSpeaker() {
+  const select = document.getElementById("speaker-select");
+  const custom = document.getElementById("speaker-custom");
+  if (select && select.value === "custom" && custom && custom.value.trim()) {
+    return custom.value.trim();
+  }
+  return select ? select.value : currentSpeaker;
 }
 
 export async function clearCognitiveFeed() {
@@ -117,7 +132,13 @@ function formatEventTime(evt) {
   return timeStr;
 }
 
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function renderTelemetry(data) {
+  latestTelemetry = data;
   const root = document.getElementById("studio-root");
   if (!root) return;
   root.dataset.status = "connected";
@@ -128,8 +149,45 @@ function renderTelemetry(data) {
     tickEl.textContent = `Tick: ${data.tick}`;
   }
 
-  // 1. Agentes (renderiza apenas se houve mudança)
-  const agentsJson = JSON.stringify(data.agents || {});
+  // Weather Badge
+  const weatherBadge = document.getElementById("weather-badge");
+  if (weatherBadge && data.weather) {
+    const w = data.weather;
+    const rainIcon = w.raining? (w.thundering? "⛈️" : "🌧️") : "☀️";
+    weatherBadge.textContent = `${rainIcon} ${w.clock || "12:00"} (${w.phase || "Dia"}) • ${w.sky || "Céu Limpo"}`;
+  }
+
+  // Players Badge & Panel
+  const playersBadge = document.getElementById("players-badge");
+  const playersCountBadge = document.getElementById("player-count-badge");
+  const playersContainer = document.getElementById("players-list-container");
+  const allPlayers = data.players || [];
+  const players = allPlayers.filter(p => !["karlach", "picard", "antigravity"].includes(p.name.toLowerCase()));
+  if (playersBadge) {
+    playersBadge.textContent = `👥 ${players.length} jogador${players.length === 1 ? '' : 'es'}`;
+  }
+  if (playersCountBadge) {
+    playersCountBadge.textContent = `${players.length} online`;
+  }
+  const playersJson = JSON.stringify(players);
+  if (playersJson !== lastPlayersJson) {
+    lastPlayersJson = playersJson;
+    if (playersContainer) {
+      if (players.length === 0) {
+        playersContainer.innerHTML = `<p style="color:#94a3b8">Nenhum jogador humano conectado no momento.</p>`;
+      } else {
+        playersContainer.innerHTML = players.map(p => `
+          <div class="player-chip">
+            <span>🟢 <strong>${p.name}</strong></span>
+            <span class="coord">[${p.x.toFixed(1)}, ${p.y.toFixed(0)}, ${p.z.toFixed(1)}]</span>
+          </div>
+        `).join("");
+      }
+    }
+  }
+
+  // 1. Agentes
+  const agentsJson = JSON.stringify({ agents: data.agents || {}, inv: data.inventory || {} });
   if (agentsJson !== lastAgentsJson) {
     lastAgentsJson = agentsJson;
     const agentsContainer = document.getElementById("agent-cards-container");
@@ -141,16 +199,27 @@ function renderTelemetry(data) {
       } else {
         agentsContainer.innerHTML = agentKeys.map(k => {
           const ag = agents[k];
+          const isKarlach = k.toLowerCase().includes("karlach");
           const posStr = ag.pos ? `[${ag.pos.map(n => Number(n).toFixed(1)).join(", ")}]` : "N/A";
+          const invObj = isKarlach ? (data.inventory?.karlach?.items || {}) : {};
+          const invKeys = Object.keys(invObj);
+          const invChipsHtml = invKeys.length ? `
+            <div class="agent-inv-chips">
+              ${invKeys.slice(0, 8).map(ik => `<span class="inv-chip">${invObj[ik]}x ${ik.replace("minecraft:", "")}</span>`).join("")}
+              ${invKeys.length > 8 ? `<span class="inv-chip">+${invKeys.length - 8}</span>` : ''}
+            </div>
+          ` : '';
+
           return `
             <div class="agent-card">
               <div class="agent-card-header">
-                <span class="agent-name">${k.toUpperCase()}</span>
+                <span class="agent-name">${isKarlach ? "🔥 " : "🖖 "}${k.toUpperCase()}</span>
                 <span class="agent-pos">${posStr}</span>
               </div>
               <div class="agent-task"><strong>Status:</strong> ${ag.status || "ativo"}</div>
               ${ag.task ? `<div class="agent-task"><strong>Tarefa:</strong> ${ag.task}</div>` : ''}
               ${ag.last_learned ? `<div class="agent-task"><strong>Última Skill:</strong> <span style="color:#fbbf24">${ag.last_learned}</span></div>` : ''}
+              ${invChipsHtml}
               ${ag.skills && ag.skills.length ? `
                 <div class="agent-skills-tag">🧠 Skills: ${ag.skills.join(", ")}</div>
               ` : ''}
@@ -161,8 +230,8 @@ function renderTelemetry(data) {
     }
   }
 
-  // 2. Leases & Recursos Espaciais Compartilhados (renderiza apenas se houve mudança)
-  const leasesJson = JSON.stringify({leases: data.leases || {}, resources: data.resources || {}});
+  // 2. Actuator Leases
+  const leasesJson = JSON.stringify({ leases: data.leases || {}, resources: data.resources || {} });
   if (leasesJson !== lastLeasesJson) {
     lastLeasesJson = leasesJson;
     const leasesContainer = document.getElementById("leases-container");
@@ -183,7 +252,7 @@ function renderTelemetry(data) {
     }
   }
 
-  // 3. Voyager Skill Library (renderiza apenas se houve mudança)
+  // 3. Voyager Skill Library
   const skillsJson = JSON.stringify(data.skills || []);
   if (skillsJson !== lastSkillsJson) {
     lastSkillsJson = skillsJson;
@@ -210,44 +279,53 @@ function renderTelemetry(data) {
     }
   }
 
-  // 4. Feed Cognitivo em Tempo Real (SEM PISCAR / diff-checked)
-  const eventsJson = JSON.stringify(data.events || []);
-  if (eventsJson !== lastEventsJson) {
-    lastEventsJson = eventsJson;
-    const logsEl = document.getElementById("cognitive-logs");
-    if (logsEl && data.events) {
-      const events = data.events;
-      if (events.length === 0) {
-        logsEl.innerHTML = `<p style="color:#94a3b8">Aguardando eventos cognitivos do servidor...</p>`;
-      } else {
-        logsEl.innerHTML = events.map(evt => {
-          const borderCol = evt.color || "#38bdf8";
-          const formattedTime = formatEventTime(evt);
-          return `
-            <div class="feed-item" style="border-left-color: ${borderCol}">
-              <div class="feed-header">
-                <span class="feed-tag" style="background:${borderCol}22; color:${borderCol}">${evt.badge || evt.type || "INFO"}</span>
-                <span class="feed-time">${formattedTime}</span>
-              </div>
-              <div class="feed-source">${evt.source || "Sistema"}</div>
-              <div class="feed-text">${escapeHtml(evt.text || "")}</div>
-            </div>
-          `;
-        }).join("");
-
-        // Auto-scroll para o fim
-        logsEl.scrollTop = logsEl.scrollHeight;
-      }
-    }
-  }
+  // 4. Feed Cognitivo em Tempo Real
+  renderCognitiveFeed(data.events || []);
 
   // 5. Radar 3D Canvas
   renderRadar(data);
 }
 
-function escapeHtml(str) {
-  if (!str) return "";
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function renderCognitiveFeed(events) {
+  const eventsJson = JSON.stringify({ events: events, filter: activeFeedFilter });
+  if (eventsJson === lastEventsJson) return;
+  lastEventsJson = eventsJson;
+
+  const logsEl = document.getElementById("cognitive-logs");
+  if (!logsEl) return;
+
+  let filtered = events;
+  if (activeFeedFilter === "stimulus") {
+    filtered = events.filter(e => (e.type || "").toLowerCase().includes("stimulus"));
+  } else if (activeFeedFilter === "router") {
+    filtered = events.filter(e => (e.type || "").toLowerCase().includes("router"));
+  } else if (activeFeedFilter === "motor") {
+    filtered = events.filter(e => (e.type || "").toLowerCase().includes("motor"));
+  } else if (activeFeedFilter === "critic") {
+    filtered = events.filter(e => (e.type || "").toLowerCase().includes("critic") || (e.type || "").toLowerCase().includes("gatekeeper"));
+  }
+
+  if (filtered.length === 0) {
+    logsEl.innerHTML = `<p style="color:#94a3b8">Nenhum evento registrado para o filtro '${activeFeedFilter}'.</p>`;
+    return;
+  }
+
+  logsEl.innerHTML = filtered.map(evt => {
+    const borderCol = evt.color || "#38bdf8";
+    const formattedTime = formatEventTime(evt);
+    return `
+      <div class="feed-item" style="border-left-color: ${borderCol}">
+        <div class="feed-header">
+          <span class="feed-tag" style="background:${borderCol}22; color:${borderCol}">${evt.badge || evt.type || "INFO"}</span>
+          <span class="feed-time">${formattedTime}</span>
+        </div>
+        <div class="feed-source">${evt.source || "Sistema"}</div>
+        <div class="feed-text">${escapeHtml(evt.text || "")}</div>
+      </div>
+    `;
+  }).join("");
+
+  logsEl.scrollTop = logsEl.scrollHeight;
 }
 
 function renderRadar(data) {
@@ -261,153 +339,205 @@ function renderRadar(data) {
   ctx.fillStyle = "#070b14";
   ctx.fillRect(0, 0, w, h);
 
-  // Grid
-  ctx.strokeStyle = "#131f33";
-  ctx.lineWidth = 1;
-  const step = 32;
-  for (let x = 0; x < w; x += step) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
-    ctx.stroke();
-  }
-  for (let y = 0; y < h; y += step) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
-  }
+  // Determina centro e escala de acordo com activeRadarView
+  let centerWorldX = -175.0;
+  let centerWorldZ = 178.0;
+  let scale = 3.6;
 
-  // Centro de Referência do Santuário (-175, 178)
-  const centerWorldX = -175.0;
-  const centerWorldZ = 178.0;
-  const scale = 3.8; // pixels por bloco
+  const karlachPos = data.agents?.karlach?.pos;
+  const picardPos = data.agents?.picard?.pos;
+
+  if (activeRadarView === "karlach" && karlachPos) {
+    centerWorldX = karlachPos[0];
+    centerWorldZ = karlachPos[2];
+    scale = 4.5;
+  } else if (activeRadarView === "picard" && picardPos) {
+    centerWorldX = picardPos[0];
+    centerWorldZ = picardPos[2];
+    scale = 4.2;
+  }
 
   const toScreenX = (wx) => (w / 2) + (wx - centerWorldX) * scale;
   const toScreenY = (wz) => (h / 2) + (wz - centerWorldZ) * scale;
 
-  // 1. Lago Norte (Área aberta de fuga e resgate)
-  const lakeX1 = toScreenX(-205);
-  const lakeY1 = toScreenY(148);
-  const lakeW = ((-145) - (-205)) * scale;
-  const lakeH = (163 - 148) * scale;
-  ctx.fillStyle = "rgba(14, 165, 233, 0.08)";
-  ctx.strokeStyle = "rgba(14, 165, 233, 0.4)";
-  ctx.setLineDash([4, 4]);
+  // Grid
+  ctx.strokeStyle = "#131f33";
   ctx.lineWidth = 1;
-  ctx.fillRect(lakeX1, lakeY1, lakeW, lakeH);
-  ctx.strokeRect(lakeX1, lakeY1, lakeW, lakeH);
-  ctx.setLineDash([]);
-  ctx.fillStyle = "#38bdf8";
-  ctx.font = "10px monospace";
-  ctx.fillText("🌊 Lago Norte (Área Externa)", lakeX1 + 6, lakeY1 + 12);
+  const step = 28;
+  for (let x = 0; x < w; x += step) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let y = 0; y < h; y += step) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
 
-  // 2. Corredor Central de Trânsito A*
-  const corrX = toScreenX(-179);
-  const corrY = toScreenY(165);
-  const corrW = ((-171) - (-179)) * scale;
-  const corrH = (196 - 165) * scale;
-  ctx.fillStyle = "rgba(51, 65, 85, 0.25)";
-  ctx.strokeStyle = "#334155";
-  ctx.lineWidth = 1;
-  ctx.fillRect(corrX, corrY, corrW, corrH);
-  ctx.strokeRect(corrX, corrY, corrW, corrH);
+  // Se visualizando Santuário ou Karlach nas proximidades do Santuário
+  const distToSanctuary = Math.hypot(centerWorldX - (-175), centerWorldZ - 178);
+  if (distToSanctuary < 80) {
+    // 1. Lago Norte
+    const lakeX1 = toScreenX(-205);
+    const lakeY1 = toScreenY(148);
+    const lakeW = ((-145) - (-205)) * scale;
+    const lakeH = (163 - 148) * scale;
+    ctx.fillStyle = "rgba(14, 165, 233, 0.08)";
+    ctx.strokeStyle = "rgba(14, 165, 233, 0.4)";
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.fillRect(lakeX1, lakeY1, lakeW, lakeH);
+    ctx.strokeRect(lakeX1, lakeY1, lakeW, lakeH);
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#38bdf8";
+    ctx.font = "10px monospace";
+    ctx.fillText("🌊 Lago Norte (Capivaras / Área Aquática)", lakeX1 + 6, lakeY1 + 12);
 
-  // 3. As 4 Jaulas Individuais do Santuário
-  const enclosures = [
-    {
-      id: "pen-north-west",
-      name: "❄️ Tundra (NW)",
-      species: "Mamute/Raposa",
-      minX: -214, maxX: -180, minZ: 165, maxZ: 177,
-      color: "#0ea5e9",
-      bg: "rgba(14, 165, 233, 0.12)",
-      gate: [-179, 171],
-      gateSide: "L"
-    },
-    {
-      id: "pen-south-west",
-      name: "🌿 Bosque (SW)",
-      species: "Capivara/Cervo",
-      minX: -214, maxX: -180, minZ: 184, maxZ: 196,
-      color: "#22c55e",
-      bg: "rgba(34, 197, 94, 0.12)",
-      gate: [-179, 189],
-      gateSide: "L"
-    },
-    {
-      id: "pen-north-east",
-      name: "🎋 Pandas (NE)",
-      species: "Panda/Camelo",
-      minX: -170, maxX: -136, minZ: 165, maxZ: 177,
-      color: "#eab308",
-      bg: "rgba(234, 179, 8, 0.12)",
-      gate: [-171, 171],
-      gateSide: "R"
-    },
-    {
-      id: "pen-south-east",
-      name: "🦒 Savana (SE)",
-      species: "Elefante/Girafa",
-      minX: -170, maxX: -136, minZ: 184, maxZ: 196,
-      color: "#f97316",
-      bg: "rgba(249, 115, 22, 0.12)",
-      gate: [-171, 189],
-      gateSide: "R"
-    }
-  ];
+    // 2. Corredor Central
+    const corrX = toScreenX(-179);
+    const corrY = toScreenY(165);
+    const corrW = ((-171) - (-179)) * scale;
+    const corrH = (196 - 165) * scale;
+    ctx.fillStyle = "rgba(51, 65, 85, 0.25)";
+    ctx.strokeStyle = "#334155";
+    ctx.lineWidth = 1;
+    ctx.fillRect(corrX, corrY, corrW, corrH);
+    ctx.strokeRect(corrX, corrY, corrW, corrH);
 
-  enclosures.forEach(enc => {
-    const ex = toScreenX(enc.minX);
-    const ey = toScreenY(enc.minZ);
-    const ew = (enc.maxX - enc.minX) * scale;
-    const eh = (enc.maxZ - enc.minZ) * scale;
+    // 3. As 4 Jaulas Individuais do Santuário (com Gatos incluídos)
+    const enclosures = [
+      {
+        id: "pen-north-west",
+        name: "❄️ Tundra (NW)",
+        species: "Mamutes & Raposas",
+        minX: -214, maxX: -180, minZ: 165, maxZ: 177,
+        color: "#0ea5e9",
+        bg: "rgba(14, 165, 233, 0.12)",
+        gate: [-179, 171],
+        gateSide: "L"
+      },
+      {
+        id: "pen-south-west",
+        name: "🌿 Bosque (SW)",
+        species: "Capivaras, Gatos & Cervos",
+        minX: -214, maxX: -180, minZ: 184, maxZ: 196,
+        color: "#22c55e",
+        bg: "rgba(34, 197, 94, 0.12)",
+        gate: [-179, 189],
+        gateSide: "L"
+      },
+      {
+        id: "pen-north-east",
+        name: "🎋 Pandas & Gatos (NE)",
+        species: "Pandas, Gatos & Camelos",
+        minX: -170, maxX: -136, minZ: 165, maxZ: 177,
+        color: "#eab308",
+        bg: "rgba(234, 179, 8, 0.12)",
+        gate: [-171, 171],
+        gateSide: "R"
+      },
+      {
+        id: "pen-south-east",
+        name: "🦒 Savana (SE)",
+        species: "Elefantes, Girafas & Zebras",
+        minX: -170, maxX: -136, minZ: 184, maxZ: 196,
+        color: "#f97316",
+        bg: "rgba(249, 115, 22, 0.12)",
+        gate: [-171, 189],
+        gateSide: "R"
+      }
+    ];
 
-    // Fundo da jaula
-    ctx.fillStyle = enc.bg;
-    ctx.fillRect(ex, ey, ew, eh);
+    enclosures.forEach(enc => {
+      const ex = toScreenX(enc.minX);
+      const ey = toScreenY(enc.minZ);
+      const ew = (enc.maxX - enc.minX) * scale;
+      const eh = (enc.maxZ - enc.minZ) * scale;
 
-    // Cerca de contenção
-    ctx.strokeStyle = enc.color;
+      ctx.fillStyle = enc.bg;
+      ctx.fillRect(ex, ey, ew, eh);
+
+      ctx.strokeStyle = enc.color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(ex, ey, ew, eh);
+
+      ctx.fillStyle = enc.color;
+      ctx.font = "bold 10px monospace";
+      ctx.fillText(enc.name, ex + 4, ey + 12);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+      ctx.font = "9px monospace";
+      ctx.fillText(enc.species, ex + 4, ey + 22);
+
+      // Portão Duplo A*
+      const [gx, gz] = enc.gate;
+      const gsx = toScreenX(gx);
+      const gsy = toScreenY(gz);
+
+      ctx.fillStyle = "#facc15";
+      ctx.beginPath();
+      ctx.arc(gsx, gsy, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = "#fef08a";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = "#fef08a";
+      ctx.font = "bold 9px monospace";
+      if (enc.gateSide === "L") {
+        ctx.fillText("🚪", gsx - 12, gsy + 3);
+      } else {
+        ctx.fillText("🚪", gsx + 4, gsy + 3);
+      }
+    });
+  } else if (activeRadarView === "picard") {
+    // Esboço da Ponte da Enterprise-D em torno de [-65, 101]
+    const bridgeX = toScreenX(-75);
+    const bridgeY = toScreenY(91);
+    const bridgeW = 20 * scale;
+    const bridgeH = 20 * scale;
+
+    ctx.fillStyle = "rgba(168, 85, 247, 0.1)";
+    ctx.strokeStyle = "#c084fc";
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(ex, ey, ew, eh);
+    ctx.strokeRect(bridgeX, bridgeY, bridgeW, bridgeH);
+    ctx.fillRect(bridgeX, bridgeY, bridgeW, bridgeH);
 
-    // Rótulo da jaula
-    ctx.fillStyle = enc.color;
-    ctx.font = "bold 10px monospace";
-    ctx.fillText(enc.name, ex + 4, ey + 12);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+    ctx.fillStyle = "#c084fc";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText("🛸 Ponte da USS Enterprise-D (NCC-1701-D)", bridgeX + 6, bridgeY + 14);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
     ctx.font = "9px monospace";
-    ctx.fillText(enc.species, ex + 4, ey + 22);
+    ctx.fillText("Estação de Comando • Leme • Meteorologia Orbital", bridgeX + 6, bridgeY + 26);
+  }
 
-    // 4. Portão Duplo A* (PortalDetector)
-    const [gx, gz] = enc.gate;
-    const gsx = toScreenX(gx);
-    const gsy = toScreenY(gz);
+  // 4. Desenhar Jogadores Humanos Conectados
+  const allPlayers = data.players || [];
+  const players = allPlayers.filter(p => !["karlach", "picard", "antigravity"].includes(p.name.toLowerCase()));
+  players.forEach(p => {
+    const px = toScreenX(p.x);
+    const py = toScreenY(p.z);
 
-    // Marcador do Portão
-    ctx.fillStyle = "#facc15";
+    // Aura verde
+    ctx.fillStyle = "rgba(34, 197, 94, 0.25)";
     ctx.beginPath();
-    ctx.arc(gsx, gsy, 3.5, 0, Math.PI * 2);
+    ctx.arc(px, py, 10, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = "#fef08a";
-    ctx.lineWidth = 1;
+    // Ponto verde
+    ctx.fillStyle = "#22c55e";
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    ctx.fillStyle = "#fef08a";
-    ctx.font = "bold 9px monospace";
-    if (enc.gateSide === "L") {
-      ctx.fillText("🚪", gsx - 12, gsy + 3);
-    } else {
-      ctx.fillText("🚪", gsx + 4, gsy + 3);
-    }
+    ctx.fillStyle = "#86efac";
+    ctx.font = "bold 10px monospace";
+    ctx.fillText(p.name, px + 8, py - 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+    ctx.font = "9px monospace";
+    ctx.fillText(`[${p.x.toFixed(1)}, ${p.z.toFixed(1)}]`, px + 8, py + 8);
   });
-
-  // Legenda de Status no Rodapé
-  ctx.fillStyle = "#64748b";
-  ctx.font = "9px monospace";
-  ctx.fillText("4 Jaulas • 4 Portais A* (TRAVERSE_PORTAL) • Corredor Central", 8, h - 8);
 
   // 5. Desenhar Agentes
   const agents = data.agents || {};
@@ -421,13 +551,11 @@ function renderRadar(data) {
     const isKarlach = k.toLowerCase().includes("karlach");
     const color = isKarlach ? "#f97316" : "#38bdf8";
 
-    // Aura pulsante
-    ctx.fillStyle = isKarlach ? "rgba(249, 115, 22, 0.2)" : "rgba(56, 189, 248, 0.2)";
+    ctx.fillStyle = isKarlach ? "rgba(249, 115, 22, 0.25)" : "rgba(56, 189, 248, 0.25)";
     ctx.beginPath();
-    ctx.arc(sx, sy, 11, 0, Math.PI * 2);
+    ctx.arc(sx, sy, 12, 0, Math.PI * 2);
     ctx.fill();
 
-    // Ponto central
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(sx, sy, 6, 0, Math.PI * 2);
@@ -437,12 +565,11 @@ function renderRadar(data) {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Rótulo
     ctx.fillStyle = "#fff";
     ctx.font = "bold 10px monospace";
     ctx.fillText(`${k.toUpperCase()}`, sx + 9, sy - 2);
 
-    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
     ctx.font = "9px monospace";
     ctx.fillText(`[${ax.toFixed(1)}, ${az.toFixed(1)}]`, sx + 9, sy + 8);
   });
@@ -455,42 +582,92 @@ if (typeof window !== "undefined") {
     fetchStatus();
     setInterval(fetchStatus, 1500);
 
-    // Botões de Ação Rápida
-    const btnShelter = document.getElementById("btn-shelter");
-    if (btnShelter) {
-      btnShelter.addEventListener("click", () => {
-        sendChatMessage("karlach, está chovendo, vá se abrigar!");
+    // Speaker Selector
+    const speakerSelect = document.getElementById("speaker-select");
+    const speakerCustom = document.getElementById("speaker-custom");
+    if (speakerSelect) {
+      if (currentSpeaker && ["pace", "Lizzie"].includes(currentSpeaker)) {
+        speakerSelect.value = currentSpeaker;
+      } else if (currentSpeaker) {
+        speakerSelect.value = "custom";
+        if (speakerCustom) {
+          speakerCustom.style.display = "inline-block";
+          speakerCustom.value = currentSpeaker;
+        }
+      }
+      speakerSelect.addEventListener("change", () => {
+        if (speakerSelect.value === "custom") {
+          if (speakerCustom) {
+            speakerCustom.style.display = "inline-block";
+            speakerCustom.focus();
+          }
+        } else {
+          if (speakerCustom) speakerCustom.style.display = "none";
+          currentSpeaker = speakerSelect.value;
+          localStorage.setItem("craft_agents_speaker", currentSpeaker);
+        }
+      });
+    }
+    if (speakerCustom) {
+      speakerCustom.addEventListener("input", () => {
+        currentSpeaker = speakerCustom.value.trim() || "pace";
+        localStorage.setItem("craft_agents_speaker", currentSpeaker);
       });
     }
 
-    const btnRescue = document.getElementById("btn-rescue");
-    if (btnRescue) {
-      btnRescue.addEventListener("click", () => {
-        sendChatMessage("karlach, a capivarinha filhote está fora da grade, conduz ela pra dentro da jaula apropriada");
+    // Action Category Tabs
+    const tabBtns = document.querySelectorAll(".tab-btn");
+    tabBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        tabBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        const cat = btn.dataset.category;
+        document.querySelectorAll(".quick-buttons-group").forEach(g => g.classList.remove("active"));
+        const targetGroup = document.getElementById(`group-${cat}`);
+        if (targetGroup) targetGroup.classList.add("active");
       });
-    }
+    });
 
-    const btnPatrol = document.getElementById("btn-patrol");
-    if (btnPatrol) {
-      btnPatrol.addEventListener("click", () => {
-        sendChatMessage("karlach, volta pra patrulha no santuario!");
+    // Quick Action Buttons com data-msg
+    document.querySelectorAll(".quick-buttons-group button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const msg = btn.dataset.msg;
+        if (msg) {
+          sendChatMessage(msg);
+        }
       });
-    }
+    });
 
-    const btnDance = document.getElementById("btn-dance");
-    if (btnDance) {
-      btnDance.addEventListener("click", () => {
-        sendChatMessage("karlach, dança o passinho de avernus!");
+    // Radar View Mode Buttons
+    const viewSanctuary = document.getElementById("radar-view-sanctuary");
+    const viewKarlach = document.getElementById("radar-view-karlach");
+    const viewPicard = document.getElementById("radar-view-picard");
+    const radarViewBtns = [viewSanctuary, viewKarlach, viewPicard].filter(Boolean);
+
+    radarViewBtns.forEach(b => {
+      b.addEventListener("click", () => {
+        radarViewBtns.forEach(x => x.classList.remove("active"));
+        b.classList.add("active");
+        if (b === viewSanctuary) activeRadarView = "sanctuary";
+        if (b === viewKarlach) activeRadarView = "karlach";
+        if (b === viewPicard) activeRadarView = "picard";
+        if (latestTelemetry) renderRadar(latestTelemetry);
       });
-    }
+    });
 
-    const btnWeather = document.getElementById("btn-picard-weather");
-    if (btnWeather) {
-      btnWeather.addEventListener("click", () => {
-        sendChatMessage("picard, como está o tempo?");
+    // Cognitive Feed Filter Buttons
+    const filterBtns = document.querySelectorAll(".feed-filter-btn");
+    filterBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        filterBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        activeFeedFilter = btn.dataset.filter || "all";
+        lastEventsJson = ""; // Força re-render
+        if (latestTelemetry) renderCognitiveFeed(latestTelemetry.events || []);
       });
-    }
+    });
 
+    // Botão Limpar Feed
     const btnClearFeed = document.getElementById("btn-clear-feed");
     if (btnClearFeed) {
       btnClearFeed.addEventListener("click", () => {
