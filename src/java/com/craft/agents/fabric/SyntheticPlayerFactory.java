@@ -454,10 +454,11 @@ public final class SyntheticPlayerFactory {
                     try {
                         Object cmdMgr = server.getClass().getMethod("method_3734").invoke(server);
                         Object cmdSrc = server.getClass().getMethod("method_3739").invoke(server);
-                        Object silentSrc = cmdSrc.getClass().getMethod("method_9217").invoke(cmdSrc);
                         cmdMgr.getClass().getMethod("method_44252", cmdSrc.getClass(), String.class)
-                                .invoke(cmdMgr, silentSrc, cmd);
-                    } catch (Throwable ignored) {}
+                                .invoke(cmdMgr, cmdSrc, cmd);
+                    } catch (Throwable t) {
+                        System.out.println("[CMD_ERROR] cmd=" + cmd + " failed: " + t);
+                    }
                 });
                 return "OK";
             }

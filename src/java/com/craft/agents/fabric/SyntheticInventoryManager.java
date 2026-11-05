@@ -1,6 +1,7 @@
 package com.craft.agents.fabric;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -232,6 +233,7 @@ public final class SyntheticInventoryManager {
                 sb.append(entry.getKey()).append(",").append(entry.getValue());
                 first = false;
             }
+
             return sb.toString();
         } catch (Throwable t) {
             return "ERR|" + t.getMessage();
