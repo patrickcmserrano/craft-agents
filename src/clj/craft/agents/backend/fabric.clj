@@ -454,6 +454,9 @@
 (defn- compute-yaw [dx dz]
   (float (* (/ 180.0 Math/PI) (Math/atan2 (- (double dx)) (double dz)))))
 
+(defn- compute-pitch [dy hdist]
+  (float (- (* (/ 180.0 Math/PI) (Math/atan2 (double dy) (max 0.001 (double hdist)))))))
+
 (defn request-path3d
   "Requisita rota A* 3D com percepcao real de voxels e portais via ponte in-server."
   [[fx fy fz] [tx ty tz] & [radius]]
@@ -1097,18 +1100,12 @@
     (when (and target-p (> dist-to-player 8.0))
       (send-bridge-cmd! (str "CMD|tp Karlach " target))
       (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
-      (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
-    (swap! nav-state assoc
-           :mode :bodyguard
-           :follow-target (or target "pace")
-           :pos tgt-pos
-           :follow-path []
-           :steps []))
+      (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
+      (swap! nav-state assoc :pos tgt-pos :follow-path [] :steps [])))
 
   (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe")
   (send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
   (send-bridge-cmd! "SWING|Karlach")
-  (if voice-line (karlach-say! voice-line))
 
   (cond
     ;; Caso A: Minerar o bloco que o jogador está olhando (Raycast / Joint Gaze)
@@ -1118,57 +1115,44 @@
         (let [bx (:x look-res)
               by (:y look-res)
               bz (:z look-res)
-              bid (:block-id look-res)]
-          ;; Se Karlach estiver a mais de 4.0m do bloco apontado, aproxima
-          (let [[kx ky kz] (:pos @nav-state)
-                dist-b (Math/sqrt (+ (Math/pow (- bx kx) 2) (Math/pow (- by ky) 2) (Math/pow (- bz kz) 2)))]
-            (when (> dist-b 4.0)
-              (send-bridge-cmd! (uformat "CMD|tp Karlach %.1f %.1f %.1f" (double bx) (double by) (double bz)))
-              (swap! nav-state assoc :pos [(double bx) (double by) (double bz)])))
+              bid (:block-id look-res)
+              [kx ky kz] (:pos @nav-state)
+              odx (- (+ (double bx) 0.5) kx)
+              ody (- (+ (double by) 0.5) (+ (double ky) 1.62))
+              odz (- (+ (double bz) 0.5) kz)
+              hdist (Math/sqrt (+ (* odx odx) (* odz odz)))
+              total-d (Math/sqrt (+ (* odx odx) (* ody ody) (* odz odz)))
+              yaw (compute-yaw odx odz)
+              pitch (compute-pitch ody hdist)]
+          ;; Se Karlach estiver a mais de 2.2m do bloco apontado, aproxima para quebrar colada
+          (when (> total-d 2.2)
+            (let [approach-x (+ (double bx) (if (> kx bx) 1.2 -1.2))
+                  approach-z (+ (double bz) (if (> kz bz) 1.2 -1.2))]
+              (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" approach-x ky approach-z yaw pitch))
+              (swap! nav-state assoc :pos [approach-x ky approach-z] :yaw yaw :pitch pitch)))
+          (let [[cur-x cur-y cur-z] (:pos @nav-state)]
+            (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" cur-x cur-y cur-z yaw pitch)))
+          (send-bridge-cmd! "SWING|Karlach")
           (let [mine-res (mine-block! "Karlach" bx by bz)]
-            (send-bridge-cmd! "SWING|Karlach")
             (if (:success? mine-res)
               (do
                 (record-cognitive-event! engine-ctx-atom :action "Mineração Instantânea"
                                          (str "Bloco " bid " quebrado em [" bx " " by " " bz "]"))
+                (send-bridge-cmd! (uformat "CMD|particle minecraft:block %s %.2f %.2f %.2f 0.3 0.3 0.3 0.05 12 normal" (or bid "minecraft:stone") (+ (double bx) 0.5) (+ (double by) 0.5) (+ (double bz) 0.5)))
+                (send-bridge-cmd! (uformat "CMD|playsound minecraft:block.deepslate.break master @a %.1f %.1f %.1f 1.0 1.0" (double bx) (double by) (double bz)))
                 (karlach-say! (str "Bloco " (str/replace (or bid "alvo") #"minecraft:" "") " quebrado com sucesso na sua frente, soldado! ⛏️ 🔥")))
               (karlach-say! (str "Não consegui quebrar esse bloco: " (:message mine-res))))))
         (karlach-say! (str "Não consegui identificar nenhum bloco na sua mira direta, " target "! Chega um pouco mais perto e aponta de novo!"))))
 
-    ;; Caso B: Minerar minério/bloco específico ou veio próximo
+    ;; Caso B: Ativação do Modo de Mineração Contínua Autônoma
     :else
-    (let [filter-query (if (or (= target-filter "any") (nil? target-filter)) "" target-filter)
-          ores (locate-nearby-ores "Karlach" 16.0 filter-query)]
-      (if-let [target-ore (first ores)]
-        (do
-          (record-cognitive-event! engine-ctx-atom :perception "Sensor de Minérios"
-                                   (str "Veio detectado: " (:block-id target-ore) " a " (uformat "%.1fm" (:distance target-ore))))
-          (let [ore-name (get ore-pt-names target-filter (str/replace (:block-id target-ore) #"minecraft:" ""))]
-            (karlach-say! (str "Localizei um veio de " ore-name " a " (uformat "%.1fm" (:distance target-ore)) "! Deixa comigo! ⛏️ 🔥"))
-            ;; Se estiver a mais de 4.2m, aproxima
-            (when (> (:distance target-ore) 4.2)
-              (send-bridge-cmd! (uformat "CMD|tp Karlach %.1f %.1f %.1f"
-                                         (double (:x target-ore))
-                                         (double (:y target-ore))
-                                         (double (:z target-ore))))
-              (swap! nav-state assoc :pos [(:x target-ore) (:y target-ore) (:z target-ore)]))
-            ;; Minera o bloco alvo
-            (let [mine-res (mine-block! "Karlach" (:x target-ore) (:y target-ore) (:z target-ore))]
-              (send-bridge-cmd! "SWING|Karlach")
-              (if (:success? mine-res)
-                ;; Procura blocos adjacentes do mesmo veio (distância <= 2.5m do bloco quebrado)
-                (let [vein (clojure.core/filter (fn [o] (and (not= [(:x o) (:y o) (:z o)] [(:x target-ore) (:y target-ore) (:z target-ore)])
-                                                             (<= (Math/abs (- (:x o) (:x target-ore))) 2)
-                                                             (<= (Math/abs (- (:y o) (:y target-ore))) 2)
-                                                             (<= (Math/abs (- (:z o) (:z target-ore))) 2)))
-                                                ores)]
-                  (doseq [adj-ore (take 3 vein)]
-                    (mine-block! "Karlach" (:x adj-ore) (:y adj-ore) (:z adj-ore))
-                    (send-bridge-cmd! "SWING|Karlach"))
-                  (karlach-say! (str "Veio de " ore-name " completamente extraído, soldado! Pode recolher o saque! 🔥 ⛏️")))
-                (karlach-say! (str "Não consegui minerar o veio: " (:message mine-res)))))))
-        (let [ore-name (get ore-pt-names target-filter (or target-filter "minérios"))]
-          (karlach-say! (str "Procurei num raio de 16 blocos e não achei nenhum veio de " ore-name " por aqui perto, soldado! Dá uma olhada e me mostra onde tem!"))))))
+    (let [ore-name (get ore-pt-names target-filter (if (str/blank? target-filter) "minérios" target-filter))]
+      (karlach-say! (str "Picareta em punho, " target "! Modo de mineração contínua de " ore-name " ativado! Vou extrair todos os veios que encontrar por aqui! 🔥 ⛏️"))
+      (swap! nav-state assoc
+             :mode :mining
+             :mining-filter (or target-filter "")
+             :mining-target (or target "pace")
+             :mining-blocks-broken 0)))
 
   (when engine-ctx-atom
     (swap! engine-ctx-atom assoc-in [:agents :karlach :task]
@@ -1678,6 +1662,76 @@
                                    (swap! nav-state assoc :mode :sanctuary-patrol :steps [] :route-idx 0 :follow-lost-ticks 0)
                                    (karlach-say! "Perdi você de vista, soldado! Vou voltar pra patrulha dos cercados."))
                                  (swap! nav-state assoc :follow-lost-ticks lost-cnt)))))
+
+                         ;; 2.1 Modo Mineração Contínua Autônoma (Varrer, Aproximar a curta distância e quebrar veios)
+                         (= (:mode st) :mining)
+                         (let [players (query-online-players)
+                               target-p (first (clojure.core/filter #(= (str/lower-case (:name %))
+                                                                       (str/lower-case (or (:mining-target st) "pace")))
+                                                                   players))]
+                           (if target-p
+                             (let [tx (:x target-p)
+                                   ty (:y target-p)
+                                   tz (:z target-p)
+                                   dx (- tx cx)
+                                   dz (- tz cz)
+                                   dist-to-player (Math/sqrt (+ (* dx dx) (* (- (double ty) (double cy)) (- (double ty) (double cy))) (* dz dz)))]
+                               (if (> dist-to-player 24.0)
+                                 (do
+                                   (send-bridge-cmd! (uformat "CMD|tp Karlach %s" (:name target-p)))
+                                   (karlach-say! "Você avançou na mina, soldado! Acompanhando seus passos!")
+                                   (swap! nav-state assoc :mode :bodyguard :pos [tx ty tz]))
+                                 ;; Ciclo de Mineração Contínua: a cada 6 ticks (~300ms)
+                                 (when (zero? (mod tick 6))
+                                   (let [filter-str (or (:mining-filter st) "")
+                                         ores (locate-nearby-ores "Karlach" 12.0 filter-str)]
+                                     (if-let [target-ore (first ores)]
+                                       (let [bx (:x target-ore)
+                                             by (:y target-ore)
+                                             bz (:z target-ore)
+                                             odx (- (+ (double bx) 0.5) cx)
+                                             ody (- (+ (double by) 0.5) (+ (double cy) 1.62))
+                                             odz (- (+ (double bz) 0.5) cz)
+                                             hdist (Math/sqrt (+ (* odx odx) (* odz odz)))
+                                             total-d (Math/sqrt (+ (* odx odx) (* ody ody) (* odz odz)))
+                                             yaw (compute-yaw odx odz)
+                                             pitch (compute-pitch ody hdist)]
+                                         ;; Se a distância até o bloco for maior que 2.4m, aproxima-se ativamente
+                                         (if (> total-d 2.4)
+                                           (let [step-d (min 0.35 (max 0.1 (- total-d 1.8)))
+                                                 safe-hdist (max 0.001 hdist)
+                                                 step-x (+ cx (* (/ odx safe-hdist) step-d))
+                                                 step-z (+ cz (* (/ odz safe-hdist) step-d))]
+                                             (send-bridge-cmd!
+                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
+                                                      step-x cy step-z yaw pitch))
+                                             (swap! nav-state assoc :pos [step-x cy step-z] :yaw yaw :pitch pitch))
+                                           ;; A menos de 2.4m: Karlach fica de frente pro bloco e mina com impacto real!
+                                           (do
+                                             (send-bridge-cmd!
+                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
+                                                      cx cy cz yaw pitch))
+                                             (send-bridge-cmd! "SWING|Karlach")
+                                             (let [mres (mine-block! "Karlach" bx by bz)]
+                                               (when (:success? mres)
+                                                 (send-bridge-cmd!
+                                                  (uformat "CMD|particle minecraft:block %s %.2f %.2f %.2f 0.3 0.3 0.3 0.05 10 normal"
+                                                          (or (:block-id target-ore) "minecraft:deepslate")
+                                                          (+ (double bx) 0.5) (+ (double by) 0.5) (+ (double bz) 0.5)))
+                                                 (send-bridge-cmd!
+                                                  (uformat "CMD|playsound minecraft:block.deepslate.break master @a %.1f %.1f %.1f 1.0 1.0"
+                                                          (double bx) (double by) (double bz)))
+                                                 (swap! nav-state update :mining-blocks-broken (fnil inc 0))
+                                                 (locate-dropped-items "Karlach" 4.0))))))
+                                       ;; Sem mais blocos desse minério no raio de 12m: conclui a extração!
+                                       (let [broken-cnt (:mining-blocks-broken @nav-state 0)
+                                             ore-label (get ore-pt-names filter-str (if (str/blank? filter-str) "minérios" filter-str))]
+                                         (if (> broken-cnt 0)
+                                           (karlach-say! (str "Veio de " ore-label " extraído por completo (" broken-cnt " blocos)! Pode recolher o saque, soldado! 🔥 ⛏️"))
+                                           (karlach-say! (str "Não encontrei mais veios de " ore-label " por aqui perto, soldado!")))
+                                         (locate-dropped-items "Karlach" 6.0)
+                                         (swap! nav-state assoc :mode :bodyguard :mining-blocks-broken 0)))))))
+                             (swap! nav-state assoc :mode :bodyguard)))
 
                          ;; 3. Sanctuary Patrol & Enclosure Caretaker BT loop
                          :else
