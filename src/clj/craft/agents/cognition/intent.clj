@@ -70,6 +70,23 @@
    "ourico"              {:entity "Ouriço"              :species "naturalist:hedgehog"}
    "tatu"                {:entity "Tatu"                :species "minecraft:armadillo"}
    "pato"                {:entity "Pato"                :species "naturalist:duck"}
+   "gatinho oriental"    {:entity "Gatinho Oriental"    :species "minecraft:cat"}
+   "gato siames"         {:entity "Gato Siamês"         :species "minecraft:cat"}
+   "gato rajado"         {:entity "Gato Rajado"         :species "minecraft:cat"}
+   "gatinho preto"       {:entity "Gatinho Preto"       :species "minecraft:cat"}
+   "gato calico"         {:entity "Gato Cálido"         :species "minecraft:cat"}
+   "gatinhos"            {:entity "Gatinhos"            :species "minecraft:cat"}
+   "gatinhas"            {:entity "Gatinhas"            :species "minecraft:cat"}
+   "gatinho"             {:entity "Gatinho"             :species "minecraft:cat"}
+   "gatinha"             {:entity "Gatinha"             :species "minecraft:cat"}
+   "gatos"               {:entity "Gatos"               :species "minecraft:cat"}
+   "gatas"               {:entity "Gatos"               :species "minecraft:cat"}
+   "gato"                {:entity "Gato"                :species "minecraft:cat"}
+   "gata"                {:entity "Gato"                :species "minecraft:cat"}
+   "bichano"             {:entity "Gato"                :species "minecraft:cat"}
+   "bichanos"            {:entity "Gatos"               :species "minecraft:cat"}
+   "cats"                {:entity "Gatos"               :species "minecraft:cat"}
+   "cat"                 {:entity "Gato"                :species "minecraft:cat"}
    "bicho"               {:entity "Animal do Santuário" :species "animal"}
    "animal"              {:entity "Animal do Santuário" :species "animal"}
    "mob"                 {:entity "Animal do Santuário" :species "animal"}})
@@ -357,8 +374,10 @@
        :intent/confidence   (max 0.90 (double router-conf))
        :intent/route-method :semantic-vector
        :intent/anchor       (:intent/anchor router-match)
-       :intent/slots        {:target/action  "resume-patrol"
-                             :target/speaker speaker}
+       :intent/slots        (cond-> {:target/action  "resume-patrol"
+                                     :target/speaker speaker}
+                              animal (assoc :target/entity (:entity animal)
+                                            :target/species (:species animal)))
        :intent/raw-text     raw-text}
 
       ;; 8. Rota Dinâmica Aprendida (P1 - Hot-Reloaded Skill Route)

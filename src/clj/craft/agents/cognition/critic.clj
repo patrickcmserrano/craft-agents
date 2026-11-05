@@ -46,6 +46,10 @@
     (str/includes? (str/lower-case species-str) "hedgehog") "Hedgehog"
     (str/includes? (str/lower-case species-str) "ourico") "Hedgehog"
     (str/includes? (str/lower-case species-str) "ouriço") "Hedgehog"
+    (str/includes? (str/lower-case species-str) "cat") "Cat"
+    (str/includes? (str/lower-case species-str) "gato") "Cat"
+    (str/includes? (str/lower-case species-str) "gata") "Cat"
+    (str/includes? (str/lower-case species-str) "bichano") "Cat"
     :else species-str))
 
 (defn parse-sanctuary-snapshot

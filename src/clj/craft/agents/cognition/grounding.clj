@@ -55,7 +55,9 @@
             inside    (or (:inside-anchor portal) [-181.5 65.0 189.0])
             outside   (or (:outside-anchor portal) [-177.0 65.0 189.0])
             feed-pos  (or (:enclosure/feed-pos enc) [-192.0 65.0 189.0])
-            food      (or (:enclosure/food enc) "minecraft:apple")
+            food      (cond
+                        (or (= species "minecraft:cat") (= species "Cat")) "minecraft:cod"
+                        :else (or (:enclosure/food enc) "minecraft:apple"))
             gate-bl   (or (:gate-block portal) "minecraft:dark_oak_fence_gate")
             facing    (or (:gate-facing portal) "east")
             food-name (case food
@@ -63,6 +65,8 @@
                         "minecraft:hay_block" "um fardo de feno"
                         "minecraft:bamboo" "um bambu"
                         "minecraft:sweet_berries" "bagas doces"
+                        "minecraft:cod" "um peixe fresco"
+                        "minecraft:salmon" "um salmão apetitoso"
                         "uma comidinha")
             voice-msg (str "O " entity " fugiu?! Deixa comigo, soldado! Pegando " food-name " e um laço pra trazer de volta ao " enc-name "!")]
         {:goal/id          :rescue-animal
@@ -165,7 +169,12 @@
       :patrol-sanctuary
       {:goal/id         :patrol-sanctuary
        :goal/type       :patrol-sanctuary
-       :goal/voice-line "De volta à ronda do Santuário! Vou cuidar de todos os bichinhos!"
+       :goal/voice-line (cond
+                          (and entity (re-find #"(?i)gat" entity))
+                          (str "Com certeza, " speaker "! Deixa comigo que vou dar atenção e peixinho fresco pros nossos gatinhos e rondar o Santuário! 🐟 🐱")
+                          (seq entity)
+                          (str "Entendido, " speaker "! Vou dar atenção especial para " entity " e patrulhar o Santuário!")
+                          :else "De volta à ronda do Santuário! Vou cuidar de todos os bichinhos!")
        :goal/speaker    speaker}
 
       :inventory-inspection

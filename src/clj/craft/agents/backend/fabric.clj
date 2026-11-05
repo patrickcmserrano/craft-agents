@@ -461,25 +461,33 @@
   (send-bridge-cmd! (str "CMD|item replace entity Karlach weapon.mainhand with " food))
   (send-bridge-cmd! "SWING|Karlach")
   (doseq [sp species-list]
-    ;; Cura e regenera os animais sem forçar reprodução infinita (InLove:0 evita superpopulação e morte por sufocamento)
-    (send-bridge-cmd!
-     (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:instant_health 1 1 true"
-             fx fy fz sp))
-    (send-bridge-cmd!
-     (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:regeneration 20 1 true"
-             fx fy fz sp))
-    (send-bridge-cmd!
-     (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run data merge entity @s {InLove:0,PersistenceRequired:1b}"
-             fx fy fz sp))
-    (send-bridge-cmd!
-     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:heart ~ ~1.2 ~ 0.4 0.4 0.4 0.02 6 normal"
-             fx fy fz sp))
-    (send-bridge-cmd!
-     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:happy_villager ~ ~1.0 ~ 0.4 0.4 0.4 0.05 8 normal"
-             fx fy fz sp))
-    (send-bridge-cmd!
-     (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=1,sort=nearest] run playsound minecraft:entity.generic.eat neutral @a ~ ~ ~ 1.0 1.0"
-             fx fy fz sp))))
+    (let [is-cat? (or (= sp "minecraft:cat") (= sp "Cat") (= sp "cat"))]
+      (when is-cat?
+        (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:cod")
+        (send-bridge-cmd! "SWING|Karlach"))
+      ;; Cura e regenera os animais sem forçar reprodução infinita (InLove:0 evita superpopulação e morte por sufocamento)
+      (send-bridge-cmd!
+       (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:instant_health 1 1 true"
+               fx fy fz sp))
+      (send-bridge-cmd!
+       (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run effect give @s minecraft:regeneration 20 1 true"
+               fx fy fz sp))
+      (send-bridge-cmd!
+       (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=%s,distance=..22] run data merge entity @s {InLove:0,PersistenceRequired:1b}"
+               fx fy fz sp))
+      (send-bridge-cmd!
+       (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:heart ~ ~1.2 ~ 0.4 0.4 0.4 0.02 6 normal"
+               fx fy fz sp))
+      (send-bridge-cmd!
+       (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=4,sort=nearest] run particle minecraft:happy_villager ~ ~1.0 ~ 0.4 0.4 0.4 0.05 8 normal"
+               fx fy fz sp))
+      (send-bridge-cmd!
+       (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=%s,distance=..22,limit=1,sort=nearest] run playsound minecraft:entity.generic.eat neutral @a ~ ~ ~ 1.0 1.0"
+               fx fy fz sp))
+      (when is-cat?
+        (send-bridge-cmd!
+         (uformat "CMD|execute positioned %.1f %.1f %.1f at @e[type=cat,distance=..22,limit=2,sort=nearest] run playsound minecraft:entity.cat.purr neutral @a ~ ~ ~ 1.0 1.0"
+                 fx fy fz))))))
 
 (defn- compute-yaw [dx dz]
   (float (* (/ 180.0 Math/PI) (Math/atan2 (- (double dx)) (double dz)))))
@@ -1409,7 +1417,7 @@
 (defonce ^:private last-sentry-scan-ms (atom 0))
 
 (def ^:private sanctuary-monitored-species
-  #{"Capybara" "Deer" "Elephant" "Giraffe" "Zebra" "Mammoth" "Fox" "Armadillo" "Duck" "Tortoise" "Hedgehog" "Panda" "Camel" "Sniffer"})
+  #{"Capybara" "Deer" "Elephant" "Giraffe" "Zebra" "Mammoth" "Fox" "Armadillo" "Duck" "Tortoise" "Hedgehog" "Panda" "Camel" "Sniffer" "Cat"})
 
 (defn parse-sanctuary-escaped-animals
   "Analisa a telemetria do SANCTUARY e retorna a lista de animais fugitivos (fora de qualquer cerca ou baia)."
@@ -1472,7 +1480,7 @@
                     target-species (:species target)
                     target-pos     (:pos target)
                     species-key    (critic/normalize-species (or target-species target-name))
-                    reg-species    (case species-key
+                    reg-species    (case (clojure.string/lower-case (or species-key ""))
                                      "capybara" "naturalist:capybara"
                                      "deer" "naturalist:deer"
                                      "panda" "minecraft:panda"
@@ -1488,6 +1496,7 @@
                                      "duck" "naturalist:duck"
                                      "hedgehog" "naturalist:hedgehog"
                                      "armadillo" "minecraft:armadillo"
+                                     "cat" "minecraft:cat"
                                      "naturalist:capybara")]
                 (swap! proactive-sentry-cooldowns assoc target-name now)
                 (record-cognitive-event! engine-ctx-atom :perception "Escolta Ativa — Detecção de Fugitivo"

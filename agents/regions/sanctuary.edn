@@ -14,11 +14,14 @@
                       :gate-facing "west"}
    :enclosure/feed-pos [-161.0 65.0 171.0]
    :enclosure/food "minecraft:bamboo"
-   :enclosure/species ["minecraft:panda" "minecraft:camel" "minecraft:sniffer"]
+   :enclosure/species ["minecraft:panda" "minecraft:camel" "minecraft:sniffer" "minecraft:cat"]
    :enclosure/residents [{:type "minecraft:panda"   :name "Panda Bambu"       :pos [-163 65 170]}
                          {:type "minecraft:panda"   :name "Panda Alegre"      :pos [-159 65 170]}
                          {:type "minecraft:camel"   :name "Camelo Real"       :pos [-142 65 170]}
-                         {:type "minecraft:sniffer" :name "Sniffer Ancestral" :pos [-142 65 173]}]}
+                         {:type "minecraft:sniffer" :name "Sniffer Ancestral" :pos [-142 65 173]}
+                         {:type "minecraft:cat"     :name "Gato Siames"       :pos [-156 65 169]}
+                         {:type "minecraft:cat"     :name "Gatinho Preto"     :pos [-155 65 167]}
+                         {:type "minecraft:cat"     :name "Gato Calico"       :pos [-148 65 170]}]}
 
   {:enclosure/id :pen-south-east
    :enclosure/name "Savana dos Elefantes & Girafas"
@@ -51,7 +54,7 @@
                       :gate-facing "east"}
    :enclosure/feed-pos [-192.0 65.0 189.0]
    :enclosure/food "minecraft:apple"
-   :enclosure/species ["naturalist:capybara" "naturalist:deer" "naturalist:duck" "naturalist:hedgehog" "minecraft:armadillo"]
+   :enclosure/species ["naturalist:capybara" "naturalist:deer" "naturalist:duck" "naturalist:hedgehog" "minecraft:armadillo" "minecraft:cat"]
    :enclosure/residents [{:type "naturalist:capybara" :name "Capivara Fofinha"    :pos [-200 65 190]}
                          {:type "naturalist:capybara" :name "Capivara Nadadora"   :pos [-197 65 192]}
                          {:type "naturalist:capybara" :name "Capivarinha Filhote" :pos [-202 65 192]}
@@ -60,7 +63,8 @@
                          {:type "naturalist:duck"     :name "Patinho Amarelo"     :pos [-199 65 190]}
                          {:type "naturalist:duck"     :name "Pato Selvagem"       :pos [-196 65 191]}
                          {:type "naturalist:hedgehog" :name "Ourico Espinhudo"    :pos [-185 65 192]}
-                         {:type "minecraft:armadillo" :name "Tatu-Bola"           :pos [-210 65 193]}]}
+                         {:type "minecraft:armadillo" :name "Tatu-Bola"           :pos [-210 65 193]}
+                         {:type "minecraft:cat"       :name "Gato Rajado"         :pos [-181 65 183]}]}
 
   {:enclosure/id :pen-north-west
    :enclosure/name "Tundra do Ártico & Raposas das Neves"

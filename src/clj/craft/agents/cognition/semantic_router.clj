@@ -89,7 +89,10 @@
               "busca o bicho que fugiu"
               "recolhe esse animal agora"
               "socorro a bicha fugiu corre"
-              "coloca essa capivara no cercado dela"]}
+              "coloca essa capivara no cercado dela"
+              "o gato fugiu resgata ele"
+              "pega o gatinho solto"
+              "resgata o gato fujão"]}
 
    {:id :spatial-attention
     :description "Atenção visual compartilhada e identificação de entidades próximas"
@@ -175,7 +178,11 @@
               "vai cuidar dos animais nos cercados"
               "retoma seus afazeres e posto"
               "vai patrulhar a area agora"
-              "alimenta os animais nas baias"]}
+              "alimenta os animais nas baias"
+              "cuida dos gatos"
+              "alimenta os gatinhos"
+              "vai cuidar dos gatos"
+              "da peixe pros gatos"]}
 
    {:id :bodyguard
     :description "Modo guarda-costas, proteção pessoal, escolta armada e combate a hostis"

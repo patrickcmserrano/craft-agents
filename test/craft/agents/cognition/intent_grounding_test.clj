@@ -90,7 +90,20 @@
       (is (= :rescue-animal (:goal/id goal-spec)))
       (is (= :pen-south-east (:goal/pen-id goal-spec)))
       (is (= "minecraft:hay_block" (:goal/bait-item goal-spec)))
-      (is (= [-171 65 189] (:goal/gate-pos goal-spec))))))
+      (is (= [-171 65 189] (:goal/gate-pos goal-spec)))))
+
+  (testing "Grounding de Gato / Felinos usa peixe fresco (:minecraft/cod) e reconhece habitat"
+    (let [r1 (intent/classify-intent-semantic "karlach, o gato fugiu, traz ele pro cercado" "pace")
+          g1 (grounding/ground-goal r1)
+          r2 (intent/classify-intent-semantic "karlach, cuida dos gatos" "pace")
+          g2 (grounding/ground-goal r2)]
+      (is (= :animal-emergency (:intent/type r1)))
+      (is (= "minecraft:cat" (get-in r1 [:intent/slots :target/species])))
+      (is (= :rescue-animal (:goal/id g1)))
+      (is (= "minecraft:cod" (:goal/bait-item g1)))
+      (is (clojure.string/includes? (:goal/voice-line g1) "peixe fresco"))
+      (is (= :patrol-sanctuary (:intent/type r2)))
+      (is (clojure.string/includes? (:goal/voice-line g2) "peixinho fresco pros nossos gatinhos")))))
 
 (deftest test-semantic-router-vector-mechanics
   (testing "Similaridade de cosseno e subword n-grams"
