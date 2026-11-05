@@ -275,14 +275,26 @@
     (catch Throwable _ {})))
 
 (defn current-enclosure-id
-  "Identifica rigorosamente em qual cercado uma coordenada [x y z] se encontra."
+  "Identifica rigorosamente em qual cercado uma coordenada [x y z] se encontra.
+   Usa os limites fisicos reais dos muros e portões do Santuário com margem de segurança
+   para não considerar animais encostados na cerca como fugitivos."
   [[cx cy cz]]
   (cond
-    (and (<= -170 cx -136) (<= 165 cz 177)) :pen-north-east
-    (and (<= -170 cx -136) (<= 184 cz 196)) :pen-south-east
-    (and (<= -214 cx -180) (<= 184 cz 196)) :pen-south-west
-    (and (<= -214 cx -180) (<= 165 cz 177)) :pen-north-west
+    (and (<= -171.8 cx -135.0) (<= 164.0 cz 178.0)) :pen-north-east
+    (and (<= -171.8 cx -135.0) (<= 183.0 cz 197.5)) :pen-south-east
+    (and (<= -215.5 cx -178.2) (<= 183.0 cz 197.5)) :pen-south-west
+    (and (<= -215.5 cx -178.2) (<= 164.0 cz 178.0)) :pen-north-west
     :else nil))
+
+(defn in-escaped-zone?
+  "Determina se a coordenada [x y z] esta comprovadamente em zona de fuga externa (corredor central, lago ou praca)."
+  [[cx cy cz]]
+  (or
+   (and (<= -178.0 cx -172.0) (<= 158.0 cz 202.0))
+   (< cz 163.5)
+   (> cz 198.0)
+   (< cx -216.0)
+   (> cx -134.0)))
 
 (defn barks-for-current-position
   "Retorna exclusivamente as falas contextuais correspondentes aos animais do cercado onde a Karlach fisicamente está."
@@ -1393,6 +1405,7 @@
 ;; ============================================================================
 
 (defonce ^:private proactive-sentry-cooldowns (atom {}))
+(defonce ^:private fugitive-candidate-counts (atom {}))
 (defonce ^:private last-sentry-scan-ms (atom 0))
 
 (def ^:private sanctuary-monitored-species
@@ -1416,7 +1429,9 @@
                                         (Double/parseDouble (nth f 4))]
                                leashed (Boolean/parseBoolean (nth f 5))]
                            (when (and (contains? sanctuary-monitored-species species)
-                                      (nil? (current-enclosure-id pos)))
+                                      (not leashed)
+                                      (nil? (current-enclosure-id pos))
+                                      (in-escaped-zone? pos))
                              {:species species
                               :name    (if (clojure.string/blank? cname) species cname)
                               :pos     pos
@@ -1435,9 +1450,17 @@
             escaped  (parse-sanctuary-escaped-animals raw-snap)]
         (when (seq escaped)
           (let [bot-pos   (:pos @nav-state [-175.0 65.0 180.0])
-                cutoff    (- now 30000) ;; Cooldown de 30s por animal para evitar loop infinito
+                cutoff    (- now 120000) ;; Cooldown ampliado de 2 minutos por animal resgatado
                 _         (swap! proactive-sentry-cooldowns (fn [m] (into {} (filter (fn [[_ ts]] (> ts cutoff)) m))))
-                available (remove (fn [e] (get @proactive-sentry-cooldowns (:name e))) escaped)]
+                escaped-names (set (map :name escaped))
+                ;; Histerese: incrementa contador de detecções e limpa quem não está mais solto
+                _         (swap! fugitive-candidate-counts
+                                 (fn [m]
+                                   (let [filtered (select-keys m escaped-names)]
+                                     (reduce (fn [acc n] (update acc n (fnil inc 0))) filtered escaped-names))))
+                ;; Animal só é considerado para captura se confirmado em pelo menos 2 varreduras (5s)
+                confirmed (filter (fn [e] (>= (get @fugitive-candidate-counts (:name e) 0) 2)) escaped)
+                available (remove (fn [e] (get @proactive-sentry-cooldowns (:name e))) confirmed)]
             (when-let [target (first (sort-by (fn [e]
                                                 (let [[ex _ ez] (:pos e)
                                                       [bx _ bz] bot-pos

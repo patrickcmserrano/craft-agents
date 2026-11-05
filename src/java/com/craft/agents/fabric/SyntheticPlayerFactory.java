@@ -525,10 +525,10 @@ public final class SyntheticPlayerFactory {
                         sName = Character.toUpperCase(sName.charAt(0)) + sName.substring(1);
                     }
                     String pen;
-                    if (ex >= -171.5 && ex <= -135.0 && ez >= 164.0 && ez <= 178.0) pen = "NE";
-                    else if (ex >= -171.5 && ex <= -135.0 && ez >= 183.0 && ez <= 197.5) pen = "SE";
-                    else if (ex >= -215.0 && ex <= -178.5 && ez >= 183.0 && ez <= 197.5) pen = "SW";
-                    else if (ex >= -215.0 && ex <= -178.5 && ez >= 164.0 && ez <= 178.0) pen = "NW";
+                    if (ex >= -171.8 && ex <= -135.0 && ez >= 164.0 && ez <= 178.0) pen = "NE";
+                    else if (ex >= -171.8 && ex <= -135.0 && ez >= 183.0 && ez <= 197.5) pen = "SE";
+                    else if (ex >= -215.5 && ex <= -178.2 && ez >= 183.0 && ez <= 197.5) pen = "SW";
+                    else if (ex >= -215.5 && ex <= -178.2 && ez >= 164.0 && ez <= 178.0) pen = "NW";
                     else pen = "OUT";
                     String key = pen + ":" + sName;
                     if (mobClass.isInstance(e)) {
