@@ -161,6 +161,19 @@
        :goal/voice-line "De volta à ronda do Santuário! Vou cuidar de todos os bichinhos!"
        :goal/speaker    speaker}
 
+      :inventory-inspection
+      {:goal/id         :inventory-inspection
+       :goal/type       :inventory-inspection
+       :goal/voice-line (str "Deixa eu checar o que eu tô carregando aqui, " speaker "!")
+       :goal/speaker    speaker}
+
+      :drop-inventory
+      {:goal/id         :drop-inventory
+       :goal/type       :drop-inventory
+       :goal/filter     (get-in intent-result [:intent/slots :target/filter] "all")
+       :goal/voice-line (str "Loot saindo do forno, " speaker "! Pegando o saque pra você!")
+       :goal/speaker    speaker}
+
       ;; Fallback
       {:goal/id         :natural-dialogue
        :goal/type       :dialogue

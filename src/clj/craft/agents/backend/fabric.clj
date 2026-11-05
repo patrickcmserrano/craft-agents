@@ -532,6 +532,65 @@
                    entries))))
        []))))
 
+(defn collect-nearby-drops!
+  "Coleta drops no chão e insere no inventário real do jogador via bridge (CA-E1.4 / Looting)."
+  ([player-name] (collect-nearby-drops! player-name 4.0))
+  ([player-name radius]
+   (let [cmd (uformat "COLLECT_DROPS|%s|%.1f" player-name (double radius))
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [parts (str/split (subs resp 3) #"\|")
+             cnt (try (Integer/parseInt (nth parts 0 "0")) (catch Throwable _ 0))]
+         (if (or (zero? cnt) (< (count parts) 2) (str/blank? (nth parts 1)))
+           {:total-count 0 :items {}}
+           (let [entries (str/split (nth parts 1) #";")]
+             {:total-count cnt
+              :items (into {}
+                           (map (fn [e]
+                                  (let [[iid c] (str/split e #",")]
+                                    [iid (try (Integer/parseInt c) (catch Throwable _ 1))]))
+                                entries))})))
+       {:total-count 0 :items {}}))))
+
+(defn inspect-inventory
+  "Consulta o inventário real do jogador via bridge, retornando mapa de itens e contagens."
+  ([player-name]
+   (let [cmd (str "INSPECT_INVENTORY|" player-name)
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [parts (str/split (subs resp 3) #"\|")
+             occupied (try (Integer/parseInt (nth parts 0 "0")) (catch Throwable _ 0))]
+         (if (or (zero? occupied) (< (count parts) 2) (str/blank? (nth parts 1)))
+           {:slots-used 0 :items {}}
+           (let [entries (str/split (nth parts 1) #";")]
+             {:slots-used occupied
+              :items (into {}
+                           (map (fn [e]
+                                  (let [[iid c] (str/split e #",")]
+                                    [iid (try (Integer/parseInt c) (catch Throwable _ 1))]))
+                                entries))})))
+       {:slots-used 0 :items {}}))))
+
+(defn drop-inventory-items!
+  "Ejeta itens do inventário no mundo (loot sharing com jogador humano)."
+  ([player-name] (drop-inventory-items! player-name "all"))
+  ([player-name filter-str]
+   (let [cmd (str "DROP_ITEMS|" player-name "|" (or filter-str ""))
+         resp (send-bridge-cmd! cmd)]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (let [parts (str/split (subs resp 3) #"\|")
+             dropped (try (Integer/parseInt (nth parts 0 "0")) (catch Throwable _ 0))]
+         (if (or (zero? dropped) (< (count parts) 2) (str/blank? (nth parts 1)))
+           {:dropped-count 0 :items {}}
+           (let [entries (str/split (nth parts 1) #";")]
+             {:dropped-count dropped
+              :items (into {}
+                           (map (fn [e]
+                                  (let [[iid c] (str/split e #",")]
+                                    [iid (try (Integer/parseInt c) (catch Throwable _ 1))]))
+                                entries))})))
+       {:dropped-count 0 :items {}}))))
+
 (defn scan-nearby-hostiles
   "Escaneia monstros hostis no raio de percepcao do jogador via bridge (CA-E1.3)."
   ([player-name] (scan-nearby-hostiles player-name 16.0))
@@ -1221,6 +1280,32 @@
     (swap! nav-state assoc :mode :sanctuary-patrol :follow-target nil :route-idx 0 :steps initial-steps))
   (karlach-say! voice-line))
 
+(defmethod execute-karlach-goal! :inventory-inspection
+  [{:goal/keys [speaker]} engine-ctx-atom _nav-state _sanctuary-route]
+  (let [inv (inspect-inventory "Karlach")
+        target (or speaker "pace")
+        items (:items inv)]
+    (record-cognitive-event! engine-ctx-atom :grounding "Inspeção de Inventário"
+                             (str "Inventário de Karlach verificado: " (pr-str items)))
+    (if (empty? items)
+      (karlach-say! (str "Minha mochila tá vazia por enquanto, " target "! Vamos minerar ou recolher uns recursos! 🔥"))
+      (let [item-list (str/join ", " (map (fn [[iid c]] (str c "x " (str/replace iid #"minecraft:" ""))) items))]
+        (karlach-say! (str "Tô carregando comigo, " target ": [" item-list "]! (" (:slots-used inv) " slots ocupados). Pronta pra continuar! 🔥 🎒"))))))
+
+(defmethod execute-karlach-goal! :drop-inventory
+  [{:goal/keys [speaker] target-filter :goal/filter} engine-ctx-atom _nav-state _sanctuary-route]
+  (let [target (or speaker "pace")
+        drop-res (drop-inventory-items! "Karlach" (or target-filter "all"))
+        dropped-cnt (:dropped-count drop-res 0)
+        items (:items drop-res)]
+    (record-cognitive-event! engine-ctx-atom :action "Ejeção de Saque / Drop de Inventário"
+                             (str "Karlach dropou " dropped-cnt " itens para " target))
+    (send-bridge-cmd! "CMD|playsound minecraft:entity.item.pickup master @a ~ ~ ~ 1.0 0.8")
+    (if (> dropped-cnt 0)
+      (let [item-list (str/join ", " (map (fn [[iid c]] (str c "x " (str/replace iid #"minecraft:" ""))) items))]
+        (karlach-say! (str "Aqui está o saque da expedição, " target "! Ejetando [" item-list "]! Todo seu, soldado! 🔥 💎")))
+      (karlach-say! (str "Não tenho nenhum recurso solto pra dropar agora, " target "! Minha mochila tá limpa.")))))
+
 (defmethod execute-karlach-goal! :default
   [{:goal/keys [raw-text voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
   (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"
@@ -1790,7 +1875,7 @@
                                                  (send-bridge-cmd!
                                                   (uformat "CMD|playsound minecraft:block.deepslate.break master @a %.1f %.1f %.1f 1.0 1.0"
                                                           (double bx) (double by) (double bz)))
-                                                 (locate-dropped-items "Karlach" 4.0)))
+                                                 (collect-nearby-drops! "Karlach" 4.0)))
                                              (swap! nav-state #(-> %
                                                                    (assoc :active-mining nil)
                                                                    (update :mining-blocks-broken (fnil inc 0)))))
@@ -1814,12 +1899,16 @@
                                                  :ticks 0
                                                  :max-ticks 14})
                                          ;; Sem mais minérios expostos acessíveis!
-                                         (let [broken-cnt (:mining-blocks-broken @nav-state 0)
-                                               ore-label (get ore-pt-names filter-str (if (str/blank? filter-str) "minérios" filter-str))]
+                                         (let [loot-res (collect-nearby-drops! "Karlach" 6.0)
+                                               broken-cnt (:mining-blocks-broken @nav-state 0)
+                                               ore-label (get ore-pt-names filter-str (if (str/blank? filter-str) "minérios" filter-str))
+                                               inv (inspect-inventory "Karlach")
+                                               loot-summary (if (empty? (:items inv))
+                                                              "nada"
+                                                              (str/join ", " (map (fn [[iid c]] (str c "x " (str/replace iid #"minecraft:" ""))) (:items inv))))]
                                            (if (> broken-cnt 0)
-                                             (karlach-say! (str "Veio de " ore-label " extraído por completo (" broken-cnt " blocos)! Pode recolher o saque, soldado! 🔥 ⛏️"))
+                                             (karlach-say! (str "Veio de " ore-label " extraído por completo (" broken-cnt " blocos)! Já looteei pro meu inventário: [" loot-summary "]! Se quiser o saque, só me pedir! 🔥 ⛏️"))
                                              (karlach-say! (str "Não encontrei mais veios expostos de " ore-label " acessíveis por aqui, soldado!")))
-                                           (locate-dropped-items "Karlach" 6.0)
                                            (swap! nav-state assoc :mode :bodyguard :mining-blocks-broken 0 :active-mining nil :unreachable-ores #{}))))))))
                              (swap! nav-state assoc :mode :bodyguard :active-mining nil :unreachable-ores #{})))
 

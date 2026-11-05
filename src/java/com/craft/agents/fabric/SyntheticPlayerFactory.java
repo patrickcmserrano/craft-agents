@@ -1061,6 +1061,38 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            if ("COLLECT_DROPS".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                double radius = parts.length >= 3 ? Double.parseDouble(parts[2]) : 4.0;
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticInventoryManager.collectNearbyDrops(server, player, radius, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("INSPECT_INVENTORY".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticInventoryManager.inspectInventory(player, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            if ("DROP_ITEMS".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                String filter = parts.length >= 3 ? parts[2] : "";
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticInventoryManager.dropInventoryItems(server, player, filter, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
             return "ERR|UNKNOWN_OP";
         } catch (Throwable t) {
             return "ERR|" + t.getMessage();

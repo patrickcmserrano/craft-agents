@@ -120,4 +120,35 @@
           (is (= 2 (count ores)))
           (is (= "minecraft:iron_ore" (:block-id (first ores))))
           (is (= 2.5 (:distance (first ores))))
-          (is (= "minecraft:coal_ore" (:block-id (second ores)))))))))
+          (is (= "minecraft:coal_ore" (:block-id (second ores))))))))
+
+  (testing "CA-E1.4/E3.1: Coleta Ativa (Looting), Inspeção e Ejeção de Inventário"
+    (testing "collect-nearby-drops! absorve drops e popula inventário"
+      (with-redefs [fabric/send-bridge-cmd! (fn [cmd]
+                                              (if (.startsWith cmd "COLLECT_DROPS|Karlach")
+                                                "OK|6|minecraft:raw_iron,4;minecraft:coal,2"
+                                                "OK|0|"))]
+        (let [res (fabric/collect-nearby-drops! "Karlach" 4.0)]
+          (is (= 6 (:total-count res)))
+          (is (= 4 (get-in res [:items "minecraft:raw_iron"])))
+          (is (= 2 (get-in res [:items "minecraft:coal"]))))))
+
+    (testing "inspect-inventory retorna itens e contagens dos slots"
+      (with-redefs [fabric/send-bridge-cmd! (fn [cmd]
+                                              (if (= cmd "INSPECT_INVENTORY|Karlach")
+                                                "OK|2|minecraft:raw_iron,4;minecraft:coal,2"
+                                                "OK|0|"))]
+        (let [inv (fabric/inspect-inventory "Karlach")]
+          (is (= 2 (:slots-used inv)))
+          (is (= 4 (get-in inv [:items "minecraft:raw_iron"])))
+          (is (= 2 (get-in inv [:items "minecraft:coal"]))))))
+
+    (testing "drop-inventory-items! ejeta itens no chão para o jogador"
+      (with-redefs [fabric/send-bridge-cmd! (fn [cmd]
+                                              (if (.startsWith cmd "DROP_ITEMS|Karlach|all")
+                                                "OK|6|minecraft:raw_iron,4;minecraft:coal,2"
+                                                "OK|0|"))]
+        (let [drop-res (fabric/drop-inventory-items! "Karlach" "all")]
+          (is (= 6 (:dropped-count drop-res)))
+          (is (= 4 (get-in drop-res [:items "minecraft:raw_iron"])))
+          (is (= 2 (get-in drop-res [:items "minecraft:coal"]))))))))

@@ -131,6 +131,14 @@
 (def ^:private mining-pattern
   #"\b(miner\w*|cav\w*|escav\w*|quebr\w*|picaret\w*|minerio|ferro|carvao|carvoes|ouro|diamante|cobre|redstone|lapis|pedra|deepslate|dripstone)\b")
 
+;; Consulta e inspeção de inventário
+(def ^:private inventory-pattern
+  #"(inventario|mochila|loot|saque|itens|recursos|o que voce pegou|quanto minerio|o que tem|que voce tem|carregando)")
+
+;; Ejeção e entrega de itens
+(def ^:private drop-pattern
+  #"(dropa\w*|entreg\w*|me da\w*|passa\w*|larga\w*|descarreg\w*|despej\w*|joga fora|joga no chao)")
+
 (defn extract-mining-target
   "Extrai o alvo específico de mineração ou bloco a partir do texto normalizado (NFD)."
   [norm-text]
@@ -175,7 +183,9 @@
         has-dance    (boolean (re-find dance-pattern norm))
         has-weather  (boolean (re-find weather-pattern norm))
         has-bodyguard (boolean (re-find bodyguard-pattern norm))
-        has-mining   (boolean (re-find mining-pattern norm))]
+        has-mining   (boolean (re-find mining-pattern norm))
+        has-inventory (boolean (re-find inventory-pattern norm))
+        has-drop     (boolean (re-find drop-pattern norm))]
     (cond
       ;; 1. Emergência / Fuga / Resgate de Animal (Prioridade Absoluta)
       (or (= :animal-emergency routed-type)
@@ -256,6 +266,29 @@
                                        :target/speaker speaker}
                                 target-filter (assoc :target/filter target-filter))
          :intent/raw-text     raw-text})
+
+      ;; 5.3 Ejeção de Saque / Dropar Minérios
+      (or (= :drop-inventory routed-type)
+          (and has-drop (or has-inventory has-mining (re-find #"(minerios?|itens?|loot|tudo|saque|ferro|ouro|carvao|diamante)" norm))))
+      {:intent/type         :drop-inventory
+       :intent/confidence   (max 0.95 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  "drop-inventory"
+                             :target/filter  (or (extract-mining-target norm) "all")
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
+
+      ;; 5.4 Inspeção de Inventário e Mochila
+      (or (= :inventory-inspection routed-type)
+          (and has-inventory (re-find #"(mostr\w*|ve\w*|olh\w*|o que|quant\w*|tem|carreg\w*|abre)" norm)))
+      {:intent/type         :inventory-inspection
+       :intent/confidence   (max 0.95 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  "inspect-inventory"
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
 
       ;; 6. Seguir o Jogador (apenas se não for comando de captura de animal)
       (or (= :follow-player routed-type) has-follow)

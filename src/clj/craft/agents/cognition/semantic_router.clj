@@ -187,6 +187,31 @@
               "quebra essa pedra"
               "vamos minerar"]}
 
+   {:id :inventory-inspection
+    :description "Consulta do inventário e inspeção de recursos guardados na mochila"
+    :anchors ["o que tem no seu inventario"
+              "mostra seu inventario"
+              "o que voce pegou"
+              "quanto minerio voce tem"
+              "ver inventario"
+              "abre a mochila"
+              "o que voce ta carregando"
+              "quanto ferro voce pegou"
+              "mostra o loot"]}
+
+   {:id :drop-inventory
+    :description "Ejetar saque, dropar minérios e entregar itens ao jogador"
+    :anchors ["me da os minerios"
+              "dropa o loot"
+              "me entrega os itens"
+              "passa o que voce minerou"
+              "larga o minerio aqui"
+              "dropa tudo"
+              "me da os itens"
+              "passa os minerios"
+              "descarrega o inventario"
+              "joga o loot no chao"]}
+
    {:id :dialogue
     :description "Diálogo aberto, saudações gerais e perguntas de conversa"
     :anchors ["ola tudo bem com voce"
