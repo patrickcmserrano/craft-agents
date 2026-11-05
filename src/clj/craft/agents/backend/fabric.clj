@@ -1033,16 +1033,25 @@
   (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Seguindo jogador " target))
   (let [players (query-online-players)
         target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
-        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))]
-    (when target-p
+        [cx cy cz] (:pos @nav-state)
+        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] [cx cy cz])
+        dist-to-p (if target-p
+                    (Math/sqrt (+ (Math/pow (- (:x target-p) cx) 2)
+                                  (Math/pow (- (:y target-p) cy) 2)
+                                  (Math/pow (- (:z target-p) cz) 2)))
+                    0.0)]
+    ;; Teleporte apenas de emergencia se estiver muito distante (> 48m / outro bioma)
+    (when (and target-p (> dist-to-p 48.0))
       (send-bridge-cmd! (str "CMD|tp Karlach " target))
       (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
       (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
     (swap! nav-state assoc
            :mode :follow
-           :pos tgt-pos
+           :pos (if (> dist-to-p 48.0) tgt-pos [cx cy cz])
            :follow-target target
-           :follow-path []
+           :follow-path (if (and target-p (<= dist-to-p 48.0))
+                          (or (request-path3d [cx cy cz] tgt-pos 2.2) [])
+                          [])
            :follow-last-target [0.0 0.0 0.0]
            :follow-lost-ticks 0
            :steps []))
@@ -1053,8 +1062,15 @@
   (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Modo Guarda-Costas ativado para " target))
   (let [players (query-online-players)
         target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
-        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))]
-    (when target-p
+        [cx cy cz] (:pos @nav-state)
+        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] [cx cy cz])
+        dist-to-p (if target-p
+                    (Math/sqrt (+ (Math/pow (- (:x target-p) cx) 2)
+                                  (Math/pow (- (:y target-p) cy) 2)
+                                  (Math/pow (- (:z target-p) cz) 2)))
+                    0.0)]
+    ;; Teleporte apenas de emergencia se estiver muito distante (> 48m / outro bioma)
+    (when (and target-p (> dist-to-p 48.0))
       (send-bridge-cmd! (str "CMD|tp Karlach " target))
       (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
       (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
@@ -1064,9 +1080,11 @@
     (send-bridge-cmd! "SWING|Karlach")
     (swap! nav-state assoc
            :mode :bodyguard
-           :pos tgt-pos
+           :pos (if (> dist-to-p 48.0) tgt-pos [cx cy cz])
            :follow-target target
-           :follow-path []
+           :follow-path (if (and target-p (<= dist-to-p 48.0))
+                          (or (request-path3d [cx cy cz] tgt-pos 2.2) [])
+                          [])
            :follow-last-target [0.0 0.0 0.0]
            :follow-lost-ticks 0
            :steps []))
@@ -1101,7 +1119,7 @@
                                        (Math/pow (- (:y target-p) cy) 2)
                                        (Math/pow (- (:z target-p) cz) 2)))
                          0.0)]
-    (when (and target-p (> dist-to-player 8.0))
+    (when (and target-p (> dist-to-player 48.0))
       (send-bridge-cmd! (str "CMD|tp Karlach " target))
       (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
       (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
@@ -1577,9 +1595,9 @@
                                    yaw (compute-yaw dx dz)]
                                (swap! nav-state assoc :follow-lost-ticks 0)
 
-                               ;; Teleporte de aproximação se o jogador estiver distante (desceu em caverna/mina)
+                               ;; Teleporte de aproximação se o jogador estiver muito distante (> 48m / outro bioma)
                                (let [total-d (Math/sqrt (+ (* dx dx) (* (- (double ty) (double cy)) (- (double ty) (double cy))) (* dz dz)))]
-                                 (when (> total-d 28.0)
+                                 (when (> total-d 48.0)
                                    (send-bridge-cmd! (uformat "CMD|tp Karlach %s" (:name target-p)))
                                    (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
                                    (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
@@ -1667,7 +1685,7 @@
                                    (karlach-say! "Perdi você de vista, soldado! Vou voltar pra patrulha dos cercados."))
                                  (swap! nav-state assoc :follow-lost-ticks lost-cnt)))))
 
-                         ;; 2.1 Modo Mineração Contínua Autônoma (Varrer, Aproximar a curta distância e quebrar veios)
+                         ;; 2.1 Modo Mineração Contínua Autônoma (Navegação A* 3D estrita, sem no-clip, sem teleporte)
                          (= (:mode st) :mining)
                          (let [players (query-online-players)
                                target-p (first (clojure.core/filter #(= (str/lower-case (:name %))
@@ -1680,12 +1698,22 @@
                                    dx (- tx cx)
                                    dz (- tz cz)
                                    dist-to-player (Math/sqrt (+ (* dx dx) (* (- (double ty) (double cy)) (- (double ty) (double cy))) (* dz dz)))]
-                               (if (> dist-to-player 24.0)
+                               (cond
+                                 ;; Teleporte de resgate apenas em distancia extrema (> 48m / outro bioma)
+                                 (> dist-to-player 48.0)
                                  (do
                                    (send-bridge-cmd! (uformat "CMD|tp Karlach %s" (:name target-p)))
-                                   (karlach-say! "Você avançou na mina, soldado! Acompanhando seus passos!")
+                                   (karlach-say! "Você avançou muito na mina, soldado! Acompanhando seus passos!")
                                    (swap! nav-state assoc :mode :bodyguard :pos [tx ty tz] :active-mining nil))
+
+                                 ;; Se o jogador se afastar mais de 16m, suspende a picareta e caminha ate ele a pe
+                                 (> dist-to-player 16.0)
+                                 (do
+                                   (karlach-say! "Avançando com você pela mina, soldado!")
+                                   (swap! nav-state assoc :mode :bodyguard :active-mining nil :follow-path (or (request-path3d [cx cy cz] [tx ty tz] 2.2) [])))
+
                                  ;; Execução motora realista
+                                 :else
                                  (if-let [am (:active-mining st)]
                                    ;; Bloco ativo sendo minerado com progresso e sons reais
                                    (let [bx (:x am)
@@ -1696,27 +1724,46 @@
                                          ay (:air-y am by)
                                          az (:air-z am bz)
                                          stand-x (+ (double ax) 0.5)
+                                         stand-y (double ay)
                                          stand-z (+ (double az) 0.5)
-                                         adx (- stand-x cx)
-                                         adz (- stand-z cz)
-                                         adist (Math/sqrt (+ (* adx adx) (* adz adz)))
                                          odx (- (+ (double bx) 0.5) cx)
                                          ody (- (+ (double by) 0.5) (+ (double cy) 1.62))
                                          odz (- (+ (double bz) 0.5) cz)
                                          hdist (Math/sqrt (+ (* odx odx) (* odz odz)))
+                                         total-ore-d (Math/sqrt (+ (* odx odx) (* (+ ody 1.62) (+ ody 1.62)) (* odz odz)))
                                          yaw (compute-yaw odx odz)
                                          pitch (compute-pitch ody hdist)]
-                                     ;; Se ainda não chegou no ponto de ar adjacente, caminha até ele (sem no-clip!)
-                                     (if (> adist 0.6)
-                                       (let [step-d (min 0.28 (max 0.08 adist))
-                                             safe-adist (max 0.001 adist)
-                                             step-x (+ cx (* (/ adx safe-adist) step-d))
-                                             step-z (+ cz (* (/ adz safe-adist) step-d))]
-                                         (send-bridge-cmd!
-                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
-                                                  step-x cy step-z yaw pitch))
-                                         (swap! nav-state assoc :pos [step-x cy step-z] :yaw yaw :pitch pitch))
-                                       ;; Posicionada no ar em frente à rocha: martela a picareta!
+                                     ;; Se estiver a mais de 2.4m do bloco de minério, navega via A* 3D pelos túneis livres (NUNCA no-clip!)
+                                     (if (> total-ore-d 2.4)
+                                       (let [path-queue (:path am [])
+                                             active-path (if (empty? path-queue)
+                                                           (request-path3d [cx cy cz] [stand-x stand-y stand-z] 1.0)
+                                                           path-queue)]
+                                         (if-let [next-node (first active-path)]
+                                           (let [nx (+ (double (:x next-node)) 0.5)
+                                                 ny (double (:y next-node))
+                                                 nz (+ (double (:z next-node)) 0.5)
+                                                 ndx (- nx cx)
+                                                 ndz (- nz cz)
+                                                 ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
+                                                 nyaw (compute-yaw ndx ndz)
+                                                 npitch (compute-pitch (- ny (+ (double cy) 1.62)) ndist)]
+                                             (if (<= ndist 0.4)
+                                               (swap! nav-state assoc-in [:active-mining :path] (vec (rest active-path)))
+                                               (let [step-d (min 0.24 (max 0.05 ndist))
+                                                     safe-ndist (max 0.001 ndist)
+                                                     step-x (+ cx (* (/ ndx safe-ndist) step-d))
+                                                     step-z (+ cz (* (/ ndz safe-ndist) step-d))]
+                                                 (send-bridge-cmd!
+                                                  (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
+                                                          step-x ny step-z nyaw npitch))
+                                                 (swap! nav-state assoc :pos [step-x ny step-z] :yaw nyaw :pitch npitch))))
+                                           ;; Sem caminho A* alcançável: minério inacessível sem quebrar outras rochas.
+                                           ;; Descarta sem atravessar parede!
+                                           (swap! nav-state #(-> %
+                                                                 (assoc :active-mining nil)
+                                                                 (update :unreachable-ores (fnil conj #{}) [bx by bz])))))
+                                       ;; Posicionada com firmeza ao lado do bloco: martela a picareta!
                                        (let [cur-ticks (inc (:ticks am 0))
                                              max-ticks (:max-ticks am 14)]
                                          (send-bridge-cmd!
@@ -1752,8 +1799,10 @@
                                    ;; Se não tiver bloco ativo, busca o próximo minério exposto a cada 5 ticks
                                    (when (zero? (mod tick 5))
                                      (let [filter-str (or (:mining-filter st) "")
-                                           ores (locate-nearby-ores "Karlach" 12.0 filter-str)]
-                                       (if-let [target-ore (first ores)]
+                                           ores (locate-nearby-ores "Karlach" 12.0 filter-str)
+                                           unreach (:unreachable-ores st #{})
+                                           reachable-ores (filter #(not (contains? unreach [(:x %) (:y %) (:z %)])) ores)]
+                                       (if-let [target-ore (first reachable-ores)]
                                          (swap! nav-state assoc :active-mining
                                                 {:x (:x target-ore)
                                                  :y (:y target-ore)
@@ -1764,15 +1813,15 @@
                                                  :air-z (:air-z target-ore)
                                                  :ticks 0
                                                  :max-ticks 14})
-                                         ;; Sem mais minérios expostos!
+                                         ;; Sem mais minérios expostos acessíveis!
                                          (let [broken-cnt (:mining-blocks-broken @nav-state 0)
                                                ore-label (get ore-pt-names filter-str (if (str/blank? filter-str) "minérios" filter-str))]
                                            (if (> broken-cnt 0)
                                              (karlach-say! (str "Veio de " ore-label " extraído por completo (" broken-cnt " blocos)! Pode recolher o saque, soldado! 🔥 ⛏️"))
-                                             (karlach-say! (str "Não encontrei mais veios expostos de " ore-label " por aqui perto, soldado!")))
+                                             (karlach-say! (str "Não encontrei mais veios expostos de " ore-label " acessíveis por aqui, soldado!")))
                                            (locate-dropped-items "Karlach" 6.0)
-                                           (swap! nav-state assoc :mode :bodyguard :mining-blocks-broken 0 :active-mining nil))))))))
-                             (swap! nav-state assoc :mode :bodyguard :active-mining nil)))
+                                           (swap! nav-state assoc :mode :bodyguard :mining-blocks-broken 0 :active-mining nil :unreachable-ores #{}))))))))
+                             (swap! nav-state assoc :mode :bodyguard :active-mining nil :unreachable-ores #{})))
 
                          ;; 3. Sanctuary Patrol & Enclosure Caretaker BT loop
                          :else
