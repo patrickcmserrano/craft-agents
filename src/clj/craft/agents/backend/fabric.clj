@@ -1354,11 +1354,28 @@
   (karlach-say! voice-line)
   (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Executando diretriz"))
 
+(defonce ^:private global-seen-chat (atom {}))
+
+(defn- chat-duplicate?
+  "Verifica se a mensagem recente do speaker ja foi processada nos ultimos 2500ms.
+   Previne duplicacao cruzada entre o log-tailer de disco e o CHAT_POLL in-memory do bridge."
+  [speaker msg]
+  (let [now    (System/currentTimeMillis)
+        key    (str (str/trim (or speaker "")) ":" (str/trim (or msg "")))
+        cutoff (- now 2500)]
+    (swap! global-seen-chat (fn [m] (into {} (filter (fn [[_ ts]] (> ts cutoff)) m))))
+    (if (get @global-seen-chat key)
+      true
+      (do
+        (swap! global-seen-chat assoc key now)
+        false))))
+
 (defn handle-player-command!
   "Processa comandos de chat (recebidos via bridge CHAT_POLL, log tailer ou Studio UI)
    e orquestra as reações dos agentes Karlach e Picard."
   [speaker msg engine-ctx-atom nav-state picard-state sanctuary-route]
-  (let [lower (str/lower-case (str/trim msg))]
+  (when-not (chat-duplicate? speaker msg)
+    (let [lower (str/lower-case (str/trim msg))]
     ;; 1. Comandos para Karlach (Pipeline Cognitivo Desacoplado: Router -> Grounding -> Multimethod)
     (when (or (str/includes? lower "karlach")
               (str/starts-with? lower "!karlach"))
@@ -1453,7 +1470,7 @@
         (record-cognitive-event! engine-ctx-atom :motor "Picard Bridge" "Retornando à ponte")
         (swap! picard-state assoc :mode :bridge-command :follow-target nil :pos [-65.0 145.0 101.0] :phase :walk)
         (send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
-        (picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))
+        (picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D."))))))
 
 (defonce ^:private log-file-pos (atom 0))
 (def ^:private server-log-path "/home/pace/minecraft-server/logs/latest.log")
@@ -1573,7 +1590,7 @@
                    (try
                      ;; Polling duplo de Chat via latest.log e In-Server Bridge (5Hz / 200ms latency)
                      (when (zero? (mod tick 4))
-                       (poll-server-log-chat! engine-ctx-atom nav-state picard-state sanctuary-route)
+;;                        (poll-server-log-chat! engine-ctx-atom nav-state picard-state sanctuary-route)
                        (let [resp (send-bridge-cmd! "CHAT_POLL")]
                          (when (and resp (str/starts-with? resp "OK;;"))
                            (let [items (str/split (subs resp 4) #";;")]
