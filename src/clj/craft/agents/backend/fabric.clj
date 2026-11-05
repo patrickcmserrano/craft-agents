@@ -292,41 +292,58 @@
     []))
 
 (defn build-sanctuary-route
-  "Constrói a rota de patrulha e alimentação do Santuário diretamente de sanctuary.edn + karlach.edn,
-   vinculando os animais de cada cercado às falas contextuais da Karlach."
+  "Constrói a rota ampliada de patrulha perimetral, vigilância e alimentação do Santuário diretamente de sanctuary.edn + karlach.edn,
+   cobrindo a Praça Central, Mirante Norte do Lago, Esplanada Leste, Pátio Sul e Alameda Oeste, intercalando os 4 cercados e o quarto."
   []
   (let [region   (regions/load-region-file "agents/regions/sanctuary.edn")
         karlach  (edn/read-string (slurp (io/file "agents/karlach.edn")))
         cor-barks (get-in karlach [:agent/dialogues :corridors])
         enc-barks (get-in karlach [:agent/dialogues :enclosures])
         sp-barks  (get-in karlach [:agent/dialogues :species])
-        wps       (:region/corridor-waypoints region)
-        corridors [{:type :promenade :name "Praça Norte"    :pos (nth wps 0 [-175.0 65.0 175.0]) :hold-item "minecraft:golden_carrot" :pause-ticks 50 :bark (:north cor-barks)}
-                   {:type :promenade :name "Corredor Leste" :pos (nth wps 1 [-173.0 65.0 180.0]) :hold-item "minecraft:wheat"         :pause-ticks 40 :bark (:east cor-barks)}
-                   {:type :promenade :name "Praça Sul"      :pos (nth wps 2 [-175.0 65.0 185.0]) :hold-item "minecraft:apple"         :pause-ticks 50 :bark (:south cor-barks)}
-                   {:type :promenade :name "Corredor Oeste" :pos (nth wps 3 [-177.0 65.0 180.0]) :hold-item "minecraft:sweet_berries" :pause-ticks 40 :bark (:west cor-barks)}]
-        enclosures (mapv (fn [enc]
-                           (let [eid    (:enclosure/id enc)
-                                 portal (:enclosure/portal enc)
-                                 sp-vec (:enclosure/species enc [])
-                                 barks  (vec (concat (get enc-barks eid [])
-                                                     (keep #(get sp-barks %) sp-vec)))]
-                             {:type        :enclosure
-                              :id          eid
-                              :name        (:enclosure/name enc (name eid))
-                              :outside     (:outside-anchor portal)
-                              :gates       (:blocks portal)
-                              :gate-block  (:gate-block portal "minecraft:dark_oak_fence_gate")
-                              :gate-facing (:gate-facing portal "west")
-                              :inside      (:inside-anchor portal)
-                              :feed-pos    (:enclosure/feed-pos enc (:inside-anchor portal))
-                              :food        (:enclosure/food enc "minecraft:apple")
-                              :species     sp-vec
-                              :residents   (:enclosure/residents enc [])
-                              :barks       barks
-                              :bark        (first barks)}))
-                         (:region/enclosures region))
-        base-route (vec (interleave corridors enclosures))
+        enclosures-map (into {}
+                             (map (fn [enc]
+                                    (let [eid    (:enclosure/id enc)
+                                          portal (:enclosure/portal enc)
+                                          sp-vec (:enclosure/species enc [])
+                                          barks  (vec (concat (get enc-barks eid [])
+                                                              (keep #(get sp-barks %) sp-vec)))]
+                                      [eid
+                                       {:type        :enclosure
+                                        :id          eid
+                                        :name        (:enclosure/name enc (name eid))
+                                        :outside     (:outside-anchor portal)
+                                        :gates       (:blocks portal)
+                                        :gate-block  (:gate-block portal "minecraft:dark_oak_fence_gate")
+                                        :gate-facing (:gate-facing portal "west")
+                                        :inside      (:inside-anchor portal)
+                                        :feed-pos    (:enclosure/feed-pos enc (:inside-anchor portal))
+                                        :food        (:enclosure/food enc "minecraft:apple")
+                                        :species     sp-vec
+                                        :residents   (:enclosure/residents enc [])
+                                        :barks       barks
+                                        :bark        (first barks)}]))
+                                  (:region/enclosures region)))
+        enc-nw (get enclosures-map :pen-north-west)
+        enc-ne (get enclosures-map :pen-north-east)
+        enc-se (get enclosures-map :pen-south-east)
+        enc-sw (get enclosures-map :pen-south-west)
+
+        extended-promenades
+        [{:type :promenade :name "Praça Central"           :pos [-175.0 65.0 180.0] :hold-item "minecraft:apple"          :pause-ticks 40 :bark (:south cor-barks "Praça central inspecionada! Tudo em ordem.")}
+         {:type :promenade :name "Posto Portão Tundra"     :pos [-177.0 65.0 171.0] :hold-item "minecraft:sweet_berries" :pause-ticks 30 :bark "Conferindo o cercado das raposas e mamutes da tundra."}
+         enc-nw
+         {:type :promenade :name "Mirante Norte do Lago"   :pos [-175.0 65.0 162.0] :hold-item "minecraft:golden_carrot" :pause-ticks 50 :bark (:north cor-barks "Bela vista do lago! As capivaras adoram nadar por aqui.")}
+         {:type :promenade :name "Posto Portão dos Pandas" :pos [-173.0 65.0 171.0] :hold-item "minecraft:bamboo"        :pause-ticks 30 :bark "Passando pelo cercado dos pandas e camelos."}
+         enc-ne
+         {:type :promenade :name "Esplanada Leste"         :pos [-155.0 65.0 180.0] :hold-item "minecraft:wheat"         :pause-ticks 40 :bark (:east cor-barks "Ronda na esplanada leste. Perímetro leste seguro!")}
+         {:type :promenade :name "Posto Portão da Savana"  :pos [-173.0 65.0 189.0] :hold-item "minecraft:hay_block"    :pause-ticks 30 :bark "Checando girafas, zebras e elefantes na savana."}
+         enc-se
+         {:type :promenade :name "Pátio Sul dos Bambus"    :pos [-175.0 65.0 195.0] :hold-item "minecraft:apple"          :pause-ticks 40 :bark "Pátio sul inspecionado. Nenhum intruso à vista!"}
+         {:type :promenade :name "Posto Portão Capivaras"  :pos [-177.0 65.0 189.0] :hold-item "minecraft:apple"          :pause-ticks 30 :bark "Olho vivo no bosque das capivaras e cervos!"}
+         enc-sw
+         {:type :promenade :name "Alameda Oeste"           :pos [-195.0 65.0 180.0] :hold-item "minecraft:sweet_berries" :pause-ticks 40 :bark (:west cor-barks "Alameda oeste percorrida. Perímetro oeste 100% sob controle!")}]
+
+        base-route (vec (filter some? extended-promenades))
         quarters   (when-let [q (:agent/quarters karlach)]
                      [{:type             :quarters
                        :id               (:id q :karlach-bedroom)
@@ -1370,6 +1387,99 @@
         (swap! global-seen-chat assoc key now)
         false))))
 
+
+;; ============================================================================
+;; Escolta Ativa: Detecção Proativa de Animais Fugitivos (Sentry Mode)
+;; ============================================================================
+
+(defonce ^:private proactive-sentry-cooldowns (atom {}))
+(defonce ^:private last-sentry-scan-ms (atom 0))
+
+(def ^:private sanctuary-monitored-species
+  #{"Capybara" "Deer" "Elephant" "Giraffe" "Zebra" "Mammoth" "Fox" "Armadillo" "Duck" "Tortoise" "Hedgehog" "Panda" "Camel" "Sniffer"})
+
+(defn parse-sanctuary-escaped-animals
+  "Analisa a telemetria do SANCTUARY e retorna a lista de animais fugitivos (fora de qualquer cerca ou baia)."
+  [raw-sanctuary-resp]
+  (when (and raw-sanctuary-resp (clojure.string/starts-with? raw-sanctuary-resp "OK|"))
+    (let [parts (clojure.string/split raw-sanctuary-resp #"\|")
+          details (when (>= (count parts) 3) (nth parts 2))]
+      (when (seq details)
+        (->> (clojure.string/split details #";")
+             (keep (fn [item]
+                     (let [f (clojure.string/split item #",")]
+                       (when (>= (count f) 6)
+                         (let [species (nth f 0)
+                               cname   (nth f 1)
+                               pos     [(Double/parseDouble (nth f 2))
+                                        (Double/parseDouble (nth f 3))
+                                        (Double/parseDouble (nth f 4))]
+                               leashed (Boolean/parseBoolean (nth f 5))]
+                           (when (and (contains? sanctuary-monitored-species species)
+                                      (nil? (current-enclosure-id pos)))
+                             {:species species
+                              :name    (if (clojure.string/blank? cname) species cname)
+                              :pos     pos
+                              :leashed? leashed}))))))
+             vec)))))
+
+(defn proactive-sentry-scan!
+  "Escolta Ativa da Karlach: monitora autonomamente se animais do santuário escaparam.
+   Ao identificar um fugitivo, interrompe a patrulha e executa o protocolo de resgate e contenção."
+  [engine-ctx-atom nav-state sanctuary-route]
+  (let [now (System/currentTimeMillis)]
+    ;; Varredura a cada 2.5s (2500ms)
+    (when (> (- now @last-sentry-scan-ms) 2500)
+      (reset! last-sentry-scan-ms now)
+      (let [raw-snap (send-bridge-cmd! "SANCTUARY")
+            escaped  (parse-sanctuary-escaped-animals raw-snap)]
+        (when (seq escaped)
+          (let [bot-pos   (:pos @nav-state [-175.0 65.0 180.0])
+                cutoff    (- now 30000) ;; Cooldown de 30s por animal para evitar loop infinito
+                _         (swap! proactive-sentry-cooldowns (fn [m] (into {} (filter (fn [[_ ts]] (> ts cutoff)) m))))
+                available (remove (fn [e] (get @proactive-sentry-cooldowns (:name e))) escaped)]
+            (when-let [target (first (sort-by (fn [e]
+                                                (let [[ex _ ez] (:pos e)
+                                                      [bx _ bz] bot-pos
+                                                      dx (- ex bx)
+                                                      dz (- ez bz)]
+                                                  (+ (* dx dx) (* dz dz))))
+                                              available))]
+              (let [target-name    (:name target)
+                    target-species (:species target)
+                    target-pos     (:pos target)
+                    species-key    (critic/normalize-species (or target-species target-name))
+                    reg-species    (case species-key
+                                     "capybara" "naturalist:capybara"
+                                     "deer" "naturalist:deer"
+                                     "panda" "minecraft:panda"
+                                     "camel" "minecraft:camel"
+                                     "sniffer" "minecraft:sniffer"
+                                     "elephant" "naturalist:elephant"
+                                     "giraffe" "naturalist:giraffe"
+                                     "zebra" "naturalist:zebra"
+                                     "ostrich" "naturalist:ostrich"
+                                     "fox" "minecraft:fox"
+                                     "mammoth" "naturalist:mammoth"
+                                     "tortoise" "naturalist:tortoise"
+                                     "duck" "naturalist:duck"
+                                     "hedgehog" "naturalist:hedgehog"
+                                     "armadillo" "minecraft:armadillo"
+                                     "naturalist:capybara")]
+                (swap! proactive-sentry-cooldowns assoc target-name now)
+                (record-cognitive-event! engine-ctx-atom :perception "Escolta Ativa — Detecção de Fugitivo"
+                                         (str "Animal detectado fora do cercado: " target-name " (" target-species ") em " target-pos ". Iniciando resgate autônomo!"))
+                (karlach-say! (str "Opa! Avistei o " target-name " solto fora do cercado! Meu motor infernal tá aquecido, vou resgatar agora mesmo! 🔥 🐾"))
+                (let [intent-res {:intent/type :animal-emergency
+                                  :intent/confidence 0.99
+                                  :intent/slots {:target/entity target-name
+                                                 :target/species reg-species
+                                                 :target/speaker "Escolta Ativa"}
+                                  :intent/raw-text (str "resgata " target-name)}
+                      goal-spec  (grounding/ground-goal intent-res)]
+                  (execute-karlach-goal! goal-spec engine-ctx-atom nav-state sanctuary-route)
+                  true)))))))))
+
 (defn handle-player-command!
   "Processa comandos de chat (recebidos via bridge CHAT_POLL, log tailer ou Studio UI)
    e orquestra as reações dos agentes Karlach e Picard."
@@ -1984,6 +2094,10 @@
                              (swap! nav-state assoc :mode :bodyguard :active-mining nil :unreachable-ores #{})))
 
                          ;; 3. Sanctuary Patrol & Enclosure Caretaker BT loop
+                         (and (= (:mode st) :sanctuary-patrol)
+                              (proactive-sentry-scan! engine-ctx-atom nav-state sanctuary-route))
+                         nil
+
                          :else
                          (let [steps (:steps st)]
                            (if (empty? steps)

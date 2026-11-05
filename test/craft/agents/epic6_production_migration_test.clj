@@ -101,3 +101,25 @@
         (is (some #(= (:op %) :walk) steps))
         (is (some #(= (:op %) :wait) steps))
         (is (some #(= (:op %) :BARK) steps))))))
+
+(deftest ca-053-proactive-sentry-and-expanded-patrol-test
+  (testing "CA-053a: Rota de patrulha ampliada cobre o perímetro completo (lago, praça, alas leste/oeste/sul)"
+    (let [route (fabric/build-sanctuary-route)
+          promenades (filter #(= (:type %) :promenade) route)
+          names (set (map :name promenades))]
+      (is (>= (count promenades) 8) "Deve conter pelo menos 8 paradas de promenade ampliadas")
+      (is (contains? names "Praça Central"))
+      (is (contains? names "Mirante Norte do Lago"))
+      (is (contains? names "Esplanada Leste"))
+      (is (contains? names "Pátio Sul dos Bambus"))
+      (is (contains? names "Alameda Oeste"))
+      (is (= 4 (count (filter #(= (:type %) :enclosure) route))) "Deve conter todos os 4 cercados intercalados")))
+
+  (testing "CA-053b: Escolta Ativa detecta fugitivos fora dos cercados e ignora animais contidos ou não-santuário"
+    (let [mock-sanctuary "OK|{NE:Camel=1, OUT:Capybara=1, OUT:Bass=1, SW:Capybara=1}|Capybara,Capivara Fofinha,-200.0,65.0,190.0,true;Capybara,Capivara Nadadora,-175.0,65.0,160.0,false;Bass,Bass,-127.0,61.0,169.0,false;Camel,Camelo Real,-146.0,65.0,170.0,true"
+          escaped (fabric/parse-sanctuary-escaped-animals mock-sanctuary)]
+      (is (= 1 (count escaped)) "Apenas Capivara Nadadora deve ser identificada como fugitiva")
+      (let [target (first escaped)]
+        (is (= "Capivara Nadadora" (:name target)))
+        (is (= "Capybara" (:species target)))
+        (is (= [-175.0 65.0 160.0] (:pos target)))))))
