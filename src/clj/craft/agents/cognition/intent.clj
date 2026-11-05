@@ -103,6 +103,10 @@
 (def ^:private look-pattern
   #"\b(olh\w*|vej\w*|ve\b|enxerg\w*|repar\w*|not\w*|ta vendo|vendo)\b")
 
+;; Teleporte intencional direto
+(def ^:private teleport-pattern
+  #"(teleport\w*|tp|teletransporte|teletransport\w*)")
+
 ;; Seguir o jogador (vem cá, me segue, acompanha, junto)
 (def ^:private follow-pattern
   #"\b(vem\w*|venh\w*|segu\w*|sig\w*|acompanh\w*|junt\w*|atras|atraz|comigo)\b")
@@ -185,8 +189,19 @@
         has-bodyguard (boolean (re-find bodyguard-pattern norm))
         has-mining   (boolean (re-find mining-pattern norm))
         has-inventory (boolean (re-find inventory-pattern norm))
-        has-drop     (boolean (re-find drop-pattern norm))]
+        has-drop     (boolean (re-find drop-pattern norm))
+        has-teleport (boolean (re-find teleport-pattern norm))]
     (cond
+      ;; 0. Teleporte Intencional Direto ("karlach, teleportar pra ca", "da tp aqui")
+      (or (= :teleport-to-player routed-type) has-teleport)
+      {:intent/type         :teleport-to-player
+       :intent/confidence   (max 0.98 (double router-conf))
+       :intent/route-method :semantic-vector
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  "teleport-to-player"
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
+
       ;; 1. Emergência / Fuga / Resgate de Animal (Prioridade Absoluta)
       (or (= :animal-emergency routed-type)
           (and animal (or has-rescue has-escape (and has-return (not has-patrol))))

@@ -1087,6 +1087,27 @@
                  :steps (vec (expand-route-microsteps quarters-stop (:pos @nav-state)))))
         (karlach-say! "Meu quarto ainda tá sendo arrumado!")))))
 
+(defmethod execute-karlach-goal! :teleport-to-player
+  [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
+  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Teleporte intencional solicitado para " target))
+  (let [players (query-online-players)
+        target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
+        tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))]
+    (when target-p
+      (send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
+      (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 35 normal")
+      (swap! nav-state assoc
+             :mode :bodyguard
+             :pos tgt-pos
+             :follow-target target
+             :follow-path []
+             :follow-last-target [0.0 0.0 0.0]
+             :follow-lost-ticks 0
+             :steps []
+             :active-mining nil))
+    (karlach-say! voice-line)))
+
 (defmethod execute-karlach-goal! :follow-player
   [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
   (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Seguindo jogador " target))

@@ -103,6 +103,13 @@
        :goal/voice-line (str "Entendido, " speaker "! Parando de te seguir e voltando pros meus afazeres no Santuário.")
        :goal/speaker    speaker}
 
+      :teleport-to-player
+      {:goal/id         :teleport-to-player
+       :goal/type       :teleport-to-player
+       :goal/target     speaker
+       :goal/voice-line (str "Abrindo fenda infernal! Teleportando direto pra você, " speaker "! 🔥 🌀")
+       :goal/speaker    speaker}
+
       :follow-player
       {:goal/id         :follow-player
        :goal/type       :follow-player

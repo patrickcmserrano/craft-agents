@@ -152,6 +152,19 @@
               "anda junto comigo"
               "vamos dar uma volta juntos"]}
 
+   {:id :teleport-to-player
+    :description "Teleporte intencional imediato para junto do jogador"
+    :anchors ["teleportar pra ca"
+              "teleporta pra ca"
+              "teleporta ate mim"
+              "teleporta aqui"
+              "da tp aqui"
+              "vem de tp"
+              "teleporta agora"
+              "da teleporte"
+              "teleporte pra ca"
+              "tp pra ca"]}
+
    {:id :patrol-sanctuary
     :description "Retomar rotina de ronda, patrulha e cuidados com os habitats"
     :anchors ["volta pra patrulha no santuario"
