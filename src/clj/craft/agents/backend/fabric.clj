@@ -1884,6 +1884,9 @@
                                          (send-bridge-cmd!
                                           (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
                                                   cx cy cz yaw pitch))
+                                         ;; Garante a picareta de netherite visível na mão principal durante toda a animação
+                                         (when (or (= cur-ticks 1) (zero? (mod cur-ticks 6)))
+                                           (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe[enchantments={levels:{\"minecraft:efficiency\":5,\"minecraft:unbreaking\":3,\"minecraft:fortune\":3}}]"))
                                          ;; Batidas rítmicas a cada 3 ticks
                                          (when (zero? (mod cur-ticks 3))
                                            (send-bridge-cmd! "SWING|Karlach")
@@ -1919,16 +1922,18 @@
                                            unreach (:unreachable-ores st #{})
                                            reachable-ores (filter #(not (contains? unreach [(:x %) (:y %) (:z %)])) ores)]
                                        (if-let [target-ore (first reachable-ores)]
-                                         (swap! nav-state assoc :active-mining
-                                                {:x (:x target-ore)
-                                                 :y (:y target-ore)
-                                                 :z (:z target-ore)
-                                                 :block-id (or (:block-id target-ore) "minecraft:deepslate")
-                                                 :air-x (:air-x target-ore)
-                                                 :air-y (:air-y target-ore)
-                                                 :air-z (:air-z target-ore)
-                                                 :ticks 0
-                                                 :max-ticks 14})
+                                         (do
+                                           (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe[enchantments={levels:{\"minecraft:efficiency\":5,\"minecraft:unbreaking\":3,\"minecraft:fortune\":3}}]")
+                                           (swap! nav-state assoc :active-mining
+                                                  {:x (:x target-ore)
+                                                   :y (:y target-ore)
+                                                   :z (:z target-ore)
+                                                   :block-id (or (:block-id target-ore) "minecraft:deepslate")
+                                                   :air-x (:air-x target-ore)
+                                                   :air-y (:air-y target-ore)
+                                                   :air-z (:air-z target-ore)
+                                                   :ticks 0
+                                                   :max-ticks 14}))
                                          ;; Sem mais minérios expostos acessíveis!
                                          (let [loot-res (collect-nearby-drops! "Karlach" 6.0)
                                                broken-cnt (:mining-blocks-broken @nav-state 0)
