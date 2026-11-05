@@ -590,7 +590,8 @@
           :message msg})))))
 
 (defn locate-nearby-ores
-  "Escaneia veios de minerios proximos ao jogador via bridge (CA-E3.1)."
+  "Escaneia veios de minerios proximos ao jogador via bridge (CA-E3.1).
+   Retorna apenas minerios com faces expostas ao ar (Anti X-Ray) e coordenadas do ponto de ar (Anti No-Clip)."
   ([player-name] (locate-nearby-ores player-name 12.0 ""))
   ([player-name radius] (locate-nearby-ores player-name radius ""))
   ([player-name radius filter-str]
@@ -603,12 +604,15 @@
            []
            (let [entries (str/split (nth parts 1) #";")]
              (mapv (fn [raw]
-                     (let [[x y z id dist] (str/split raw #",")]
+                     (let [[x y z id dist ax ay az] (str/split raw #",")]
                        {:x (try (Integer/parseInt x) (catch Throwable _ 0))
                         :y (try (Integer/parseInt y) (catch Throwable _ 0))
                         :z (try (Integer/parseInt z) (catch Throwable _ 0))
                         :block-id id
-                        :distance (try (Double/parseDouble dist) (catch Throwable _ 0.0))}))
+                        :distance (try (Double/parseDouble dist) (catch Throwable _ 0.0))
+                        :air-x (if ax (try (Integer/parseInt ax) (catch Throwable _ (Integer/parseInt x))) (try (Integer/parseInt x) (catch Throwable _ 0)))
+                        :air-y (if ay (try (Integer/parseInt ay) (catch Throwable _ (Integer/parseInt y))) (try (Integer/parseInt y) (catch Throwable _ 0)))
+                        :air-z (if az (try (Integer/parseInt az) (catch Throwable _ (Integer/parseInt z))) (try (Integer/parseInt z) (catch Throwable _ 0)))}))
                    entries))))
        []))))
 
@@ -1680,58 +1684,95 @@
                                  (do
                                    (send-bridge-cmd! (uformat "CMD|tp Karlach %s" (:name target-p)))
                                    (karlach-say! "Você avançou na mina, soldado! Acompanhando seus passos!")
-                                   (swap! nav-state assoc :mode :bodyguard :pos [tx ty tz]))
-                                 ;; Ciclo de Mineração Contínua: a cada 6 ticks (~300ms)
-                                 (when (zero? (mod tick 6))
-                                   (let [filter-str (or (:mining-filter st) "")
-                                         ores (locate-nearby-ores "Karlach" 12.0 filter-str)]
-                                     (if-let [target-ore (first ores)]
-                                       (let [bx (:x target-ore)
-                                             by (:y target-ore)
-                                             bz (:z target-ore)
-                                             odx (- (+ (double bx) 0.5) cx)
-                                             ody (- (+ (double by) 0.5) (+ (double cy) 1.62))
-                                             odz (- (+ (double bz) 0.5) cz)
-                                             hdist (Math/sqrt (+ (* odx odx) (* odz odz)))
-                                             total-d (Math/sqrt (+ (* odx odx) (* ody ody) (* odz odz)))
-                                             yaw (compute-yaw odx odz)
-                                             pitch (compute-pitch ody hdist)]
-                                         ;; Se a distância até o bloco for maior que 2.4m, aproxima-se ativamente
-                                         (if (> total-d 2.4)
-                                           (let [step-d (min 0.35 (max 0.1 (- total-d 1.8)))
-                                                 safe-hdist (max 0.001 hdist)
-                                                 step-x (+ cx (* (/ odx safe-hdist) step-d))
-                                                 step-z (+ cz (* (/ odz safe-hdist) step-d))]
-                                             (send-bridge-cmd!
-                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
-                                                      step-x cy step-z yaw pitch))
-                                             (swap! nav-state assoc :pos [step-x cy step-z] :yaw yaw :pitch pitch))
-                                           ;; A menos de 2.4m: Karlach fica de frente pro bloco e mina com impacto real!
+                                   (swap! nav-state assoc :mode :bodyguard :pos [tx ty tz] :active-mining nil))
+                                 ;; Execução motora realista
+                                 (if-let [am (:active-mining st)]
+                                   ;; Bloco ativo sendo minerado com progresso e sons reais
+                                   (let [bx (:x am)
+                                         by (:y am)
+                                         bz (:z am)
+                                         bid (:block-id am)
+                                         ax (:air-x am bx)
+                                         ay (:air-y am by)
+                                         az (:air-z am bz)
+                                         stand-x (+ (double ax) 0.5)
+                                         stand-z (+ (double az) 0.5)
+                                         adx (- stand-x cx)
+                                         adz (- stand-z cz)
+                                         adist (Math/sqrt (+ (* adx adx) (* adz adz)))
+                                         odx (- (+ (double bx) 0.5) cx)
+                                         ody (- (+ (double by) 0.5) (+ (double cy) 1.62))
+                                         odz (- (+ (double bz) 0.5) cz)
+                                         hdist (Math/sqrt (+ (* odx odx) (* odz odz)))
+                                         yaw (compute-yaw odx odz)
+                                         pitch (compute-pitch ody hdist)]
+                                     ;; Se ainda não chegou no ponto de ar adjacente, caminha até ele (sem no-clip!)
+                                     (if (> adist 0.6)
+                                       (let [step-d (min 0.28 (max 0.08 adist))
+                                             safe-adist (max 0.001 adist)
+                                             step-x (+ cx (* (/ adx safe-adist) step-d))
+                                             step-z (+ cz (* (/ adz safe-adist) step-d))]
+                                         (send-bridge-cmd!
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
+                                                  step-x cy step-z yaw pitch))
+                                         (swap! nav-state assoc :pos [step-x cy step-z] :yaw yaw :pitch pitch))
+                                       ;; Posicionada no ar em frente à rocha: martela a picareta!
+                                       (let [cur-ticks (inc (:ticks am 0))
+                                             max-ticks (:max-ticks am 14)]
+                                         (send-bridge-cmd!
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
+                                                  cx cy cz yaw pitch))
+                                         ;; Batidas rítmicas a cada 3 ticks
+                                         (when (zero? (mod cur-ticks 3))
+                                           (send-bridge-cmd! "SWING|Karlach")
+                                           (send-bridge-cmd!
+                                            (uformat "CMD|playsound minecraft:block.deepslate.hit master @a %.1f %.1f %.1f 0.8 1.0"
+                                                    (+ (double bx) 0.5) (+ (double by) 0.5) (+ (double bz) 0.5)))
+                                           (send-bridge-cmd!
+                                            (uformat "CMD|particle minecraft:block %s %.2f %.2f %.2f 0.2 0.2 0.2 0.02 3 normal"
+                                                    bid (+ (double bx) 0.5) (+ (double by) 0.5) (+ (double bz) 0.5))))
+                                         (if (>= cur-ticks max-ticks)
+                                           ;; Tempo de quebra concluído: estoura o bloco!
                                            (do
-                                             (send-bridge-cmd!
-                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
-                                                      cx cy cz yaw pitch))
                                              (send-bridge-cmd! "SWING|Karlach")
                                              (let [mres (mine-block! "Karlach" bx by bz)]
                                                (when (:success? mres)
                                                  (send-bridge-cmd!
-                                                  (uformat "CMD|particle minecraft:block %s %.2f %.2f %.2f 0.3 0.3 0.3 0.05 10 normal"
-                                                          (or (:block-id target-ore) "minecraft:deepslate")
-                                                          (+ (double bx) 0.5) (+ (double by) 0.5) (+ (double bz) 0.5)))
+                                                  (uformat "CMD|particle minecraft:block %s %.2f %.2f %.2f 0.35 0.35 0.35 0.08 16 normal"
+                                                          bid (+ (double bx) 0.5) (+ (double by) 0.5) (+ (double bz) 0.5)))
                                                  (send-bridge-cmd!
                                                   (uformat "CMD|playsound minecraft:block.deepslate.break master @a %.1f %.1f %.1f 1.0 1.0"
                                                           (double bx) (double by) (double bz)))
-                                                 (swap! nav-state update :mining-blocks-broken (fnil inc 0))
-                                                 (locate-dropped-items "Karlach" 4.0))))))
-                                       ;; Sem mais blocos desse minério no raio de 12m: conclui a extração!
-                                       (let [broken-cnt (:mining-blocks-broken @nav-state 0)
-                                             ore-label (get ore-pt-names filter-str (if (str/blank? filter-str) "minérios" filter-str))]
-                                         (if (> broken-cnt 0)
-                                           (karlach-say! (str "Veio de " ore-label " extraído por completo (" broken-cnt " blocos)! Pode recolher o saque, soldado! 🔥 ⛏️"))
-                                           (karlach-say! (str "Não encontrei mais veios de " ore-label " por aqui perto, soldado!")))
-                                         (locate-dropped-items "Karlach" 6.0)
-                                         (swap! nav-state assoc :mode :bodyguard :mining-blocks-broken 0)))))))
-                             (swap! nav-state assoc :mode :bodyguard)))
+                                                 (locate-dropped-items "Karlach" 4.0)))
+                                             (swap! nav-state #(-> %
+                                                                   (assoc :active-mining nil)
+                                                                   (update :mining-blocks-broken (fnil inc 0)))))
+                                           ;; Continua quebrando
+                                           (swap! nav-state assoc-in [:active-mining :ticks] cur-ticks)))))
+                                   ;; Se não tiver bloco ativo, busca o próximo minério exposto a cada 5 ticks
+                                   (when (zero? (mod tick 5))
+                                     (let [filter-str (or (:mining-filter st) "")
+                                           ores (locate-nearby-ores "Karlach" 12.0 filter-str)]
+                                       (if-let [target-ore (first ores)]
+                                         (swap! nav-state assoc :active-mining
+                                                {:x (:x target-ore)
+                                                 :y (:y target-ore)
+                                                 :z (:z target-ore)
+                                                 :block-id (or (:block-id target-ore) "minecraft:deepslate")
+                                                 :air-x (:air-x target-ore)
+                                                 :air-y (:air-y target-ore)
+                                                 :air-z (:air-z target-ore)
+                                                 :ticks 0
+                                                 :max-ticks 14})
+                                         ;; Sem mais minérios expostos!
+                                         (let [broken-cnt (:mining-blocks-broken @nav-state 0)
+                                               ore-label (get ore-pt-names filter-str (if (str/blank? filter-str) "minérios" filter-str))]
+                                           (if (> broken-cnt 0)
+                                             (karlach-say! (str "Veio de " ore-label " extraído por completo (" broken-cnt " blocos)! Pode recolher o saque, soldado! 🔥 ⛏️"))
+                                             (karlach-say! (str "Não encontrei mais veios expostos de " ore-label " por aqui perto, soldado!")))
+                                           (locate-dropped-items "Karlach" 6.0)
+                                           (swap! nav-state assoc :mode :bodyguard :mining-blocks-broken 0 :active-mining nil))))))))
+                             (swap! nav-state assoc :mode :bodyguard :active-mining nil)))
 
                          ;; 3. Sanctuary Patrol & Enclosure Caretaker BT loop
                          :else

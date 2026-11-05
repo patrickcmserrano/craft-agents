@@ -1044,8 +1044,8 @@ public final class SyntheticPlayerFactory {
                 Object pm = server.getClass().getMethod("method_3760").invoke(server);
                 Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
                 if (player != null) {
-                    List<SyntheticExcavation.OreTarget> ores = SyntheticExcavation.scanNearbyOres(player, radius, filter, cl);
-                    return SyntheticExcavation.formatOresProtocol(ores);
+                    List<SyntheticExposedOreScanner.ExposedOreTarget> ores = SyntheticExposedOreScanner.scanExposedOres(player, radius, filter, cl);
+                    return SyntheticExposedOreScanner.formatOresProtocol(ores);
                 }
                 return "ERR|NO_PLAYER";
             }
