@@ -83,7 +83,16 @@
           lmgr (leases/create-lease-manager)
           res  (reflexes/evaluate-survival-reflexes! body backend lmgr)]
       (is (true? (:triggered? res)))
-      (is (= :escape-hazard (:reflex res))))))
+      (is (= :escape-hazard (:reflex res)))))
+  (testing "Agente com asfixia/afogamento aciona reflexo :surface-for-air"
+    (let [w (wf/make-flat-world-state 64)
+          backend (wf/make-mock-backend w)
+          body (wf/make-mock-body w {:id :karlach :pos [0.0 64.0 0.0]})
+          _ (swap! (:state-atom body) assoc :drowning? true :oxygen 0)
+          lmgr (leases/create-lease-manager)
+          res (reflexes/evaluate-survival-reflexes! body backend lmgr)]
+      (is (true? (:triggered? res)))
+      (is (= :surface-for-air (:reflex res))))))
 
 (deftest ca-033-builtin-skills-semantic-error-codes-test
   (testing "CA-033: Skill :care-for-enclosure sem comida retorna erro semantico estruturado :MISSING_ITEM p/ escalonamento"
