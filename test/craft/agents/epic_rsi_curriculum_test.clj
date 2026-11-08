@@ -3,6 +3,7 @@
    Verifica Memória Negativa, Motor de Curiosidade, Síntese de Fallbacks e Dreamer RSI."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
+            [clojure.edn :as edn]
             [craft.agents.schemas :as schemas]
             [craft.agents.cognition.ledger :as ledger]
             [craft.agents.cognition.critic :as critic]
@@ -19,7 +20,7 @@
       (is (= {} empty-data)))
 
     ;; Registra 3 falhas na skill :rescue-duck para a mesma ação :attach-lead
-    (dotimes [i 3]
+    (dotimes [_ 3]
       (ledger/record-abort!
        test-ledger-file
        {:skill-id           :rescue-duck
@@ -373,3 +374,52 @@
           res (schemas/detect-lease-conflicts tree ctx)]
       (is (true? (:conflict? res)))
       (is (contains? (set (:conflicting-channels res)) :hands)))))
+
+(deftest test-curiosity-to-swe-task-bridge
+  (testing "Conversão determinística de Hipótese de Curiosidade em tarefa SWE-Runner"
+    (let [hypothesis {:hypothesis/type :frontier-exploration
+                      :hypothesis/priority :normal
+                      :target/category :sanctuary-fauna
+                      :target/identifier "capybara"
+                      :prompt/directive "Sintetize uma rotina de aproximação e carinho para a capivara."}
+          swe-task (curriculum/generate-swe-task-from-hypothesis
+                    hypothesis
+                    {:repo-dir "/home/pace/dev/craft-agents"
+                     :task-id "task-capybara-care"
+                     :model "deepseek-v4-1-flash"})]
+      (is (= "task-capybara-care" (:task-id swe-task)))
+      (is (= "/home/pace/dev/craft-agents" (:repo-dir swe-task)))
+      (is (= "deepseek-v4-1-flash" (:model swe-task)))
+      (is (= :edn (:envelope-format swe-task)))
+      (is (= "make test" (:test-cmd swe-task)))
+      (is (.contains (:spec-instruction swe-task) "capivara"))))
+
+  (testing "Despacho de hipótese de curiosidade grava arquivo EDN na fila do SWE"
+    (let [tmp-queue (io/file "target/test-curiosity-queue")
+          hypothesis {:hypothesis/type :frontier-exploration
+                      :target/identifier "capybara"
+                      :prompt/directive "Rotina de capivara"}
+          dispatch (curriculum/dispatch-curiosity-to-swe!
+                    hypothesis
+                    {:repo-dir "/home/pace/dev/craft-agents"
+                     :task-id "task-capybara-queue"
+                     :queue-dir (.getPath tmp-queue)})]
+      (is (true? (:dispatched? dispatch)))
+      (is (.exists (io/file (:task-file dispatch))))
+      (let [loaded (clojure.edn/read-string (slurp (:task-file dispatch)))]
+        (is (= "task-capybara-queue" (:task-id loaded))))))
+
+  (testing "step-curriculum-cycle! aciona despacho SWE quando :dispatch-swe? true"
+    (let [registry (atom {:composite-skills {}})
+          tmp-queue (io/file "target/test-curiosity-queue-step")
+          res (curriculum/step-curriculum-cycle!
+               {:skills-map {}
+                :abort-ledger {}
+                :scene-digest {:self {:inventory {"minecraft:wheat" 2}} :entities {:animals-summary {}}}
+                :skill-registry registry
+                :server-status {:tps 20.0 :idle-ticks 200 :hostiles-count 0}
+                :dispatch-swe? true
+                :queue-dir (.getPath tmp-queue)})]
+      (is (= :executed (:status res)))
+      (is (= :frontier-exploration (get-in res [:hypothesis :hypothesis/type])))
+      (is (true? (get-in res [:result :swe-dispatch :dispatched?]))))))

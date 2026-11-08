@@ -4,6 +4,7 @@
    explorar a fronteira física observada e comprimir a biblioteca de skills via homoiconicidade."
   (:require [clojure.walk :as walk]
             [clojure.set :as set]
+            [clojure.java.io :as io]
             [craft.agents.schemas :as schemas]
             [craft.agents.cognition.ledger :as ledger]))
 
@@ -241,7 +242,43 @@
        :rsi/status :no-compressible-patterns})))
 
 ;; =============================================================================
-;; 6. CICLO AUTÔNOMO FECHADO DO CURRICULUM AGENT
+;; 6. PONTE CURRICULUM AGENT -> SWE-RUNNER (AUTONOMOUS CODE GENERATION)
+;; =============================================================================
+
+(defn generate-swe-task-from-hypothesis
+  "Converte uma hipótese de curiosidade do Curriculum Agent em uma tarefa executável para o SWE-Runner."
+  [hypothesis & [{:keys [repo-dir task-id model test-cmd target-files]
+                  :or {repo-dir "/home/pace/dev/craft-agents"
+                       model "deepseek-v4-1-flash"
+                       test-cmd "make test"
+                       target-files ["src/clj/craft/agents/bt/builtins.clj"
+                                     "test/craft/agents/epic4_behavior_leases_store_test.clj"]}}]]
+  (let [tid (or task-id (str "curiosity-" (name (or (:hypothesis/type hypothesis) :task)) "-" (System/currentTimeMillis)))]
+    {:repo-dir repo-dir
+     :task-id tid
+     :task-profile "architecture"
+     :model model
+     :test-cmd test-cmd
+     :target-files target-files
+     :envelope-format :edn
+     :spec-instruction (or (:prompt/directive hypothesis)
+                           (str "Implementar hipótese de curiosidade para " (:target/identifier hypothesis)))}))
+
+(defn dispatch-curiosity-to-swe!
+  "Despacha uma hipótese para a fila de tarefas do SWE-Runner gravando um arquivo EDN."
+  [hypothesis & [{:keys [queue-dir] :or {queue-dir "target/curiosity-queue"} :as opts}]]
+  (let [swe-task (generate-swe-task-from-hypothesis hypothesis opts)
+        q-dir (io/file queue-dir)
+        _ (.mkdirs q-dir)
+        task-file (io/file q-dir (str (:task-id swe-task) ".edn"))]
+    (spit task-file (pr-str swe-task))
+    {:dispatched? true
+     :task-id (:task-id swe-task)
+     :task-file (.getPath task-file)
+     :swe-task swe-task}))
+
+;; =============================================================================
+;; 7. CICLO AUTÔNOMO FECHADO DO CURRICULUM AGENT
 ;; =============================================================================
 
 (defn step-curriculum-cycle!
@@ -251,9 +288,9 @@
    3. Executa a hipótese apropriada:
       - :self-healing-fallback: aplica wrap-action-with-fallback na skill alvo e registra no skill-registry.
       - :dream-consolidation: executa dream-compress-library! no skill-registry.
-      - :frontier-exploration: emite diretiva formal para o Sistema 2.
+      - :frontier-exploration: emite diretiva formal para o Sistema 2 ou despacha para o SWE-Runner se :dispatch-swe? true.
    Retorna mapa estruturado com status e telemetria."
-  [{:keys [skills-map abort-ledger scene-digest skill-registry server-status]}]
+  [{:keys [skills-map abort-ledger scene-digest skill-registry server-status dispatch-swe?] :as opts}]
   (if-not (server-idle? server-status)
     {:status :skipped :reason :server-busy}
     (let [hypothesis (generate-curiosity-hypothesis
@@ -290,7 +327,10 @@
              :reason (if-not valid-node? :INVALID_SCHEMA :LEASE_CONFLICT)}))
 
         :frontier-exploration
-        {:status :executed
-         :hypothesis hypothesis
-         :result {:rsi/status :frontier-directive-ready
-                  :directive (:prompt/directive hypothesis)}}))))
+        (let [dispatch (when dispatch-swe?
+                         (dispatch-curiosity-to-swe! hypothesis opts))]
+          {:status :executed
+           :hypothesis hypothesis
+           :result (cond-> {:rsi/status :frontier-directive-ready
+                            :directive (:prompt/directive hypothesis)}
+                     dispatch (assoc :swe-dispatch dispatch))})))))
