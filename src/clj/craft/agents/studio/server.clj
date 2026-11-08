@@ -97,6 +97,33 @@
            :headers {"Content-Type" "application/json; charset=utf-8"}
            :body (json/write-str {:status "ok" :cleared true})})
 
+        (and (= uri "/api/reload") (= method :post))
+        (try
+          (println "[craft-agents] 🔄 Recebida solicitação de Hot-Reload em tempo de execução...")
+          (require 'craft.agents.skills.actions :reload)
+          (require 'craft.agents.skills.composer :reload)
+          (require 'craft.agents.cognition.semantic-router :reload)
+          (require 'craft.agents.cognition.intent :reload)
+          (require 'craft.agents.backend.fabric.goals :reload)
+          (let [loaded-routes (router/load-persisted-routes! "agents/routes")]
+            (when (instance? clojure.lang.IAtom engine-ctx)
+              (swap! engine-ctx update :events (fnil conj [])
+                     {:timestamp (System/currentTimeMillis)
+                      :type :rsi
+                      :source "JVM Hot-Reload"
+                      :text (str "Capacidades recarregadas dinamicamente via POST /api/reload (" (count loaded-routes) " rotas ativas).")}))
+            (println (format "[craft-agents] ✅ Hot-Reload concluído com sucesso. %d rotas recarregadas." (count loaded-routes)))
+            {:status 200
+             :headers {"Content-Type" "application/json; charset=utf-8"}
+             :body (json/write-str {:status "ok"
+                                    :reloaded true
+                                    :routes-loaded (count loaded-routes)})})
+          (catch Throwable t
+            (println (format "[craft-agents] ❌ Erro durante Hot-Reload: %s" (.getMessage t)))
+            {:status 500
+             :headers {"Content-Type" "application/json; charset=utf-8"}
+             :body (json/write-str {:status "error" :message (.getMessage t)})}))
+
         (= uri "/ws")
         (if (:websocket? req)
           (http/as-channel req

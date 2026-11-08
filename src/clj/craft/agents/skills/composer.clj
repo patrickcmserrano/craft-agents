@@ -42,7 +42,7 @@
 
 (defn validate-and-register-skill!
   "Valida sub-arvore proposta por IA (schema, lease conflicts, acoes conhecidas, ausencia de recursao ciclica, timeouts) e salva EDN (CA-037, CA-RSI.3.2)."
-  [skill-registry skills-dir skill-def & [{:keys [routes-dir] :or {routes-dir "agents/routes"}}]]
+  [skill-registry skills-dir skill-def & [{:keys [routes-dir custom-anchors] :or {routes-dir "agents/routes"}}]]
   (let [skill-id       (:skill/id skill-def)
         tree           (:skill/tree skill-def)
         known-actions  (let [ka (:known-actions @skill-registry)]
@@ -78,7 +78,9 @@
               (spit f (pr-str skill-def)))
             (swap! skill-registry assoc-in [:composite-skills skill-id] tree)
             (try
-              (router/auto-register-skill-route! skill-def {:persist? true :routes-dir routes-dir})
+              (router/auto-register-skill-route! skill-def {:persist? true
+                                                            :routes-dir routes-dir
+                                                            :custom-anchors custom-anchors})
               (catch Throwable _ nil))
             {:ok? true :skill-id skill-id}))))))
 
@@ -391,15 +393,32 @@
       (let [ast-res (parse-natural-or-edn-tree body name speaker)]
         (if-not (:ok? ast-res)
           ast-res
-          (let [slug     (slugify (:name ast-res))
-                skill-id (keyword slug)
+          (let [slug         (slugify (:name ast-res))
+                skill-id     (keyword slug)
+                clean-name   (str/replace (:name ast-res) #"[-_]" " ")
+                trimmed-body (str/trim (or body ""))
+                trimmed-raw  (str/trim (or raw-instruction ""))
+                custom-anchors (vec
+                                (distinct
+                                 (remove str/blank?
+                                         [trimmed-body
+                                          (str "karlach " trimmed-body)
+                                          (str/replace trimmed-body #"(?i)\s+(?:comigo|junto|aqui)" "")
+                                          (str "karlach " (str/replace trimmed-body #"(?i)\s+(?:comigo|junto|aqui)" ""))
+                                          clean-name
+                                          (str "karlach " clean-name)
+                                          (:name ast-res)
+                                          (when (not= trimmed-raw trimmed-body) trimmed-raw)
+                                          (when (not= trimmed-raw trimmed-body) (str "karlach " trimmed-raw))])))
                 skill-def {:skill/id         skill-id
                            :skill/name       (str "Habilidade " (:name ast-res))
                            :skill/author     (str "Player-" (or speaker "pace"))
                            :skill/trigger    :chat-command
                            :skill/timeout-ms 30000
                            :skill/tree       (:tree ast-res)}
-                reg-res (validate-and-register-skill! skill-registry skills-dir skill-def {:routes-dir routes-dir})]
+                reg-res   (validate-and-register-skill! skill-registry skills-dir skill-def
+                                                        {:routes-dir routes-dir
+                                                         :custom-anchors custom-anchors})]
             (if (:ok? reg-res)
               {:ok?        true
                :skill-id   skill-id

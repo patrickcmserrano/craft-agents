@@ -176,19 +176,37 @@
         (is (= :mount-boat (:action-id res)))
         (is (= ["CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..6,sort=nearest,limit=1]"] @sent))))
 
-    (testing "Sintetização via chat gera skill válida com :mount-boat"
+    (testing "Sintetização via chat gera skill válida com :mount-boat e registra âncoras primárias no router"
       (let [tmp-skills (io/file (System/getProperty "java.io.tmpdir") (str "ca-mount-boat-" (System/nanoTime)))
+            tmp-routes (io/file (System/getProperty "java.io.tmpdir") (str "ca-routes-" (System/nanoTime)))
             registry   (atom {:known-actions composer/default-known-actions
                               :composite-skills {}})]
         (.mkdirs tmp-skills)
+        (.mkdirs tmp-routes)
         (try
           (let [res (composer/synthesize-and-register-skill-from-chat!
-                     registry tmp-skills "entrar-barco: suba no barco comigo" "Pace")]
+                     registry tmp-skills "entrar-barco: suba no barco comigo" "Pace" {:routes-dir (.getPath tmp-routes)})
+                route-file (io/file tmp-routes "entrar-barco.edn")]
             (is (:ok? res))
             (is (= [:sequence [:action :mount-boat {:speaker "Pace"}]]
-                   (get-in res [:skill-def :skill/tree]))))
+                   (get-in res [:skill-def :skill/tree])))
+            (is (.exists route-file) "Arquivo de rota semântica deve ter sido persistido")
+            (let [route-data (clojure.edn/read-string (slurp route-file))
+                  anchors    (set (:anchors route-data))]
+              (is (contains? anchors "suba no barco comigo") "A frase literal falada pelo jogador deve ser âncora")
+              (is (contains? anchors "karlach suba no barco comigo") "Variação com nome da agente deve ser âncora")))
           (finally
-            (doseq [f (reverse (file-seq tmp-skills))] (.delete f))))))))
+            (doseq [f (reverse (file-seq tmp-skills))] (.delete f))
+            (doseq [f (reverse (file-seq tmp-routes))] (.delete f))))))))
+
+(deftest ca-040-studio-hot-reload-endpoint-test
+  (testing "POST /api/reload recarrega namespaces e rotas sem derrubar JVM"
+    (let [ctx-atom (atom {:events []})
+          handler  (studio/create-app-handler ctx-atom)
+          resp     (handler {:uri "/api/reload" :request-method :post})]
+      (is (= 200 (:status resp)))
+      (is (str/includes? (:body resp) "\"reloaded\":true"))
+      (is (pos? (count (:events @ctx-atom))) "Evento de reload deve ser registrado no blackboard do studio"))))
 
 
 (deftest ca-046-dynamic-terrain-portal-perception-test

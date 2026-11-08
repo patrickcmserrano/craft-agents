@@ -505,12 +505,14 @@
                       (str "Implementar a nova capacidade motora que falta no motor para o comando: '" instruction "'.\n"
                            "REQUISITOS:\n"
                            "1. Em `src/clj/craft/agents/skills/composer.clj`:\n"
-                           "   - Adicionar a nova ação em `default-known-actions` (ex: :mount-boat, :ride-vehicle).\n"
-                           "   - Em `step->action-node`, mapear o termo (barco, subir no barco, montar) para [:action :mount-boat].\n"
+                           "   - Adicionar a nova ação em `default-known-actions`.\n"
+                           "   - Em `step->action-node`, mapear o termo e intenções da instrução para [:action :nome-acao {:speaker speaker}].\n"
                            "2. Em `src/clj/craft/agents/skills/actions.clj`:\n"
-                           "   - Implementar `(defmethod execute-action :mount-boat [action-id action-args ctx] ...)` executando `((:send-cmd! ctx) \"CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]\")` e retornando `{:status :success}`.\n"
+                           "   - Implementar `(defmethod execute-action :nome-acao [action-id action-args ctx] ...)` retornando `{:status :success :action-id action-id}`.\n"
+                           "   - REGRA DE PRATA ESPACIAL (CRÍTICO): Comandos Minecraft enviados via socket console executam na origem [0, 0, 0] se não forem explicitamente ancorados. Para qualquer comando que interaja com entidades próximas, seletores (@e, @p) ou coordenadas relativas, você DEVE prefixar com `execute at Karlach run ...` (exemplo: `\"CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..6,sort=nearest,limit=1]\"`). NUNCA envie comandos relativos sem ancoragem espacial.\n"
                            "3. Em `test/craft/agents/epic5_cognition_mcp_studio_test.clj`:\n"
-                           "   - Cobrir com teste unitário a nova ação e mapeamento mantendo 100% GREEN.")}]
+                           "   - Cobrir com teste unitário a nova ação e mapeamento mantendo 100% GREEN.\n"
+                           "   - Não modifique testes existentes (Locked-Test protocol).")}]
             (try
               (curriculum/dispatch-curiosity-to-swe!
                hyp
