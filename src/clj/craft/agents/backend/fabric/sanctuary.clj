@@ -189,9 +189,9 @@
                fx fy fz sp))
       (if is-cat?
         (do
-          ;; 1. Reprodução AFK para gatos adultos (Age: 0): coloca InLove:600 e Sitting:0b (limite de segurança de 18 gatos por recinto)
+          ;; 1. Reprodução AFK para gatos adultos (Age: 0): apenas gatos em pé (Sitting:0b), preservando gatos sentados (Sitting:1b)
           (transport/send-bridge-cmd!
-           (uformat "CMD|execute positioned %.1f %.1f %.1f if entity @e[type=cat,distance=..25,limit=18] as @e[type=cat,distance=..25,nbt={Age:0}] run data merge entity @s {InLove:600,Sitting:0b,PersistenceRequired:1b}"
+           (uformat "CMD|execute positioned %.1f %.1f %.1f if entity @e[type=cat,distance=..25,limit=18] as @e[type=cat,distance=..25,nbt={Age:0,Sitting:0b}] run data merge entity @s {InLove:600,PersistenceRequired:1b}"
                    fx fy fz))
           ;; 2. Aceleração de crescimento para gatinhos filhotes (Age < 0) com peixe fresco
           (transport/send-bridge-cmd!

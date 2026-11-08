@@ -441,7 +441,7 @@
   ;; Pulso imediato de reprodução para gatos próximos à Karlach
   (let [[cx cy cz] (:pos @nav-state [-175.0 65.0 180.0])]
     (transport/send-bridge-cmd!
-     (uformat "CMD|execute positioned %.1f %.1f %.1f if entity @e[type=cat,distance=..35,limit=18] as @e[type=cat,distance=..35,nbt={Age:0}] run data merge entity @s {InLove:600,Sitting:0b,PersistenceRequired:1b}"
+     (uformat "CMD|execute positioned %.1f %.1f %.1f if entity @e[type=cat,distance=..35,limit=18] as @e[type=cat,distance=..35,nbt={Age:0,Sitting:0b}] run data merge entity @s {InLove:600,PersistenceRequired:1b}"
              cx cy cz))
     (transport/send-bridge-cmd!
      (uformat "CMD|execute positioned %.1f %.1f %.1f as @e[type=cat,distance=..35] run effect give @s minecraft:regeneration 10 1 true"

@@ -123,3 +123,20 @@
         (is (= "Capivara Nadadora" (:name target)))
         (is (= "Capybara" (:species target)))
         (is (= [-175.0 65.0 160.0] (:pos target)))))))
+
+(deftest ca-054-cat-sitting-lock-preservation-test
+  (testing "CA-054: Karlach preserva gatos sentados (Sitting:1b) e NUNCA forca Sitting:0b na reproducao/alimentacao"
+    (let [cmds (atom [])]
+      (with-redefs [fabric/send-bridge-cmd! (fn [cmd] (swap! cmds conj cmd))]
+        (fabric/feed-enclosure-animals! [-175.0 65.0 180.0] "minecraft:cod" ["minecraft:cat"])
+        (let [cat-merge-cmds (filter #(and (clojure.string/includes? % "type=cat")
+                                           (clojure.string/includes? % "data merge entity"))
+                                     @cmds)]
+          (is (seq cat-merge-cmds) "Deve emitir comando de reproducao/cuidados para gatos")
+          (doseq [cmd cat-merge-cmds]
+            (let [[_ merge-payload] (clojure.string/split cmd #"run data merge entity @s ")]
+              (is (not (clojure.string/includes? (or merge-payload "") "Sitting:"))
+                  "Payload do data merge jamais deve sobrescrever Sitting em gatos, impedindo teleporte indesejado para o jogador"))
+            (is (clojure.string/includes? cmd "Sitting:0b}")
+                "Comando de reproducao deve selecionar apenas gatos que ja estao em pe (nbt={Age:0,Sitting:0b})")))))))
+
