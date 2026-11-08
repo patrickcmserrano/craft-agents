@@ -26,6 +26,6 @@
 (defmethod execute-action :mount-boat
   [_action-id _action-args ctx]
   (when-let [send-cmd! (:send-cmd! ctx)]
-    (send-cmd! "CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]"))
+    (send-cmd! "CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..6,sort=nearest,limit=1]"))
   {:status :success
    :action-id :mount-boat})

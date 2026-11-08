@@ -174,7 +174,7 @@
             res  (actions/execute-action :mount-boat {} ctx)]
         (is (= :success (:status res)))
         (is (= :mount-boat (:action-id res)))
-        (is (= ["CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]"] @sent))))
+        (is (= ["CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..6,sort=nearest,limit=1]"] @sent))))
 
     (testing "Sintetização via chat gera skill válida com :mount-boat"
       (let [tmp-skills (io/file (System/getProperty "java.io.tmpdir") (str "ca-mount-boat-" (System/nanoTime)))
