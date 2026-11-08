@@ -8,3 +8,5 @@ state/*.jsonl
 !state/.gitkeep
 *.class
 *.jar
+/.ai-factory/index/
+.ai-factory/
