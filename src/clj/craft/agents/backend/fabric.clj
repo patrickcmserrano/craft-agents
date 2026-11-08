@@ -1449,6 +1449,122 @@
         (send-bridge-cmd! "CMD|playsound minecraft:block.note_block.bass master @a ~ ~ ~ 1.0 0.8")
         (karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como '!karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))
 
+(defn- execute-tree-node!
+  "Executa nó da Behavior Tree preservando semântica de controle (:fallback, :sequence, :parallel) e expandindo macros."
+  [node engine-ctx-atom nav-state sanctuary-route speaker]
+  (if-not (vector? node)
+    {:status :failure :reason :INVALID_NODE}
+    (let [op   (first node)
+          args (rest node)]
+      (case op
+        :sequence
+        (loop [children args]
+          (if (empty? children)
+            {:status :success}
+            (let [res (execute-tree-node! (first children) engine-ctx-atom nav-state sanctuary-route speaker)]
+              (if (= :success (:status res))
+                (recur (rest children))
+                res))))
+
+        (:fallback :selector)
+        (loop [children args]
+          (if (empty? children)
+            {:status :failure}
+            (let [res (execute-tree-node! (first children) engine-ctx-atom nav-state sanctuary-route speaker)]
+              (if (= :success (:status res))
+                res
+                (recur (rest children))))))
+
+        :parallel
+        (let [results (mapv #(execute-tree-node! % engine-ctx-atom nav-state sanctuary-route speaker) args)]
+          (if (some #(= :failure (:status %)) results)
+            {:status :failure}
+            {:status :success}))
+
+        :action
+        (let [action-id (first args)
+              action-args (second args)
+              skills-dir (io/file "skills")
+              macro-file (io/file skills-dir (str (clojure.core/name action-id) ".edn"))
+              macro-def  (when (.exists macro-file)
+                           (try (edn/read-string (slurp macro-file)) (catch Throwable _ nil)))
+              macro-tree (or (:skill/tree macro-def)
+                             (get-in @engine-ctx-atom [:composite-skills action-id]))]
+          (if macro-tree
+            (execute-tree-node! macro-tree engine-ctx-atom nav-state sanctuary-route speaker)
+            (try
+              (case action-id
+                :social-dance
+                (do (execute-karlach-goal! {:goal/type :social-dance :goal/voice-line "Olha o passinho de vitória! 🔥"}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :sit-furniture
+                (do (execute-karlach-goal! {:goal/type :sit-furniture :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :stand-up
+                (do (execute-karlach-goal! {:goal/type :stand-up :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :patrol-sanctuary
+                (do (execute-karlach-goal! {:goal/type :patrol-sanctuary :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :breed-animals
+                (do (execute-karlach-goal! {:goal/type :breed-animals :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :follow-player
+                (do (execute-karlach-goal! {:goal/type :follow-player :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :bodyguard
+                (do (execute-karlach-goal! {:goal/type :bodyguard :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :mining-cooperation
+                (do (execute-karlach-goal! {:goal/type :mining-cooperation :goal/speaker speaker :goal/filter (:target action-args "diamond")}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :drop-inventory
+                (do (execute-karlach-goal! {:goal/type :drop-inventory :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :teleport-to-player
+                (do (execute-karlach-goal! {:goal/type :teleport-to-player :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :move-to-quarters
+                (do (execute-karlach-goal! {:goal/type :weather-shelter :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success})
+
+                :say-message
+                (do (karlach-say! (or (:text action-args) "Comando concluído com sucesso, soldado!"))
+                    {:status :success})
+
+                :play-sound
+                (do (send-bridge-cmd! (str "CMD|playsound " (:sound action-args "minecraft:entity.experience_orb.pickup") " master @a ~ ~ ~ 1.0 1.0"))
+                    {:status :success})
+
+                (do
+                  (record-cognitive-event! engine-ctx-atom :motor "Ação Dinâmica" (str "Executando ação: " action-id " com args: " (pr-str action-args)))
+                  {:status :success}))
+              (catch Throwable _
+                {:status :failure :action action-id}))))
+
+        {:status :success}))))
+
 (defmethod execute-karlach-goal! :execute-dynamic-skill
   [{:goal/keys [skill-id speaker]} engine-ctx-atom nav-state sanctuary-route]
   (let [skills-dir (io/file "skills")
@@ -1462,61 +1578,7 @@
         (karlach-say! (str "Executando habilidade aprendida '" skill-name "', " (or speaker "soldado") "! 🔥"))
         (send-bridge-cmd! "SWING|Karlach")
         (send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
-        (let [actions (composer/extract-actions-with-args skill-tree)]
-          (doseq [{:keys [action args]} actions]
-            (case action
-              :social-dance
-              (execute-karlach-goal! {:goal/type :social-dance :goal/voice-line "Olha o passinho de vitória! 🔥"}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :sit-furniture
-              (execute-karlach-goal! {:goal/type :sit-furniture :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :stand-up
-              (execute-karlach-goal! {:goal/type :stand-up :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :patrol-sanctuary
-              (execute-karlach-goal! {:goal/type :patrol-sanctuary :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :breed-animals
-              (execute-karlach-goal! {:goal/type :breed-animals :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :follow-player
-              (execute-karlach-goal! {:goal/type :follow-player :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :bodyguard
-              (execute-karlach-goal! {:goal/type :bodyguard :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :mining-cooperation
-              (execute-karlach-goal! {:goal/type :mining-cooperation :goal/speaker speaker :goal/filter (:target args "diamond")}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :drop-inventory
-              (execute-karlach-goal! {:goal/type :drop-inventory :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :teleport-to-player
-              (execute-karlach-goal! {:goal/type :teleport-to-player :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :move-to-quarters
-              (execute-karlach-goal! {:goal/type :weather-shelter :goal/speaker speaker}
-                                     engine-ctx-atom nav-state sanctuary-route)
-
-              :say-message
-              (karlach-say! (or (:text args) "Comando concluído com sucesso, soldado!"))
-
-              :play-sound
-              (send-bridge-cmd! (str "CMD|playsound " (:sound args "minecraft:entity.experience_orb.pickup") " master @a ~ ~ ~ 1.0 1.0"))
-
-              ;; Fallback p/ ações genéricas
-              (record-cognitive-event! engine-ctx-atom :motor "Ação Dinâmica" (str "Executando ação composta: " action " com args: " (pr-str args)))))))
+        (execute-tree-node! skill-tree engine-ctx-atom nav-state sanctuary-route speaker))
       (karlach-say! (str "Não encontrei os registros da skill " skill-id " no meu córtex, " (or speaker "soldado") "!")))))
 
 (defmethod execute-karlach-goal! :default
@@ -2284,6 +2346,11 @@
                                                    (critic/check-runtime-invariants invariants obs)))]
                                (if (and inv-check (:violated? inv-check))
                                  (let [reflection (critic/generate-early-abort-reflection inv-check cur-step)]
+                                   (try
+                                     (critic/record-early-abort-event! reflection
+                                                                      (or (:skill-id cur-step) :patrol-sanctuary)
+                                                                      "state/abort-ledger.edn")
+                                     (catch Throwable _ nil))
                                    (record-cognitive-event! engine-ctx-atom :critic-fail "Environmental Critic"
                                                             (str "EARLY ABORT DETECTADO: " (:diagnostic inv-check)))
                                    (record-cognitive-event! engine-ctx-atom :reflexion "System 2 Reflexion"

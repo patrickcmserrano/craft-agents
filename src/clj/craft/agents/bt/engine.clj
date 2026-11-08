@@ -47,10 +47,18 @@
         :action
         (let [action-id (first args)
               params    (second args)
+              composite (get-in ctx [:composite-skills action-id])
               handler   (get-in ctx [:actions action-id])]
-          (if handler
+          (cond
+            composite
+            (let [res (tick-tree composite (assoc ctx :params params))]
+              (update res :active-path (fn [p] (into [action-id] (or p [])))))
+
+            handler
             (let [res (handler (assoc ctx :params params))]
               (update res :active-path (fn [p] (into [action-id] (or p [])))))
+
+            :else
             {:status :failure :active-path [action-id] :reason :UNKNOWN_ACTION}))
 
         :guard

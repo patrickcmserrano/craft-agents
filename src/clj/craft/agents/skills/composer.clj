@@ -89,7 +89,8 @@
 (defn retrieve-relevant-skills
   "Skill-RAG (P2.1, CA-RSI.1.2): Recupera as top-k skills mais similares semanticamente ao objetivo atual.
    Se abort-ledger for fornecido, enriquece com histórico de falhas e restrições negativas."
-  [query skills-dir & [{:keys [top-k abort-ledger] :or {top-k 3}}]]
+  [query skills-dir & [{:keys [top-k abort-ledger recurrence-threshold]
+                        :or {top-k 3 recurrence-threshold 3}}]]
   (let [dir (io/file skills-dir)]
     (if (and (.exists dir) (.isDirectory dir))
       (let [files      (filter #(str/ends-with? (.getName %) ".edn") (.listFiles dir))
@@ -111,8 +112,8 @@
                                        sim        (router/cosine-similarity q-vec s-vec)
                                        aborts     (when (and ledger-map sid) (get ledger-map sid []))
                                        frequent   (when (and ledger-map sid)
-                                                    (ledger/frequent-aborts (select-keys ledger-map [sid]) 1))
-                                       unstable?  (>= (count aborts) 3)
+                                                    (ledger/frequent-aborts (select-keys ledger-map [sid]) recurrence-threshold))
+                                       unstable?  (>= (count aborts) recurrence-threshold)
                                        neg-prompt (when (seq frequent)
                                                     (ledger/build-negative-constraints-prompt frequent))]
                                    (cond-> {:skill data :score sim :file (.getName f)}

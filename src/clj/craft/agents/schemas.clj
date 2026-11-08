@@ -108,40 +108,55 @@
    :look-at-player       :gaze})
 
 (defn extract-requested-lease-channels
-  "Extrai todos os canais de lease requisitados por ações dentro de um nó ou sub-árvore."
-  [node]
-  (let [acc (atom #{})]
-    (walk/postwalk
-     (fn [n]
-       (when (and (vector? n) (= (first n) :action))
-         (when-let [ch (get action->lease-channel (second n))]
-           (swap! acc conj ch)))
-       n)
-     node)
-    @acc))
+  "Extrai todos os canais de lease requisitados por ações dentro de um nó ou sub-árvore.
+   Se composite-skills for fornecido, expande recursivamente nós de macro.
+   Ações desconhecidas fora de action->lease-channel são tratadas fail-closed como :unknown."
+  ([node]
+   (extract-requested-lease-channels node nil))
+  ([node ctx]
+   (let [composites (or (:composite-skills ctx) ctx {})
+         acc (atom #{})]
+     (walk/postwalk
+      (fn [n]
+        (when (and (vector? n) (= (first n) :action))
+          (let [act-id (second n)]
+            (if-let [comp (get composites act-id)]
+              (swap! acc into (extract-requested-lease-channels comp composites))
+              (if-let [ch (get action->lease-channel act-id)]
+                (swap! acc conj ch)
+                (swap! acc conj :unknown)))))
+        n)
+      node)
+     @acc)))
 
 (defn detect-lease-conflicts
   "Verificação Estática de Conflito de Leases Simbólicas (CA-RSI.3.2).
    Analisa todos os nós [:parallel ...] da árvore e detecta se dois ou mais ramos
-   concorrentes requisitam o mesmo canal de lease (:legs, :hands, :gaze)."
-  [tree]
-  (let [conflicts (atom [])]
-    (walk/postwalk
-     (fn [n]
-       (when (and (vector? n) (= (first n) :parallel))
-         (let [children           (rest n)
-               channels-per-child (mapv extract-requested-lease-channels children)
-               all-channels       (apply concat channels-per-child)
-               freqs              (frequencies all-channels)
-               clashing           (vec (sort (keep (fn [[ch count]] (when (> count 1) ch)) freqs)))]
-           (when (seq clashing)
-             (swap! conflicts conj {:node n :channels clashing}))))
-       n)
-     tree)
-    (let [all-clashing (vec (sort (distinct (mapcat :channels @conflicts))))]
-      {:conflict?            (boolean (seq @conflicts))
-       :conflicting-channels all-clashing
-       :conflicts            @conflicts})))
+   concorrentes requisitam o mesmo canal de lease (:legs, :hands, :gaze ou :unknown fail-closed)."
+  ([tree]
+   (detect-lease-conflicts tree nil))
+  ([tree ctx]
+   (let [conflicts (atom [])]
+     (walk/postwalk
+      (fn [n]
+        (when (and (vector? n) (= (first n) :parallel))
+          (let [children           (rest n)
+                channels-per-child (mapv #(extract-requested-lease-channels % ctx) children)
+                all-channels       (apply concat channels-per-child)
+                freqs              (frequencies all-channels)
+                clashing           (vec (sort (distinct
+                                               (concat (keep (fn [[ch count]] (when (> count 1) ch)) freqs)
+                                                       (when (and (contains? (set all-channels) :unknown)
+                                                                  (> (count children) 1))
+                                                         [:unknown])))))]
+            (when (seq clashing)
+              (swap! conflicts conj {:node n :channels clashing}))))
+        n)
+      tree)
+     (let [all-clashing (vec (sort (distinct (mapcat :channels @conflicts))))]
+       {:conflict?            (boolean (seq @conflicts))
+        :conflicting-channels all-clashing
+        :conflicts            @conflicts}))))
 
 (def AgentProfile
   [:map

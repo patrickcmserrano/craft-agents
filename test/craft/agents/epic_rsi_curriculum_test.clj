@@ -7,6 +7,7 @@
             [craft.agents.cognition.ledger :as ledger]
             [craft.agents.cognition.critic :as critic]
             [craft.agents.skills.composer :as composer]
+            [craft.agents.bt.engine :as bt]
             [craft.agents.rsi.curriculum :as curriculum]))
 
 (def test-ledger-file "target/test-abort-ledger.edn")
@@ -78,7 +79,12 @@
     (is (false? (curriculum/server-idle? {:tps 20.0 :idle-ticks 50 :hostiles-count 0}))
         "Rejeita se não tiver ticks ociosos suficientes")
     (is (false? (curriculum/server-idle? {:tps 20.0 :idle-ticks 200 :hostiles-count 2}))
-        "Rejeita se houver hostis detectados")))
+        "Rejeita se houver hostis detectados")
+    (testing "Fail-closed: Rejeita se status for incompleto ou nulo"
+      (is (false? (curriculum/server-idle? {})))
+      (is (false? (curriculum/server-idle? nil)))
+      (is (false? (curriculum/server-idle? {:tps 20.0})))
+      (is (false? (curriculum/server-idle? {:idle-ticks 120}))))))
 
 (deftest test-curiosity-hypothesis-generation-ca-rsi-2
   (let [sample-skills {:rescue-sheep
@@ -310,3 +316,60 @@
         (is (= :executed (:status res)))
         (is (= :dream-consolidation (get-in res [:hypothesis :hypothesis/type])))
         (is (= :compressed-successfully (get-in res [:result :rsi/status])))))))
+
+(deftest test-bt-engine-macro-expansion-and-execution
+  (testing "Engine expande nós [:action :macro-...] recursivamente via :composite-skills"
+    (let [log (atom [])
+          ctx {:actions {:walk (fn [_] (swap! log conj :walk) {:status :success})
+                         :eat  (fn [_] (swap! log conj :eat) {:status :success})}
+               :composite-skills {:macro-routine [:sequence
+                                                  [:action :walk]
+                                                  [:action :eat]]}}
+          tree [:sequence
+                [:action :macro-routine]]
+          res (bt/tick-tree tree ctx)]
+      (is (= :success (:status res)))
+      (is (= [:walk :eat] @log)))))
+
+(deftest test-bt-engine-semantic-fallback-recovery
+  (testing "Fallback tenta rota alternativa quando o primeiro ramo falha"
+    (let [log (atom [])
+          ctx {:actions {:unstable-action (fn [_] (swap! log conj :unstable) {:status :failure})
+                         :recovery-action (fn [_] (swap! log conj :recovery) {:status :success})}}
+          tree [:fallback
+                [:action :unstable-action]
+                [:action :recovery-action]]
+          res (bt/tick-tree tree ctx)]
+      (is (= :success (:status res)))
+      (is (= [:unstable :recovery] @log))))
+
+  (testing "Fallback não executa contingência se o primeiro ramo for bem sucedido"
+    (let [log (atom [])
+          ctx {:actions {:primary-action (fn [_] (swap! log conj :primary) {:status :success})
+                         :recovery-action (fn [_] (swap! log conj :recovery) {:status :success})}}
+          tree [:fallback
+                [:action :primary-action]
+                [:action :recovery-action]]
+          res (bt/tick-tree tree ctx)]
+      (is (= :success (:status res)))
+      (is (= [:primary] @log)))))
+
+(deftest test-detect-lease-conflicts-fail-closed-and-macros
+  (testing "Ação desconhecida em nó paralelo é tratada fail-closed gerando conflito"
+    (let [tree [:parallel
+                [:action :walk]
+                [:action :unknown-complex-mutation]]
+          res (schemas/detect-lease-conflicts tree)]
+      (is (true? (:conflict? res)))
+      (is (contains? (set (:conflicting-channels res)) :unknown))))
+
+  (testing "Expande macros recursivamente para detectar conflitos de lease aninhados"
+    (let [ctx {:composite-skills {:macro-hands [:sequence
+                                                [:action :attach-lead]
+                                                [:action :close-gate]]}}
+          tree [:parallel
+                [:action :open-gate]
+                [:action :macro-hands]]
+          res (schemas/detect-lease-conflicts tree ctx)]
+      (is (true? (:conflict? res)))
+      (is (contains? (set (:conflicting-channels res)) :hands)))))

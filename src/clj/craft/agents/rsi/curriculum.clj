@@ -13,16 +13,22 @@
 
 (defn server-idle?
   "Verifica se o servidor e o agente estão em estado calmo apropriado para cognição do Sistema 2.
-   Critérios:
+   Critérios FAIL-CLOSED:
+   - status deve ser um mapa válido e com métricas explícitas presentes
    - TPS estável (>= min-tps, padrão 19.0)
    - Zero comandos de jogadores recentes por idle-ticks (padrão 100 ticks = 5 segundos)
-   - Nenhum hostil no SceneDigest imediato"
-  [{:keys [tps idle-ticks hostiles-count]} & [{:keys [min-tps req-idle-ticks]
-                                              :or {min-tps 19.0 req-idle-ticks 100}}]]
+   - Nenhum hostil no SceneDigest imediato (hostiles-count == 0)"
+  [status & [{:keys [min-tps req-idle-ticks]
+              :or {min-tps 19.0 req-idle-ticks 100}}]]
   (boolean
-   (and (>= (or tps 20.0) min-tps)
-        (>= (or idle-ticks req-idle-ticks) req-idle-ticks)
-        (zero? (or hostiles-count 0)))))
+   (and (map? status)
+        (seq status)
+        (number? (:tps status))
+        (number? (:idle-ticks status))
+        (number? (:hostiles-count status))
+        (>= (:tps status) min-tps)
+        (>= (:idle-ticks status) req-idle-ticks)
+        (zero? (:hostiles-count status)))))
 
 ;; =============================================================================
 ;; 2. CÁLCULO DE FRONTEIRA OBSERVÁVEL VS. DOMÍNIO COBERTO (FRONTIER DELTA)
@@ -217,7 +223,8 @@
                              (fn [acc sid]
                                (let [old-tree (get comps sid)
                                      new-tree (replace-subtree old-tree pattern macro-call-node)]
-                                 (if (schemas/valid-bt-node? new-tree)
+                                 (if (and (schemas/valid-bt-node? new-tree)
+                                          (not (:conflict? (schemas/detect-lease-conflicts new-tree @skill-registry))))
                                    (do
                                      (swap! skill-registry assoc-in [:composite-skills sid] new-tree)
                                      (conj acc sid))
@@ -267,14 +274,20 @@
               fallback-sub [:sequence
                             [:action :equip-bait {:item "minecraft:apple"}]
                             [:action failed-action]]
-              healed-tree (when old-tree (wrap-action-with-fallback old-tree failed-action fallback-sub))]
-          (when (and healed-tree (schemas/valid-bt-node? healed-tree))
-            (swap! skill-registry assoc-in [:composite-skills skill-id] healed-tree))
-          {:status :executed
-           :hypothesis hypothesis
-           :result {:rsi/status :self-healing-applied
-                    :skill-id skill-id
-                    :healed-tree healed-tree}})
+              healed-tree (when old-tree (wrap-action-with-fallback old-tree failed-action fallback-sub))
+              valid-node? (when healed-tree (schemas/valid-bt-node? healed-tree))
+              lease-check (when valid-node? (schemas/detect-lease-conflicts healed-tree @skill-registry))]
+          (if (and valid-node? (not (:conflict? lease-check)))
+            (do
+              (swap! skill-registry assoc-in [:composite-skills skill-id] healed-tree)
+              {:status :executed
+               :hypothesis hypothesis
+               :result {:rsi/status :self-healing-applied
+                        :skill-id skill-id
+                        :healed-tree healed-tree}})
+            {:status :rejected
+             :hypothesis hypothesis
+             :reason (if-not valid-node? :INVALID_SCHEMA :LEASE_CONFLICT)}))
 
         :frontier-exploration
         {:status :executed
