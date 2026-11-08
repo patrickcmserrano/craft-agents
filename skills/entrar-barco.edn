@@ -1,0 +1,1 @@
+#:skill{:id :entrar-barco, :name "Habilidade entrar-barco", :author "Player-pace", :trigger :chat-command, :timeout-ms 30000, :tree [:sequence [:action :mount-boat {:speaker "pace"}]]}
