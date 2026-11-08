@@ -1,0 +1,22 @@
+{:skill/id :follow-multimodal
+ :skill/name "Seguir Multimodal Terra-Barco"
+ :skill/author "System-2-Composer"
+ :skill/trigger :chat-command
+ :skill/timeout-ms 60000
+ :skill/tree
+ [:fallback
+  [:sequence
+   [:condition :leader-in-vehicle?]
+   [:condition :self-in-same-vehicle?]
+   [:action :passive-passenger-look]]
+  [:sequence
+   [:condition :leader-in-vehicle?]
+   [:condition :not-self-in-vehicle?]
+   [:condition :leader-vehicle-has-seat?]
+   [:action :approach-vehicle {:max-dist 3.0}]
+   [:action :mount-vehicle]]
+  [:sequence
+   [:condition :not-leader-in-vehicle?]
+   [:condition :self-in-vehicle?]
+   [:action :dismount-vehicle]]
+  [:action :walk-towards-leader]]}

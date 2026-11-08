@@ -1,0 +1,5 @@
+{:id :descer-barco
+ :description "Habilidade descer-barco / desembarcar"
+ :anchors ["descer do barco" "karlach desça do barco" "desca do barco" "karlach desca do barco"
+           "desembarcar" "karlach desembarcar" "sair do barco" "karlach saia do barco"
+           "desmonte do barco" "pula fora do barco" "descer" "karlach descer"]}

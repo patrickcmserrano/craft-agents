@@ -4,11 +4,13 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [craft.agents.backend.fabric :as fabric]
+            [craft.agents.backend.fabric.goals :as fabric-goals]
             [craft.agents.blackboard :as bb]
             [craft.agents.cognition :as cognition]
             [craft.agents.fixtures.world-fixture :as wf]
             [craft.agents.mcp.server :as mcp]
             [craft.agents.perception :as perception]
+            [craft.agents.schemas :as schemas]
             [craft.agents.skills.actions :as actions]
             [craft.agents.skills.composer :as composer]
             [craft.agents.studio.ingame-debug :as ingame-debug]
@@ -239,3 +241,84 @@
             (doseq [[x y z] walk-targets]
               (is (= 189.5 z) (str "Passo desviou da reta ortogonal do portão: " [x y z]))
               (is (= 65.0 y)))))))))
+
+(deftest ca-048-multimodal-vehicle-following-and-native-dismount-test
+  (testing "CA-048: Multimodal Following com Isolamento de Leases e Desembarque Server-Native (Zero CMD|...)"
+
+    (testing "1. Desembarque Server-Native invoca STAND nativo e restaura estado terrestre sem CMD string"
+      (let [sent (atom [])
+            nav-state (atom {:in-vehicle? true :vehicle-id "boat-1"})
+            ctx {:send-cmd! (fn [c] (swap! sent conj c))
+                 :speaker "Karlach"
+                 :nav-state nav-state}
+            res (actions/execute-action :dismount-vehicle {} ctx)]
+        (is (= :success (:status res)))
+        (is (= :dismount-vehicle (:action-id res)))
+        (is (= ["STAND|Karlach"] @sent) "Deve usar comando nativo STAND da JVM sem invocar console CMD|execute")
+        (is (false? (:in-vehicle? @nav-state)) "Deve atualizar estado corporal para fora do veículo")))
+
+    (testing "2. Isolamento Estrito de Leases: Ramo :sync-passive-ride requisita apenas :gaze e NÃO aloca :legs"
+      (let [passive-branch [:sequence
+                            [:condition :leader-in-vehicle?]
+                            [:condition :self-in-same-vehicle?]
+                            [:action :passive-passenger-look]]
+            leases (schemas/extract-requested-lease-channels passive-branch)]
+        (is (contains? leases :gaze) "Passageiro embarcado deve alocar lease visual :gaze")
+        (is (not (contains? leases :legs)) "Passageiro embarcado NUNCA pode alocar lease motora :legs (PathSolver3D ocioso)"))
+
+      (let [board-branch [:sequence
+                          [:condition :leader-in-vehicle?]
+                          [:condition :not-self-in-vehicle?]
+                          [:condition :leader-vehicle-has-seat?]
+                          [:action :approach-vehicle {:max-dist 3.0}]
+                          [:action :mount-vehicle]]
+            leases (schemas/extract-requested-lease-channels board-branch)]
+        (is (contains? leases :legs) "Aproximação do casco aloca :legs")
+        (is (contains? leases :hands) "Interação de montagem aloca :hands")))
+
+    (testing "3. Execução Reativa da Árvore Multimodal em 4 Cenários"
+      (let [tree composer/follow-player-multimodal-tree]
+        (is (schemas/valid-bt-node? tree) "A árvore composta multimodal deve atender estritamente ao schema Malli BTNode")
+
+        ;; Cenário A: Ambos no barco -> executa :sync-passive-ride (:passive-passenger-look)
+        (let [ctx-atom (atom {:perception {:leader {:in-vehicle? true :vehicle {:id "boat-99"}}
+                                           :self   {:in-vehicle? true :vehicle-id "boat-99"}}})
+              nav-state (atom {:in-vehicle? true :vehicle-id "boat-99"})
+              res (fabric-goals/execute-tree-node! tree ctx-atom nav-state [] "pace")]
+          (is (= :success (:status res)))
+          (is (= :passive-passenger-look (:action-id res))))
+
+        ;; Cenário B: Líder no barco, Karlach na praia, assento livre -> executa :approach-vehicle e :mount-vehicle
+        (let [ctx-atom (atom {:perception {:leader {:in-vehicle? true :vehicle {:id "boat-99" :free-seats 1}}
+                                           :self   {:in-vehicle? false}}})
+              nav-state (atom {:in-vehicle? false})
+              res (fabric-goals/execute-tree-node! tree ctx-atom nav-state [] "pace")]
+          (is (= :success (:status res)))
+          (is (= :mount-vehicle (:action-id res))))
+
+        ;; Cenário C: Barco lotado (0 assentos livres) -> Ramo 2 falha no guard e cai no Ramo 4 (caminhada/fallback)
+        (let [ctx-atom (atom {:perception {:leader {:in-vehicle? true :vehicle {:id "boat-99" :free-seats 0}}
+                                           :self   {:in-vehicle? false}}})
+              nav-state (atom {:in-vehicle? false})
+              res (fabric-goals/execute-tree-node! tree ctx-atom nav-state [] "pace")]
+          (is (= :success (:status res)))
+          (is (contains? #{:walk-towards-leader :follow-player} (:action-id res))
+              "Com barco lotado, deve fazer fallback seguro para locomoção terrestre sem erro"))
+
+        ;; Cenário D: Líder desembarcou na margem -> Karlach dispara :dismount-vehicle nativo
+        (let [ctx-atom (atom {:perception {:leader {:in-vehicle? false}
+                                           :self   {:in-vehicle? true :vehicle-id "boat-99"}}})
+              nav-state (atom {:in-vehicle? true :vehicle-id "boat-99"})
+              res (fabric-goals/execute-tree-node! tree ctx-atom nav-state [] "pace")]
+          (is (= :success (:status res)))
+          (is (= :dismount-vehicle (:action-id res))))))
+
+    (testing "4. Mapeamento de Linguagem Natural para Ações de Veículo"
+      (is (= [:action :dismount-vehicle {:speaker "Pace"}]
+             (composer/step->action-node "karlach desça do barco" "Pace")))
+      (is (= [:action :dismount-vehicle {:speaker "Pace"}]
+             (composer/step->action-node "desembarcar agora" "Pace")))
+      (is (= [:action :dismount-vehicle {:speaker "Pace"}]
+             (composer/step->action-node "sair do barco" "Pace")))
+      (is (= [:action :mount-vehicle {:speaker "Pace"}]
+             (composer/step->action-node "subir no barco" "Pace"))))))

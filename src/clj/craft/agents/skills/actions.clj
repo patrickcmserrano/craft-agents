@@ -27,5 +27,45 @@
   [_action-id _action-args ctx]
   (when-let [send-cmd! (:send-cmd! ctx)]
     (send-cmd! "CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..6,sort=nearest,limit=1]"))
+  (when-let [nav-state (:nav-state ctx)]
+    (swap! nav-state assoc :in-vehicle? true))
   {:status :success
    :action-id :mount-boat})
+
+(defmethod execute-action :mount-vehicle
+  [_action-id _action-args ctx]
+  (let [target (or (:speaker ctx) "Karlach")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "CMD|execute at " target " run ride " target " mount @e[type=boat,distance=..6,sort=nearest,limit=1]")))
+    (when-let [nav-state (:nav-state ctx)]
+      (swap! nav-state assoc :in-vehicle? true))
+    {:status :success
+     :action-id :mount-vehicle}))
+
+(defmethod execute-action :dismount-vehicle
+  [_action-id _action-args ctx]
+  (let [target (or (:speaker ctx) "Karlach")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      ;; Execução nativa in-server via bridge STAND (.stopRiding() nativo na JVM)
+      (send-cmd! (str "STAND|" target)))
+    (when-let [nav-state (:nav-state ctx)]
+      (swap! nav-state assoc :in-vehicle? false :vehicle-id nil))
+    {:status :success
+     :action-id :dismount-vehicle}))
+
+(defmethod execute-action :approach-vehicle
+  [_action-id action-args ctx]
+  (let [max-dist (or (:max-dist action-args) 3.0)]
+    {:status :success
+     :action-id :approach-vehicle
+     :max-dist max-dist}))
+
+(defmethod execute-action :passive-passenger-look
+  [_action-id _action-args _ctx]
+  {:status :success
+   :action-id :passive-passenger-look})
+
+(defmethod execute-action :walk-towards-leader
+  [_action-id _action-args _ctx]
+  {:status :success
+   :action-id :walk-towards-leader})

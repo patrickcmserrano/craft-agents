@@ -58,7 +58,7 @@
             (and (seq args)
                  (every? valid-bt-node? args))
 
-            (:action :guard)
+            (:action :guard :condition)
             (and (keyword? (first args))
                  (or (nil? (second args))
                      (map? (second args))))
@@ -91,6 +91,8 @@
    :teleport-to-player   :legs
    :lure-to-gate         :legs
    :lure-inside          :legs
+   :approach-vehicle     :legs
+   :walk-towards-leader  :legs
 
    :attach-lead          :hands
    :detach-lead          :hands
@@ -103,9 +105,13 @@
    :drop-inventory       :hands
    :breed-animals        :hands
    :mining-cooperation   :hands
+   :mount-boat           :hands
+   :mount-vehicle        :hands
+   :dismount-vehicle     :hands
 
    :social-gaze          :gaze
-   :look-at-player       :gaze})
+   :look-at-player       :gaze
+   :passive-passenger-look :gaze})
 
 (defn extract-requested-lease-channels
   "Extrai todos os canais de lease requisitados por ações dentro de um nó ou sub-árvore.

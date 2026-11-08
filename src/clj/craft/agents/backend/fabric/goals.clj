@@ -230,9 +230,9 @@
 (defmethod execute-karlach-goal! :follow-player
   [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
   (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Seguindo jogador " target))
-  (let [players (actions/query-online-players)
+  (let [players (try (actions/query-online-players) (catch Throwable _ []))
         target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
-        [cx cy cz] (:pos @nav-state)
+        [cx cy cz] (or (:pos @nav-state) [-175.0 65.0 180.0])
         tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] [cx cy cz])
         dist-to-p (if target-p
                     (Math/sqrt (+ (Math/pow (- (:x target-p) cx) 2)
@@ -253,8 +253,9 @@
                           [])
            :follow-last-target [0.0 0.0 0.0]
            :follow-lost-ticks 0
-           :steps []))
-  (actions/karlach-say! voice-line))
+           :steps [])
+    (when voice-line
+      (actions/karlach-say! voice-line))))
 
 (defmethod execute-karlach-goal! :bodyguard
   [{:goal/keys [target voice-line]} engine-ctx-atom nav-state _sanctuary-route]
@@ -535,7 +536,8 @@
             (actions/karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como 'karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))))
 
 (defn execute-tree-node!
-  "Executa nó da Behavior Tree preservando semântica de controle (:fallback, :sequence, :parallel) e expandindo macros."
+  "Executa nó da Behavior Tree preservando semântica de controle (:fallback, :sequence, :parallel, :inverter),
+   avaliação de condições (:guard, :condition) e expandindo macros com isolamento de leases (CA-048)."
   [node engine-ctx-atom nav-state sanctuary-route speaker]
   (if-not (vector? node)
     {:status :failure :reason :INVALID_NODE}
@@ -543,12 +545,13 @@
           args (rest node)]
       (case op
         :sequence
-        (loop [children args]
+        (loop [children args
+               last-res {:status :success}]
           (if (empty? children)
-            {:status :success}
+            last-res
             (let [res (execute-tree-node! (first children) engine-ctx-atom nav-state sanctuary-route speaker)]
               (if (= :success (:status res))
-                (recur (rest children))
+                (recur (rest children) (if (:action-id res) res last-res))
                 res))))
 
         (:fallback :selector)
@@ -566,6 +569,63 @@
             {:status :failure}
             {:status :success}))
 
+        :inverter
+        (let [child-res (execute-tree-node! (first args) engine-ctx-atom nav-state sanctuary-route speaker)]
+          (case (:status child-res)
+            :success {:status :failure}
+            :failure {:status :success}
+            child-res))
+
+        (:guard :condition)
+        (let [cond-id (first args)
+              eval-res (case cond-id
+                         (:leader-in-vehicle? :leader-in-boat?)
+                         (boolean (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
+                                      (get-in @engine-ctx-atom [:leader :in-vehicle?])
+                                      (:leader-in-vehicle? @nav-state)))
+
+                         (:self-in-vehicle? :self-in-boat?)
+                         (boolean (or (:in-vehicle? @nav-state)
+                                      (get-in @engine-ctx-atom [:perception :self :in-vehicle?])
+                                      (get-in @engine-ctx-atom [:agents :karlach :in-vehicle?])))
+
+                         :not-self-in-vehicle?
+                         (not (or (:in-vehicle? @nav-state)
+                                  (get-in @engine-ctx-atom [:perception :self :in-vehicle?])
+                                  (get-in @engine-ctx-atom [:agents :karlach :in-vehicle?])))
+
+                         :not-leader-in-vehicle?
+                         (not (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
+                                  (get-in @engine-ctx-atom [:leader :in-vehicle?])
+                                  (:leader-in-vehicle? @nav-state)))
+
+                         :self-in-same-vehicle?
+                         (let [self-in   (boolean (or (:in-vehicle? @nav-state)
+                                                      (get-in @engine-ctx-atom [:perception :self :in-vehicle?])))
+                               leader-in (boolean (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
+                                                      (:leader-in-vehicle? @nav-state)))
+                               self-vid  (or (:vehicle-id @nav-state)
+                                             (get-in @engine-ctx-atom [:perception :self :vehicle-id]))
+                               lead-vid  (or (get-in @engine-ctx-atom [:perception :leader :vehicle :id])
+                                             (get-in @engine-ctx-atom [:perception :leader :vehicle-id]))]
+                           (and self-in leader-in (or (= self-vid lead-vid) (and (nil? self-vid) (nil? lead-vid)))))
+
+                         :leader-vehicle-has-seat?
+                         (let [free-seats (get-in @engine-ctx-atom [:perception :leader :vehicle :free-seats]
+                                                  (get-in @engine-ctx-atom [:leader :vehicle :free-seats] 1))]
+                           (pos? free-seats))
+
+                         :within-mount-range?
+                         (let [dist (or (get-in @engine-ctx-atom [:perception :leader :distance])
+                                        (:leader-distance @nav-state)
+                                        2.0)]
+                           (<= dist 3.5))
+
+                         true)]
+          (if eval-res
+            {:status :success}
+            {:status :failure}))
+
         :action
         (let [action-id (first args)
               action-args (second args)
@@ -582,65 +642,70 @@
                 :social-dance
                 (do (execute-karlach-goal! {:goal/type :social-dance :goal/voice-line "Olha o passinho de vitória! 🔥"}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :social-dance})
 
                 :sit-furniture
                 (do (execute-karlach-goal! {:goal/type :sit-furniture :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :sit-furniture})
 
                 :stand-up
                 (do (execute-karlach-goal! {:goal/type :stand-up :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :stand-up})
 
                 :patrol-sanctuary
                 (do (execute-karlach-goal! {:goal/type :patrol-sanctuary :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :patrol-sanctuary})
 
                 :breed-animals
                 (do (execute-karlach-goal! {:goal/type :breed-animals :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :breed-animals})
 
                 :follow-player
                 (do (execute-karlach-goal! {:goal/type :follow-player :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :follow-player})
+
+                :walk-towards-leader
+                (do (execute-karlach-goal! {:goal/type :follow-player :goal/speaker speaker}
+                                           engine-ctx-atom nav-state sanctuary-route)
+                    {:status :success :action-id :walk-towards-leader})
 
                 :bodyguard
                 (do (execute-karlach-goal! {:goal/type :bodyguard :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :bodyguard})
 
                 :mining-cooperation
                 (do (execute-karlach-goal! {:goal/type :mining-cooperation :goal/speaker speaker :goal/filter (:target action-args "diamond")}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :mining-cooperation})
 
                 :drop-inventory
                 (do (execute-karlach-goal! {:goal/type :drop-inventory :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :drop-inventory})
 
                 :teleport-to-player
                 (do (execute-karlach-goal! {:goal/type :teleport-to-player :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :teleport-to-player})
 
                 :move-to-quarters
                 (do (execute-karlach-goal! {:goal/type :weather-shelter :goal/speaker speaker}
                                            engine-ctx-atom nav-state sanctuary-route)
-                    {:status :success})
+                    {:status :success :action-id :move-to-quarters})
 
                 :say-message
                 (do (actions/karlach-say! (or (:text action-args) "Comando concluído com sucesso, soldado!"))
-                    {:status :success})
+                    {:status :success :action-id :say-message})
 
                 :play-sound
                 (do (transport/send-bridge-cmd! (str "CMD|playsound " (:sound action-args "minecraft:entity.experience_orb.pickup") " master @a ~ ~ ~ 1.0 1.0"))
-                    {:status :success})
+                    {:status :success :action-id :play-sound})
 
                 (let [act-res (skill-actions/execute-action action-id action-args
                                                             {:send-cmd! transport/send-bridge-cmd!

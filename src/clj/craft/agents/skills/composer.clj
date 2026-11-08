@@ -38,7 +38,28 @@
     :check-weather :move-to-quarters :rest-at-bed :wait-out-rain :attach-lead :detach-lead :verify-containment
     :sit-furniture :stand-up :social-dance :follow-player :patrol-sanctuary :teleport-to-player
     :drop-inventory :breed-animals :mining-cooperation :bodyguard :say-message :play-sound :move-to
-    :traverse-portal :feed-nearby :mount-boat :ride-vehicle})
+    :traverse-portal :feed-nearby :mount-boat :ride-vehicle
+    :approach-vehicle :mount-vehicle :dismount-vehicle :passive-passenger-look :walk-towards-leader})
+
+(def follow-player-multimodal-tree
+  "Árvore Composta Multimodal de 4 Estágios com Isolamento de Leases (CA-048).
+   Garante locomoção semântica entre terra e água sem vazamento motor para PathSolver3D."
+  [:fallback
+   [:sequence
+    [:condition :leader-in-vehicle?]
+    [:condition :self-in-same-vehicle?]
+    [:action :passive-passenger-look]]
+   [:sequence
+    [:condition :leader-in-vehicle?]
+    [:condition :not-self-in-vehicle?]
+    [:condition :leader-vehicle-has-seat?]
+    [:action :approach-vehicle {:max-dist 3.0}]
+    [:action :mount-vehicle]]
+   [:sequence
+    [:condition :not-leader-in-vehicle?]
+    [:condition :self-in-vehicle?]
+    [:action :dismount-vehicle]]
+   [:action :walk-towards-leader]])
 
 (defn validate-and-register-skill!
   "Valida sub-arvore proposta por IA (schema, lease conflicts, acoes conhecidas, ausencia de recursao ciclica, timeouts) e salva EDN (CA-037, CA-RSI.3.2)."
@@ -336,6 +357,14 @@
       ;; Drop / Entregar itens
       (re-find #"drop|larg|entreg|jog.*loot|item" norm)
       [:action :drop-inventory {:speaker speaker}]
+
+      ;; Descer do barco / Desembarcar
+      (re-find #"desc[ae]|desembarc|sai[ar].*(?:barco|veiculo)|desmont" norm)
+      [:action :dismount-vehicle {:speaker speaker}]
+
+      ;; Subir no barco específico
+      (re-find #"subir no barco" norm)
+      [:action :mount-vehicle {:speaker speaker}]
 
       ;; Barco / Veículo / Montar
       (re-find #"barco|boat|veiculo|veículo|montar|mont[ae]|sub[ae] no barco|embarc" norm)
