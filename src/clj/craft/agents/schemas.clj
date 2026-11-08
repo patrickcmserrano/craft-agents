@@ -53,7 +53,7 @@
         (let [op (first node)
               args (rest node)]
           (case op
-            (:selector :sequence :parallel)
+            (:selector :fallback :sequence :parallel)
             (and (seq args)
                  (every? valid-bt-node? args))
 

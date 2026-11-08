@@ -11,7 +11,8 @@
             [craft.agents.epic7-headless-swarm-v02-test]
             [craft.agents.cognition.intent-grounding-test]
             [craft.agents.cognition.critic-test]
-            [craft.agents.epic-survival-homeostasis-test]))
+            [craft.agents.epic-survival-homeostasis-test]
+            [craft.agents.epic-rsi-curriculum-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -24,7 +25,8 @@
    {:epic 7 :title "Epico 7 — v0.2 Headless Swarm TCP (CA-049..CA-052)"          :ns 'craft.agents.epic7-headless-swarm-v02-test}
    {:epic 8 :title "Epico 8 — Intent Router & Semantic Grounding (CA-040)"        :ns 'craft.agents.cognition.intent-grounding-test}
    {:epic 9 :title "Epico 9 — Environmental Critic & Reflexion Loop (CA-041)"     :ns 'craft.agents.cognition.critic-test}
-   {:epic 10 :title "Epico I (AGI) — Homeostase, Fisiologia e Autopreservacao (CA-E1.1..E1.4)" :ns 'craft.agents.epic-survival-homeostasis-test}])
+   {:epic 10 :title "Epico I (AGI) — Homeostase, Fisiologia e Autopreservacao (CA-E1.1..E1.4)" :ns 'craft.agents.epic-survival-homeostasis-test}
+   {:epic 11 :title "Epico II (RSI) — Curriculum Agent & Recursive Self-Improvement (CA-RSI.1..RSI.4)" :ns 'craft.agents.epic-rsi-curriculum-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]

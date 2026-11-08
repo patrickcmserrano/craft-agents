@@ -9,16 +9,16 @@
     (let [op   (first node)
           args (rest node)]
       (case op
-        :selector
+        (:selector :fallback)
         (loop [idx 0
                children args]
           (if (empty? children)
-            {:status :failure :active-path [:selector]}
+            {:status :failure :active-path [op]}
             (let [child (first children)
                   res   (tick-tree child ctx)]
               (case (:status res)
                 (:success :running)
-                (update res :active-path #(into [:selector idx] %))
+                (update res :active-path #(into [op idx] %))
 
                 :failure
                 (recur (inc idx) (rest children))))))

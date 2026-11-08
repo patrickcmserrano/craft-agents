@@ -110,3 +110,4 @@ make studio
 | [06 — Matriz TDD e Especificação de Testes](docs/06-matriz-tdd-e-especificacao-testes.md) | Mapeamento de asserções comportamentais e cobertura. |
 | [07 — Primitivas Cinemáticas Mineflayer na JVM](docs/07-plano-primitivas-cinematicas-mineflayer-jvm.md) | Portabilidade e otimização das primitivas de controle cinemático. |
 | [08 — Tese, Arquitetura Cognitiva e Capacidades](docs/08-tese-arquitetura-cognitiva-e-capacidades.md) | **Manifesto fundacional, capacidades atuais e visão científica.** |
+| [09 — Backlog: Curriculum Agent & RSI](docs/09-backlog-rsi-curriculum-agent.md) | **Engenharia de autoaperfeiçoamento recursivo, curiosidade e Dreamer.** |

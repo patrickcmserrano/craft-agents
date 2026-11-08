@@ -2,7 +2,8 @@
   "Environmental Critic e Reflexion Engine para Aprendizado Contínuo (Voyager Triad).
    Inspeciona o estado real do mundo físico no servidor (Ground Truth),
    elimina alucinações de sucesso em malha aberta e sintetiza hipóteses de correção (CA-041)."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [craft.agents.cognition.ledger :as ledger]))
 
 (def enclosure->quadrant
   {:pen-north-east :NE
@@ -339,3 +340,15 @@
                                  :leash-attached      "O laço arrebentou, soldado! Parando a marcha pra prender de novo!"
                                  :health-above        "Dano crítico! Recuando para posição segura!"
                                  "Anomalia detectada em tempo de voo! Abortando sequência para evitar erro no mundo!")})
+
+(defn record-early-abort-event!
+  "Registra uma ocorrência de reflexão de Early Abort no Ledger de Memória Negativa (CA-RSI.1)."
+  ([reflection skill-id] (record-early-abort-event! reflection skill-id ledger/default-ledger-path))
+  ([reflection skill-id ledger-path]
+   (ledger/record-abort!
+    ledger-path
+    {:skill-id           skill-id
+     :failed-action      (:reflection/step-op reflection)
+     :violated-invariant (:reflection/invariant reflection)
+     :diagnostic         (:reflection/diagnostic reflection)
+     :timestamp          (System/currentTimeMillis)})))
