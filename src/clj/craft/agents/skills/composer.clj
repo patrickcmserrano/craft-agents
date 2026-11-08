@@ -38,7 +38,7 @@
     :check-weather :move-to-quarters :rest-at-bed :wait-out-rain :attach-lead :detach-lead :verify-containment
     :sit-furniture :stand-up :social-dance :follow-player :patrol-sanctuary :teleport-to-player
     :drop-inventory :breed-animals :mining-cooperation :bodyguard :say-message :play-sound :move-to
-    :traverse-portal :feed-nearby})
+    :traverse-portal :feed-nearby :mount-boat :ride-vehicle})
 
 (defn validate-and-register-skill!
   "Valida sub-arvore proposta por IA (schema, lease conflicts, acoes conhecidas, ausencia de recursao ciclica, timeouts) e salva EDN (CA-037, CA-RSI.3.2)."
@@ -334,6 +334,10 @@
       ;; Drop / Entregar itens
       (re-find #"drop|larg|entreg|jog.*loot|item" norm)
       [:action :drop-inventory {:speaker speaker}]
+
+      ;; Barco / Veículo / Montar
+      (re-find #"barco|boat|veiculo|veículo|montar|mont[ae]|sub[ae] no barco|embarc" norm)
+      [:action :mount-boat {:speaker speaker}]
 
       ;; Teleporte
       (re-find #"teleport|fend|tp" norm)

@@ -9,6 +9,7 @@
             [craft.agents.fixtures.world-fixture :as wf]
             [craft.agents.mcp.server :as mcp]
             [craft.agents.perception :as perception]
+            [craft.agents.skills.actions :as actions]
             [craft.agents.skills.composer :as composer]
             [craft.agents.studio.ingame-debug :as ingame-debug]
             [craft.agents.studio.server :as studio]))
@@ -151,6 +152,80 @@
         (is (false? (:valid? res)))
         (is (= :precondition-failed (:status res)))
         (is (= :pen-unknown (:missing-enc res)))))))
+
+(deftest ca-047-mount-boat-action-and-mapping-test
+  (testing "CA-047: Nova capacidade motora :mount-boat mapeada em linguagem natural e executada via send-cmd!"
+    (testing "Mapeamento de linguagem natural para [:action :mount-boat]"
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "suba no barco comigo" "Pace")))
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "entrar-barco" "Pace")))
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "montar no barco" "Pace")))
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "vamos de boat" "Pace"))))
+
+    (testing ":mount-boat está no catálogo default-known-actions"
+      (is (contains? composer/default-known-actions :mount-boat)))
+
+    (testing "execute-action :mount-boat despacha o comando correto e retorna :success"
+      (let [sent (atom [])
+            ctx  {:send-cmd! (fn [c] (swap! sent conj c))}
+            res  (actions/execute-action :mount-boat {} ctx)]
+        (is (= :success (:status res)))
+        (is (= :mount-boat (:action-id res)))
+        (is (= ["CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]"] @sent))))
+
+    (testing "Sintetização via chat gera skill válida com :mount-boat"
+      (let [tmp-skills (io/file (System/getProperty "java.io.tmpdir") (str "ca-mount-boat-" (System/nanoTime)))
+            registry   (atom {:known-actions composer/default-known-actions
+                              :composite-skills {}})]
+        (.mkdirs tmp-skills)
+        (try
+          (let [res (composer/synthesize-and-register-skill-from-chat!
+                     registry tmp-skills "entrar-barco: suba no barco comigo" "Pace")]
+            (is (:ok? res))
+            (is (= [:sequence [:action :mount-boat {:speaker "Pace"}]]
+                   (get-in res [:skill-def :skill/tree]))))
+          (finally
+            (doseq [f (reverse (file-seq tmp-skills))] (.delete f))))))))
+
+(deftest ca-047-mount-boat-action-and-mapping-test
+  (testing "CA-047: Nova capacidade motora :mount-boat mapeada em linguagem natural e executada via send-cmd!"
+    (testing "Mapeamento de linguagem natural para [:action :mount-boat]"
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "suba no barco comigo" "Pace")))
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "entrar-barco" "Pace")))
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "montar no barco" "Pace")))
+      (is (= [:action :mount-boat {:speaker "Pace"}]
+             (composer/step->action-node "vamos de boat" "Pace"))))
+
+    (testing ":mount-boat está no catálogo default-known-actions"
+      (is (contains? composer/default-known-actions :mount-boat)))
+
+    (testing "execute-action :mount-boat despacha o comando correto e retorna :success"
+      (let [sent (atom [])
+            ctx  {:send-cmd! (fn [c] (swap! sent conj c))}
+            res  (actions/execute-action :mount-boat {} ctx)]
+        (is (= :success (:status res)))
+        (is (= :mount-boat (:action-id res)))
+        (is (= ["CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]"] @sent))))
+
+    (testing "Sintetização via chat gera skill válida com :mount-boat"
+      (let [tmp-skills (io/file (System/getProperty "java.io.tmpdir") (str "ca-mount-boat-" (System/nanoTime)))
+            registry   (atom {:known-actions composer/default-known-actions
+                              :composite-skills {}})]
+        (.mkdirs tmp-skills)
+        (try
+          (let [res (composer/synthesize-and-register-skill-from-chat!
+                     registry tmp-skills "entrar-barco: suba no barco comigo" "Pace")]
+            (is (:ok? res))
+            (is (= [:sequence [:action :mount-boat {:speaker "Pace"}]]
+                   (get-in res [:skill-def :skill/tree]))))
+          (finally
+            (doseq [f (reverse (file-seq tmp-skills))] (.delete f))))))))
 
 (deftest ca-046-dynamic-terrain-portal-perception-test
   (testing "CA-046: generate-walk-steps detecta :TRAVERSE_PORTAL em tempo real e emite micro-etapas de condução profunda"
