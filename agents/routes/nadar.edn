@@ -1,0 +1,4 @@
+{:name "Nadar e Acompanhar Animal na Água"
+ :stops [{:pos [-175.0 65.0 180.0] :label "Origem"}
+         {:pos [-175.0 63.0 185.0] :label "Água"}]
+ :actions [{:op :swim-follow}]}

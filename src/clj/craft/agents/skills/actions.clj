@@ -69,3 +69,15 @@
   [_action-id _action-args _ctx]
   {:status :success
    :action-id :walk-towards-leader})
+
+(defmethod execute-action :swim-follow
+  [_action-id _action-args ctx]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      ;; Ancoragem espacial obrigatória: executa na origem do bot
+      (send-cmd! (str "CMD|execute at " target " run effect give " target " minecraft:dolphins_grace 10 0 true"))
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:splash ~ ~0.5 ~ 0.4 0.2 0.4 0.1 15 normal")))
+    (when-let [nav-state (:nav-state ctx)]
+      (swap! nav-state assoc :swimming? true))
+    {:status :success
+     :action-id :swim-follow}))

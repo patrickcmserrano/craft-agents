@@ -368,3 +368,28 @@
             (is (some? res))
             (is (= ["EQUIP_ITEM|Karlach|offhand|minecraft:shield"] @sent)
                 "Deve despachar comando nativo EQUIP_ITEM sem console string CMD|item replace")))))))
+
+(deftest ca-050-swim-follow-skill-test
+  (testing "CA-050: Capacidade Motora de Nado e Acompanhamento Aquático (:swim-follow)"
+    (testing "1. Mapeamento de Linguagem Natural em step->action-node"
+      (is (= [:action :swim-follow {:speaker "pace"}]
+             (composer/step->action-node "me segue nadando pela agua" "pace")))
+      (is (= [:action :swim-follow {:speaker "pace"}]
+             (composer/step->action-node "nadar pelo rio" "pace"))))
+
+    (testing "2. Execução da Ação Motora :swim-follow com Ancoragem Espacial"
+      (let [sent (atom [])
+            nav-state (atom {:swimming? false})
+            ctx {:send-cmd! (fn [c] (swap! sent conj c))
+                 :agent-name "Karlach"
+                 :speaker "pace"
+                 :nav-state nav-state}
+            res (actions/execute-action :swim-follow {} ctx)]
+        (is (= :success (:status res)))
+        (is (= :swim-follow (:action-id res)))
+        (is (true? (:swimming? @nav-state)))
+        (is (some #(re-find #"execute at Karlach run" %) @sent)
+            "Comando deve ser ancorado espacialmente na origem de Karlach")))
+
+    (testing "3. Atribuição de Canal de Lease :legs"
+      (is (= :legs (get schemas/action->lease-channel :swim-follow))))))

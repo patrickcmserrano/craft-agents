@@ -39,7 +39,7 @@
     :sit-furniture :stand-up :social-dance :follow-player :patrol-sanctuary :teleport-to-player
     :drop-inventory :breed-animals :mining-cooperation :bodyguard :say-message :play-sound :move-to
     :traverse-portal :feed-nearby :mount-boat :ride-vehicle
-    :approach-vehicle :mount-vehicle :dismount-vehicle :passive-passenger-look :walk-towards-leader})
+    :approach-vehicle :mount-vehicle :dismount-vehicle :passive-passenger-look :walk-towards-leader :swim-follow})
 
 (def follow-player-multimodal-tree
   "Árvore Composta Multimodal de 4 Estágios com Isolamento de Leases (CA-048).
@@ -361,6 +361,10 @@
       ;; Descer do barco / Desembarcar
       (re-find #"desc[ae]|desembarc|sai[ar].*(?:barco|veiculo)|desmont" norm)
       [:action :dismount-vehicle {:speaker speaker}]
+
+      ;; Nado / Seguir nadando pela água
+      (re-find #"nad\w*|mergulh\w*|agua|água" norm)
+      [:action :swim-follow {:speaker speaker}]
 
       ;; Subir no barco específico
       (re-find #"subir no barco" norm)

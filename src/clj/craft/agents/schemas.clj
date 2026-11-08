@@ -93,6 +93,7 @@
    :lure-inside          :legs
    :approach-vehicle     :legs
    :walk-towards-leader  :legs
+   :swim-follow          :legs
 
    :attach-lead          :hands
    :detach-lead          :hands

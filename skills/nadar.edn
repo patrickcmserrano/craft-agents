@@ -1,0 +1,6 @@
+{:skill/id :nadar
+ :skill/name "Nadar e Acompanhar Animal na Água"
+ :skill/author "Player-pace"
+ :skill/trigger :chat-command
+ :skill/timeout-ms 30000
+ :skill/tree [:sequence [:action :swim-follow {:speaker "pace"}]]}
