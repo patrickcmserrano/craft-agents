@@ -14,6 +14,8 @@
         iz (int (Math/floor (double pz)))
         hazard? (or (.isHazard vox ix iy iz)
                     (.isHazard vox ix (dec iy) iz))
+        lava-or-fire? (or (:in-lava? body-st)
+                          (:on-fire? body-st))
         drowning? (or (:drowning? body-st)
                       (:underwater? body-st)
                       (and (contains? body-st :oxygen) (<= (:oxygen body-st) 2)))]
@@ -23,6 +25,12 @@
         (leases/acquire-leases! lease-mgr {:channels #{:legs} :owner-id :reflex-hazard :priority 100})
         (proto/apply-motor-controls! agent-body {:forward 1.0 :jump? true :sprint? true :yaw 180.0 :pitch 0.0})
         {:triggered? true :reflex :escape-hazard})
+
+      lava-or-fire?
+      (do
+        (leases/acquire-leases! lease-mgr {:channels #{:legs} :owner-id :reflex-lava :priority 99})
+        (proto/apply-motor-controls! agent-body {:forward 1.0 :jump? true :sprint? true :pitch 0.0})
+        {:triggered? true :reflex :escape-lava})
 
       drowning?
       (do

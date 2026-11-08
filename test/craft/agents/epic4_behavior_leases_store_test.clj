@@ -92,7 +92,16 @@
           lmgr (leases/create-lease-manager)
           res (reflexes/evaluate-survival-reflexes! body backend lmgr)]
       (is (true? (:triggered? res)))
-      (is (= :surface-for-air (:reflex res))))))
+      (is (= :surface-for-air (:reflex res)))))
+  (testing "Agente em lava ou em chamas aciona reflexo :escape-lava"
+    (let [w (wf/make-flat-world-state 64)
+          backend (wf/make-mock-backend w)
+          body (wf/make-mock-body w {:id :karlach :pos [0.0 64.0 0.0]})
+          _ (swap! (:state-atom body) assoc :in-lava? true)
+          lmgr (leases/create-lease-manager)
+          res (reflexes/evaluate-survival-reflexes! body backend lmgr)]
+      (is (true? (:triggered? res)))
+      (is (= :escape-lava (:reflex res))))))
 
 (deftest ca-033-builtin-skills-semantic-error-codes-test
   (testing "CA-033: Skill :care-for-enclosure sem comida retorna erro semantico estruturado :MISSING_ITEM p/ escalonamento"
