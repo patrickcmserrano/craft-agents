@@ -414,6 +414,32 @@ public final class SyntheticPlayerFactory {
                         } catch (Throwable ignored) {}
                         player.getClass().getMethod("method_5728", boolean.class).invoke(player, sprint);
                         player.getClass().getMethod("method_5660", boolean.class).invoke(player, sneak);
+                        boolean inWater = false;
+                        try {
+                            inWater = (Boolean) player.getClass().getMethod("method_5799").invoke(player);
+                        } catch (Throwable t1) {
+                            try {
+                                inWater = (Boolean) player.getClass().getMethod("method_5869").invoke(player);
+                            } catch (Throwable t2) {}
+                        }
+
+                        if (inWater && sprint) {
+                            try {
+                                player.getClass().getMethod("method_5796", boolean.class).invoke(player, true);
+                                Class<?> poseCls = Class.forName("net.minecraft.class_4050", true, cl);
+                                Object swimPose = poseCls.getField("field_18079").get(null);
+                                player.getClass().getMethod("method_18380", poseCls).invoke(player, swimPose);
+                            } catch (Throwable ignored) {}
+                        } else {
+                            try {
+                                player.getClass().getMethod("method_5796", boolean.class).invoke(player, false);
+                                if (!sneak) {
+                                    Class<?> poseCls = Class.forName("net.minecraft.class_4050", true, cl);
+                                    Object standPose = poseCls.getField("field_18076").get(null);
+                                    player.getClass().getMethod("method_18380", poseCls).invoke(player, standPose);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
                         try {
                             Object overworld = player.getClass().getMethod("method_51469").invoke(player);
                             Object chunkMgr = overworld.getClass().getMethod("method_14178").invoke(overworld);
