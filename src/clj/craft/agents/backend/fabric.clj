@@ -9,6 +9,7 @@
             [craft.agents.backend.protocol :as proto]
             [craft.agents.regions :as regions]
             [craft.agents.skills.composer :as composer]
+            [craft.agents.skills.actions :as actions]
             [craft.agents.cognition.intent :as intent]
             [craft.agents.cognition.grounding :as grounding]
             [craft.agents.cognition.critic :as critic]
@@ -1459,9 +1460,10 @@
                            "1. Em `src/clj/craft/agents/skills/composer.clj`:\n"
                            "   - Adicionar a nova ação em `default-known-actions` (ex: :mount-boat, :ride-vehicle).\n"
                            "   - Em `step->action-node`, mapear o termo (barco, subir no barco, montar) para [:action :mount-boat].\n"
-                           "2. Em `src/clj/craft/agents/backend/fabric.clj`:\n"
-                           "   - No `execute-tree-node!`, tratar a ação correspondente emitindo o comando via bridge (ex: CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]).\n"
-                           "3. Cobrir com teste unitário em test/ e manter 100% GREEN.")}]
+                           "2. Em `src/clj/craft/agents/skills/actions.clj`:\n"
+                           "   - Implementar `(defmethod execute-action :mount-boat [action-id action-args ctx] ...)` executando `((:send-cmd! ctx) \"CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]\")` e retornando `{:status :success}`.\n"
+                           "3. Em `test/craft/agents/epic5_cognition_mcp_studio_test.clj`:\n"
+                           "   - Cobrir com teste unitário a nova ação e mapeamento mantendo 100% GREEN.")}]
             (try
               (curriculum/dispatch-curiosity-to-swe!
                hyp
@@ -1470,7 +1472,7 @@
                 :model "deepseek-v4-1-flash"
                 :test-cmd "make test"
                 :target-files ["src/clj/craft/agents/skills/composer.clj"
-                               "src/clj/craft/agents/backend/fabric.clj"
+                               "src/clj/craft/agents/skills/actions.clj"
                                "test/craft/agents/epic5_cognition_mcp_studio_test.clj"]})
               (catch Throwable t
                 (println "[curriculum] Erro ao despachar SWE:" (.getMessage t))))
@@ -1591,9 +1593,16 @@
                 (do (send-bridge-cmd! (str "CMD|playsound " (:sound action-args "minecraft:entity.experience_orb.pickup") " master @a ~ ~ ~ 1.0 1.0"))
                     {:status :success})
 
-                (do
-                  (record-cognitive-event! engine-ctx-atom :motor "Ação Dinâmica" (str "Executando ação: " action-id " com args: " (pr-str action-args)))
-                  {:status :success}))
+                (let [act-res (actions/execute-action action-id action-args
+                                                      {:send-cmd! send-bridge-cmd!
+                                                       :karlach-say! karlach-say!
+                                                       :speaker speaker
+                                                       :engine-ctx engine-ctx-atom
+                                                       :nav-state nav-state
+                                                       :sanctuary-route sanctuary-route})]
+                  (record-cognitive-event! engine-ctx-atom :motor "Ação Modular"
+                                           (str "Executando ação modular: " action-id " -> " (:status act-res)))
+                  act-res))
               (catch Throwable _
                 {:status :failure :action action-id}))))
 
