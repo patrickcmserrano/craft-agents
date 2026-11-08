@@ -110,6 +110,15 @@
           :alive? (try (Boolean/parseBoolean (nth parts 3 "true")) (catch Throwable _ true))})
        {:hp 20.0 :food 20 :saturation 5.0 :alive? true}))))
 
+(defn query-sitting-status
+  "Consulta se o agente ou jogador está montado em veículo/assento via opcode nativo IS_SITTING."
+  ([] (query-sitting-status "Karlach"))
+  ([player-name]
+   (let [resp (transport/send-bridge-cmd! (str "IS_SITTING|" player-name))]
+     (if (and resp (str/starts-with? resp "OK|"))
+       (= (second (str/split resp #"\|")) "true")
+       false))))
+
 (defn locate-dropped-items
   "Escaneia ItemEntity caidos no chao em um raio via bridge (CA-E1.4)."
   ([player-name] (locate-dropped-items player-name {}))

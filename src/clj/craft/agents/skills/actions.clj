@@ -34,7 +34,7 @@
 
 (defmethod execute-action :mount-vehicle
   [_action-id _action-args ctx]
-  (let [target (or (:speaker ctx) "Karlach")]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")]
     (when-let [send-cmd! (:send-cmd! ctx)]
       (send-cmd! (str "CMD|execute at " target " run ride " target " mount @e[type=boat,distance=..6,sort=nearest,limit=1]")))
     (when-let [nav-state (:nav-state ctx)]
@@ -44,7 +44,7 @@
 
 (defmethod execute-action :dismount-vehicle
   [_action-id _action-args ctx]
-  (let [target (or (:speaker ctx) "Karlach")]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")]
     (when-let [send-cmd! (:send-cmd! ctx)]
       ;; Execução nativa in-server via bridge STAND (.stopRiding() nativo na JVM)
       (send-cmd! (str "STAND|" target)))

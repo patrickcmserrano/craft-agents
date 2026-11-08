@@ -64,6 +64,7 @@
 (def query-online-players actions/query-online-players)
 (def query-leash-status actions/query-leash-status)
 (def query-health-status actions/query-health-status)
+(def query-sitting-status actions/query-sitting-status)
 (def locate-dropped-items actions/locate-dropped-items)
 (def collect-nearby-drops! actions/collect-nearby-drops!)
 (def inspect-inventory actions/inspect-inventory)

@@ -7,7 +7,7 @@
                      ensure-live-bridge-and-agents! inspect-inventory karlach-say!
                      last-drop-ms locate-dropped-items locate-nearby-ores mine-block!
                      ore-pt-names query-leash-status query-online-players
-                     scan-nearby-hostiles]]
+                     query-sitting-status scan-nearby-hostiles]]
             [craft.agents.backend.fabric.navigation :as nav
              :refer [compute-pitch compute-yaw expand-route-microsteps
                      generate-walk-steps request-path3d]]
@@ -335,6 +335,23 @@
                                    (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
                                    (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
                                    (swap! nav-state assoc :pos [tx ty tz] :follow-path [])))
+
+                               ;; Sincronização e Composição Multimodal Terra-Barco (2Hz)
+                               (when (zero? (mod tick 10))
+                                 (try
+                                   (let [actual-sitting? (query-sitting-status "Karlach")
+                                         target-sitting? (query-sitting-status (:name target-p))]
+                                     (when (some? actual-sitting?)
+                                       (swap! nav-state assoc :in-vehicle? actual-sitting?))
+                                     ;; 1. Se o líder desembarcou e Karlach continua no barco -> desembarque automático nativo
+                                     (when (and actual-sitting? (false? target-sitting?))
+                                       (send-bridge-cmd! "STAND|Karlach")
+                                       (swap! nav-state assoc :in-vehicle? false))
+                                     ;; 2. Se o líder embarcou e Karlach está próxima (<= 3.5m) fora do barco -> embarque automático
+                                     (when (and (false? actual-sitting?) target-sitting? (<= dist 3.5))
+                                       (send-bridge-cmd! "CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..4,sort=nearest,limit=1]")
+                                       (swap! nav-state assoc :in-vehicle? true)))
+                                   (catch Throwable _ nil)))
 
                                ;; Varredura tática e preempção de combate reativo (CA-049)
                                (let [hostiles (if (zero? (mod tick 4))
