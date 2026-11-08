@@ -1,6 +1,7 @@
 (ns craft.agents.schemas
   "Catalogo central de schemas Malli e geracao de JSON Schema p/ MCP (CA-004)."
-  (:require [malli.core :as m]
+  (:require [clojure.walk :as walk]
+            [malli.core :as m]
             [malli.error :as me]
             [malli.json-schema :as json-schema]))
 
@@ -75,6 +76,72 @@
 
 (def BTNode
   [:fn {:error/message "Invalid BTNode vector"} valid-bt-node?])
+
+;; =============================================================================
+;; ANÁLISE ESTÁTICA DE CONFLITOS DE LEASES SIMBÓLICAS (CA-RSI.3.2)
+;; =============================================================================
+
+(def action->lease-channel
+  "Mapeamento determinístico de primitivas de ação para o canal de lease exigido."
+  {:walk                 :legs
+   :move-to              :legs
+   :patrol-waypoints     :legs
+   :patrol-sanctuary     :legs
+   :follow-player        :legs
+   :teleport-to-player   :legs
+   :lure-to-gate         :legs
+   :lure-inside          :legs
+
+   :attach-lead          :hands
+   :detach-lead          :hands
+   :open-gate            :hands
+   :close-gate           :hands
+   :equip-bait           :hands
+   :feed-animal          :hands
+   :feed-nearby          :hands
+   :excavate-block       :hands
+   :drop-inventory       :hands
+   :breed-animals        :hands
+   :mining-cooperation   :hands
+
+   :social-gaze          :gaze
+   :look-at-player       :gaze})
+
+(defn extract-requested-lease-channels
+  "Extrai todos os canais de lease requisitados por ações dentro de um nó ou sub-árvore."
+  [node]
+  (let [acc (atom #{})]
+    (walk/postwalk
+     (fn [n]
+       (when (and (vector? n) (= (first n) :action))
+         (when-let [ch (get action->lease-channel (second n))]
+           (swap! acc conj ch)))
+       n)
+     node)
+    @acc))
+
+(defn detect-lease-conflicts
+  "Verificação Estática de Conflito de Leases Simbólicas (CA-RSI.3.2).
+   Analisa todos os nós [:parallel ...] da árvore e detecta se dois ou mais ramos
+   concorrentes requisitam o mesmo canal de lease (:legs, :hands, :gaze)."
+  [tree]
+  (let [conflicts (atom [])]
+    (walk/postwalk
+     (fn [n]
+       (when (and (vector? n) (= (first n) :parallel))
+         (let [children           (rest n)
+               channels-per-child (mapv extract-requested-lease-channels children)
+               all-channels       (apply concat channels-per-child)
+               freqs              (frequencies all-channels)
+               clashing           (vec (sort (keep (fn [[ch count]] (when (> count 1) ch)) freqs)))]
+           (when (seq clashing)
+             (swap! conflicts conj {:node n :channels clashing}))))
+       n)
+     tree)
+    (let [all-clashing (vec (sort (distinct (mapcat :channels @conflicts))))]
+      {:conflict?            (boolean (seq @conflicts))
+       :conflicting-channels all-clashing
+       :conflicts            @conflicts})))
 
 (def AgentProfile
   [:map

@@ -4,6 +4,7 @@
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]
             [clojure.string :as str]
+            [craft.agents.cognition.ledger :as ledger]
             [craft.agents.cognition.semantic-router :as router]
             [craft.agents.schemas :as schemas]))
 
@@ -40,7 +41,7 @@
     :traverse-portal :feed-nearby})
 
 (defn validate-and-register-skill!
-  "Valida sub-arvore proposta por IA (schema, acoes conhecidas, ausencia de recursao ciclica, timeouts) e salva EDN (CA-037)."
+  "Valida sub-arvore proposta por IA (schema, lease conflicts, acoes conhecidas, ausencia de recursao ciclica, timeouts) e salva EDN (CA-037, CA-RSI.3.2)."
   [skill-registry skills-dir skill-def & [{:keys [routes-dir] :or {routes-dir "agents/routes"}}]]
   (let [skill-id       (:skill/id skill-def)
         tree           (:skill/tree skill-def)
@@ -49,52 +50,78 @@
         comps          (:composite-skills @skill-registry {})
         called-actions (extract-action-calls tree)
         all-allowed    (into known-actions (keys comps))
-        unknowns       (remove all-allowed called-actions)]
-    (if-not (schemas/valid-bt-node? tree)
+        unknowns       (remove all-allowed called-actions)
+        lease-check    (schemas/detect-lease-conflicts tree)]
+    (cond
+      (not (schemas/valid-bt-node? tree))
       {:ok? false :reason :INVALID_SCHEMA :message "Árvore não atende ao schema Malli schemas/BTNode"}
-      (if (seq unknowns)
-        {:ok? false :reason :UNKNOWN_ACTION :unknowns (vec unknowns)}
-        (let [comp-graph (reduce-kv (fn [m k v]
-                                      (assoc m k (extract-action-calls v)))
-                                    {}
-                                    (assoc comps skill-id tree))
-              cycle?     (has-cycle? comp-graph skill-id #{} #{})]
-          (if cycle?
-            {:ok? false :reason :CYCLIC_DEPENDENCY}
-            (do
-              (let [f (io/file skills-dir (str (name skill-id) ".edn"))]
-                (spit f (pr-str skill-def)))
-              (swap! skill-registry assoc-in [:composite-skills skill-id] tree)
-              (try
-                (router/auto-register-skill-route! skill-def {:persist? true :routes-dir routes-dir})
-                (catch Throwable _ nil))
-              {:ok? true :skill-id skill-id})))))))
+
+      (:conflict? lease-check)
+      {:ok? false
+       :reason :LEASE_CONFLICT
+       :conflicting-channels (:conflicting-channels lease-check)
+       :message "Conflito de lease: múltiplos ramos concorrentes em :parallel requisitam o mesmo canal."}
+
+      (seq unknowns)
+      {:ok? false :reason :UNKNOWN_ACTION :unknowns (vec unknowns)}
+
+      :else
+      (let [comp-graph (reduce-kv (fn [m k v]
+                                    (assoc m k (extract-action-calls v)))
+                                  {}
+                                  (assoc comps skill-id tree))
+            cycle?     (has-cycle? comp-graph skill-id #{} #{})]
+        (if cycle?
+          {:ok? false :reason :CYCLIC_DEPENDENCY}
+          (do
+            (let [f (io/file skills-dir (str (name skill-id) ".edn"))]
+              (spit f (pr-str skill-def)))
+            (swap! skill-registry assoc-in [:composite-skills skill-id] tree)
+            (try
+              (router/auto-register-skill-route! skill-def {:persist? true :routes-dir routes-dir})
+              (catch Throwable _ nil))
+            {:ok? true :skill-id skill-id}))))))
 
 ;; ----------------------------------------------------------------------------
-;; Skill-RAG: Recuperação de Habilidades Semelhantes (P2.1)
+;; Skill-RAG: Recuperação de Habilidades Semelhantes (P2.1, CA-RSI.1.2)
 ;; ----------------------------------------------------------------------------
 
 (defn retrieve-relevant-skills
-  "Skill-RAG (P2.1): Recupera as top-k skills mais similares semanticamente ao objetivo atual
-   a partir dos arquivos .edn no repositório de habilidades para servir de few-shot context."
-  [query skills-dir & [{:keys [top-k] :or {top-k 3}}]]
+  "Skill-RAG (P2.1, CA-RSI.1.2): Recupera as top-k skills mais similares semanticamente ao objetivo atual.
+   Se abort-ledger for fornecido, enriquece com histórico de falhas e restrições negativas."
+  [query skills-dir & [{:keys [top-k abort-ledger] :or {top-k 3}}]]
   (let [dir (io/file skills-dir)]
     (if (and (.exists dir) (.isDirectory dir))
-      (let [files     (filter #(str/ends-with? (.getName %) ".edn") (.listFiles dir))
-            q-vec     (router/text->vector query)
-            scored    (keep (fn [f]
-                              (try
-                                (let [data    (edn/read-string (slurp f))
-                                      s-text  (str (:skill/name data) " "
-                                                   (:skill/trigger data) " "
-                                                   (name (:skill/id data)) " "
-                                                   (pr-str (:skill/tree data)))
-                                      s-vec   (router/text->vector s-text)
-                                      sim     (router/cosine-similarity q-vec s-vec)]
-                                  {:skill data :score sim :file (.getName f)})
-                                (catch Throwable _ nil)))
-                            files)
-            sorted    (sort-by (comp - :score) scored)]
+      (let [files      (filter #(str/ends-with? (.getName %) ".edn") (.listFiles dir))
+            q-vec      (router/text->vector query)
+            ledger-map (cond
+                         (map? abort-ledger) abort-ledger
+                         (or (string? abort-ledger) (instance? java.io.File abort-ledger))
+                         (ledger/read-ledger abort-ledger)
+                         :else nil)
+            scored     (keep (fn [f]
+                               (try
+                                 (let [data       (edn/read-string (slurp f))
+                                       sid        (:skill/id data)
+                                       s-text     (str (:skill/name data) " "
+                                                       (:skill/trigger data) " "
+                                                       (name sid) " "
+                                                       (pr-str (:skill/tree data)))
+                                       s-vec      (router/text->vector s-text)
+                                       sim        (router/cosine-similarity q-vec s-vec)
+                                       aborts     (when (and ledger-map sid) (get ledger-map sid []))
+                                       frequent   (when (and ledger-map sid)
+                                                    (ledger/frequent-aborts (select-keys ledger-map [sid]) 1))
+                                       unstable?  (>= (count aborts) 3)
+                                       neg-prompt (when (seq frequent)
+                                                    (ledger/build-negative-constraints-prompt frequent))]
+                                   (cond-> {:skill data :score sim :file (.getName f)}
+                                     (seq aborts) (assoc :negative-constraints aborts
+                                                         :unstable? unstable?)
+                                     neg-prompt   (assoc :negative-prompt neg-prompt)))
+                                 (catch Throwable _ nil)))
+                             files)
+            sorted     (sort-by (comp - :score) scored)]
         (vec (take top-k sorted)))
       [])))
 

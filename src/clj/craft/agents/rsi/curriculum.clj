@@ -232,3 +232,52 @@
          :savings-score   (:savings-score candidate)})
       {:ok? false
        :rsi/status :no-compressible-patterns})))
+
+;; =============================================================================
+;; 6. CICLO AUTÔNOMO FECHADO DO CURRICULUM AGENT
+;; =============================================================================
+
+(defn step-curriculum-cycle!
+  "Executa um ciclo autônomo do Curriculum Agent (CA-RSI):
+   1. Inspeciona o estado do servidor (server-idle?). Se não estiver calmo, pula (:skipped).
+   2. Gera hipótese de curiosidade (generate-curiosity-hypothesis).
+   3. Executa a hipótese apropriada:
+      - :self-healing-fallback: aplica wrap-action-with-fallback na skill alvo e registra no skill-registry.
+      - :dream-consolidation: executa dream-compress-library! no skill-registry.
+      - :frontier-exploration: emite diretiva formal para o Sistema 2.
+   Retorna mapa estruturado com status e telemetria."
+  [{:keys [skills-map abort-ledger scene-digest skill-registry server-status]}]
+  (if-not (server-idle? server-status)
+    {:status :skipped :reason :server-busy}
+    (let [hypothesis (generate-curiosity-hypothesis
+                      {:skills-map (or skills-map (get @skill-registry :composite-skills) {})
+                       :abort-ledger abort-ledger
+                       :scene-digest scene-digest})]
+      (case (:hypothesis/type hypothesis)
+        :dream-consolidation
+        (let [res (dream-compress-library! skill-registry)]
+          {:status :executed
+           :hypothesis hypothesis
+           :result res})
+
+        :self-healing-fallback
+        (let [skill-id (:target/skill-id hypothesis)
+              failed-action (:target/failed-action hypothesis)
+              old-tree (get-in @skill-registry [:composite-skills skill-id])
+              fallback-sub [:sequence
+                            [:action :equip-bait {:item "minecraft:apple"}]
+                            [:action failed-action]]
+              healed-tree (when old-tree (wrap-action-with-fallback old-tree failed-action fallback-sub))]
+          (when (and healed-tree (schemas/valid-bt-node? healed-tree))
+            (swap! skill-registry assoc-in [:composite-skills skill-id] healed-tree))
+          {:status :executed
+           :hypothesis hypothesis
+           :result {:rsi/status :self-healing-applied
+                    :skill-id skill-id
+                    :healed-tree healed-tree}})
+
+        :frontier-exploration
+        {:status :executed
+         :hypothesis hypothesis
+         :result {:rsi/status :frontier-directive-ready
+                  :directive (:prompt/directive hypothesis)}}))))

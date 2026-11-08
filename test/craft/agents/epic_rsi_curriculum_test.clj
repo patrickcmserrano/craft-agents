@@ -6,6 +6,7 @@
             [craft.agents.schemas :as schemas]
             [craft.agents.cognition.ledger :as ledger]
             [craft.agents.cognition.critic :as critic]
+            [craft.agents.skills.composer :as composer]
             [craft.agents.rsi.curriculum :as curriculum]))
 
 (def test-ledger-file "target/test-abort-ledger.edn")
@@ -197,3 +198,115 @@
             ;; As árvores refatoradas continuam atendendo estritamente ao schema Malli
             (is (true? (schemas/valid-bt-node? refactored-duck)))
             (is (true? (schemas/valid-bt-node? refactored-pig)))))))))
+
+(deftest test-skill-rag-negative-constraints-injection-ca-rsi-1-2
+  (testing "Skill-RAG enriquece skills recuperadas com restrições negativas empíricas do ledger"
+    (let [skills-dir "target/test-rag-skills"
+          ledger-data {:rescue-duck [{:failed-action :attach-lead
+                                      :violated-invariant :leash-attached
+                                      :diagnostic "Corda arrebentou."}
+                                     {:failed-action :attach-lead
+                                      :violated-invariant :leash-attached
+                                      :diagnostic "Corda arrebentou novamente."}
+                                     {:failed-action :attach-lead
+                                      :violated-invariant :leash-attached
+                                      :diagnostic "Corda arrebentou pela 3a vez."}]}]
+      (.mkdirs (io/file skills-dir))
+      (spit (io/file skills-dir "rescue-duck.edn")
+            (pr-str {:skill/id :rescue-duck
+                     :skill/name "Rescue Duck"
+                     :skill/trigger "resgate o pato"
+                     :skill/tree [:sequence
+                                  [:action :locate-duck]
+                                  [:action :attach-lead {:target "Duck"}]]}))
+      (try
+        (let [results (composer/retrieve-relevant-skills
+                       "resgate o pato"
+                       skills-dir
+                       {:abort-ledger ledger-data})]
+          (is (seq results))
+          (let [first-res (first results)]
+            (is (= :rescue-duck (get-in first-res [:skill :skill/id])))
+            (is (true? (:unstable? first-res)))
+            (is (seq (:negative-constraints first-res)))
+            (is (= :attach-lead (:failed-action (first (:negative-constraints first-res)))))
+            (is (some? (:negative-prompt first-res)))
+            (is (.contains (:negative-prompt first-res) "RESTRIÇÕES NEGATIVAS"))))
+        (finally
+          (doseq [f (.listFiles (io/file skills-dir))] (.delete f))
+          (.delete (io/file skills-dir)))))))
+
+(deftest test-static-lease-conflict-analysis-ca-rsi-3-2
+  (testing "detect-lease-conflicts identifica nós paralelos disputando o mesmo canal de lease"
+    ;; Conflito em :hands (dois nós simultâneos usam :hands)
+    (let [conflicting-tree [:parallel
+                            [:action :attach-lead {:target "Cow"}]
+                            [:action :open-gate {:enclosure "corral"}]]
+          analysis (schemas/detect-lease-conflicts conflicting-tree)]
+      (is (true? (:conflict? analysis)))
+      (is (contains? (set (:conflicting-channels analysis)) :hands)))
+
+    ;; Sem conflito (:legs + :gaze usam canais ortogonais)
+    (let [orthogonal-tree [:parallel
+                           [:action :walk {:target [10 64 10]}]
+                           [:action :social-gaze {:target "Pace"}]]
+          analysis (schemas/detect-lease-conflicts orthogonal-tree)]
+      (is (false? (:conflict? analysis)))
+      (is (empty? (:conflicting-channels analysis))))
+
+    ;; Gatekeeper do composer rejeita árvore com conflito de leases
+    (let [registry (atom {:composite-skills {}})
+          skills-dir "target/test-gatekeeper-skills"
+          invalid-skill {:skill/id :conflicted-task
+                         :skill/name "Conflicted Task"
+                         :skill/tree [:parallel
+                                      [:action :attach-lead {:target "Cow"}]
+                                      [:action :feed-animal {:target "Cow"}]]}]
+      (.mkdirs (io/file skills-dir))
+      (try
+        (let [res (composer/validate-and-register-skill! registry skills-dir invalid-skill)]
+          (is (false? (:ok? res)))
+          (is (= :LEASE_CONFLICT (:reason res)))
+          (is (contains? (set (:conflicting-channels res)) :hands)))
+        (finally
+          (doseq [f (.listFiles (io/file skills-dir))] (.delete f))
+          (.delete (io/file skills-dir)))))))
+
+(deftest test-autonomous-curriculum-cycle-execution
+  (testing "step-curriculum-cycle! orquestra o ciclo fechado quando servidor estiver calmo"
+    (let [registry (atom {:composite-skills
+                          {:rescue-duck
+                           [:sequence
+                            [:action :locate-duck]
+                            [:sequence
+                             [:action :equip-bait {:item "apple"}]
+                             [:action :attach-lead {:target "duck"}]]]
+                           :rescue-pig
+                           [:sequence
+                            [:action :locate-pig]
+                            [:sequence
+                             [:action :equip-bait {:item "apple"}]
+                             [:action :attach-lead {:target "duck"}]]]}})
+          idle-status {:tps 20.0 :idle-ticks 150 :hostiles-count 0}
+          busy-status {:tps 14.0 :idle-ticks 10 :hostiles-count 3}]
+
+      ;; 1. Quando o servidor está ocupado, o ciclo é ignorado
+      (let [res (curriculum/step-curriculum-cycle!
+                 {:skills-map (:composite-skills @registry)
+                  :abort-ledger {}
+                  :scene-digest {:self {:inventory {"apple" 2}} :entities {:animals-summary {}}}
+                  :skill-registry registry
+                  :server-status busy-status})]
+        (is (= :skipped (:status res)))
+        (is (= :server-busy (:reason res))))
+
+      ;; 2. Quando o servidor está calmo e há oportunidade de compressão (Dreamer)
+      (let [res (curriculum/step-curriculum-cycle!
+                 {:skills-map (:composite-skills @registry)
+                  :abort-ledger {}
+                  :scene-digest {:self {:inventory {}} :entities {:animals-summary {}}}
+                  :skill-registry registry
+                  :server-status idle-status})]
+        (is (= :executed (:status res)))
+        (is (= :dream-consolidation (get-in res [:hypothesis :hypothesis/type])))
+        (is (= :compressed-successfully (get-in res [:result :rsi/status])))))))
