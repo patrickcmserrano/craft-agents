@@ -400,7 +400,19 @@
                                 target-filter (assoc :target/filter target-filter))
          :intent/raw-text     raw-text})
 
-      ;; 6. Seguir o Jogador (apenas se não for comando de captura de animal)
+      ;; 6. Rota Dinâmica Aprendida (P1 - Hot-Reloaded Skill Route)
+      ;; Se o roteador semântico encontrou rota customizada (ex: :entrar-barco) com alta confiança, executa a skill
+      (and (not (#{:dialogue :follow-player :patrol-sanctuary :mining-cooperation :teleport-to-player :animal-emergency} routed-type))
+           (>= router-conf 0.70))
+      {:intent/type         routed-type
+       :intent/confidence   (double router-conf)
+       :intent/route-method :dynamic-skill-route
+       :intent/anchor       (:intent/anchor router-match)
+       :intent/slots        {:target/action  (name routed-type)
+                             :target/speaker speaker}
+       :intent/raw-text     raw-text}
+
+      ;; 7. Seguir o Jogador (apenas se não for comando de captura de animal ou skill customizada)
       (or (= :follow-player routed-type) has-follow)
       {:intent/type         :follow-player
        :intent/confidence   (max 0.92 (double router-conf))
@@ -410,7 +422,7 @@
                              :target/speaker speaker}
        :intent/raw-text     raw-text}
 
-      ;; 7. Retomada de Patrulha / Ronda / Alimentação
+      ;; 8. Retomada de Patrulha / Ronda / Alimentação
       (or (= :patrol-sanctuary routed-type) has-patrol)
       {:intent/type         :patrol-sanctuary
        :intent/confidence   (max 0.90 (double router-conf))
@@ -420,16 +432,6 @@
                                      :target/speaker speaker}
                               animal (assoc :target/entity (:entity animal)
                                             :target/species (:species animal)))
-       :intent/raw-text     raw-text}
-
-      ;; 8. Rota Dinâmica Aprendida (P1 - Hot-Reloaded Skill Route)
-      (and routed-type (not= :dialogue routed-type) (>= router-conf 0.70))
-      {:intent/type         routed-type
-       :intent/confidence   (double router-conf)
-       :intent/route-method :dynamic-skill-route
-       :intent/anchor       (:intent/anchor router-match)
-       :intent/slots        {:target/action  (name routed-type)
-                             :target/speaker speaker}
        :intent/raw-text     raw-text}
 
       ;; 9. Diálogo Geral / Diretriz
