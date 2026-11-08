@@ -11,7 +11,8 @@
             [craft.agents.skills.composer :as composer]
             [craft.agents.cognition.intent :as intent]
             [craft.agents.cognition.grounding :as grounding]
-            [craft.agents.cognition.critic :as critic])
+            [craft.agents.cognition.critic :as critic]
+            [craft.agents.rsi.curriculum :as curriculum])
   (:import [java.io BufferedReader InputStreamReader OutputStreamWriter PrintWriter RandomAccessFile]
            [java.net Socket]
            [java.nio.charset StandardCharsets]))
@@ -1446,8 +1447,41 @@
         (karlach-say! (str "Entendido, " (or speaker "soldado") "! Nova habilidade '" sname "' aprendida e gravada na minha memória! 🔥 Experimente dizer '" sname "' quando quiser que eu execute!")))
       (let [reason (:reason synth-res)
             msg    (or (:message synth-res) (str reason))]
-        (send-bridge-cmd! "CMD|playsound minecraft:block.note_block.bass master @a ~ ~ ~ 1.0 0.8")
-        (karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como 'karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))
+        (if (contains? #{:UNRECOGNIZED_STEPS :UNKNOWN_ACTION} reason)
+          (let [slug (composer/slugify instruction)
+                tid  (str "ca-gap-" (subs slug 0 (min (count slug) 24)) "-" (System/currentTimeMillis))
+                hyp  {:hypothesis/type :frontier-exploration
+                      :target/category :motor-capability-gap
+                      :target/identifier slug
+                      :prompt/directive
+                      (str "Implementar a nova capacidade motora que falta no motor para o comando: '" instruction "'.\n"
+                           "REQUISITOS:\n"
+                           "1. Em `src/clj/craft/agents/skills/composer.clj`:\n"
+                           "   - Adicionar a nova ação em `default-known-actions` (ex: :mount-boat, :ride-vehicle).\n"
+                           "   - Em `step->action-node`, mapear o termo (barco, subir no barco, montar) para [:action :mount-boat].\n"
+                           "2. Em `src/clj/craft/agents/backend/fabric.clj`:\n"
+                           "   - No `execute-tree-node!`, tratar a ação correspondente emitindo o comando via bridge (ex: CMD|ride Karlach mount @e[type=boat,distance=..4,limit=1]).\n"
+                           "3. Cobrir com teste unitário em test/ e manter 100% GREEN.")}]
+            (try
+              (curriculum/dispatch-curiosity-to-swe!
+               hyp
+               {:repo-dir "/home/pace/dev/craft-agents"
+                :task-id tid
+                :model "deepseek-v4-1-flash"
+                :test-cmd "make test"
+                :target-files ["src/clj/craft/agents/skills/composer.clj"
+                               "src/clj/craft/agents/backend/fabric.clj"
+                               "test/craft/agents/epic5_cognition_mcp_studio_test.clj"]})
+              (catch Throwable t
+                (println "[curriculum] Erro ao despachar SWE:" (.getMessage t))))
+            (send-bridge-cmd! "SWING|Karlach")
+            (send-bridge-cmd! "CMD|playsound minecraft:block.beacon.activate master @a ~ ~ ~ 1.0 1.2")
+            (record-cognitive-event! engine-ctx-atom :rsi "Curriculum RSI Loop"
+                                     (str "Lacuna motora detectada no chat: '" instruction "'. Tarefa " tid " despachada para target/curiosity-queue/."))
+            (karlach-say! (str "Soldado, meu corpo ainda não tem a capacidade motora para '" instruction "'! ⚡ Despachei uma tarefa de auto-engenharia (" tid ") para a fábrica autônoma. O SWE-Runner está programando essa habilidade agora!")))
+          (do
+            (send-bridge-cmd! "CMD|playsound minecraft:block.note_block.bass master @a ~ ~ ~ 1.0 0.8")
+            (karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como 'karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))))
 
 (defn- execute-tree-node!
   "Executa nó da Behavior Tree preservando semântica de controle (:fallback, :sequence, :parallel) e expandindo macros."
