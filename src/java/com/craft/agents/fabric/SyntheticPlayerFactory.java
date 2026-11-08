@@ -422,13 +422,35 @@ public final class SyntheticPlayerFactory {
                                 inWater = (Boolean) player.getClass().getMethod("method_5869").invoke(player);
                             } catch (Throwable t2) {}
                         }
-
-                        if (inWater && sprint) {
+                        if (!inWater) {
                             try {
+                                Object overworld = player.getClass().getMethod("method_51469").invoke(player);
+                                Class<?> bpCls = Class.forName("net.minecraft.class_2338", true, cl);
+                                Object bp = bpCls.getConstructor(int.class, int.class, int.class).newInstance(
+                                        (int) Math.floor(x), (int) Math.floor(y + 0.1), (int) Math.floor(z));
+                                Object bState = overworld.getClass().getMethod("method_8320", bpCls).invoke(overworld, bp);
+                                String bStr = bState.toString().toLowerCase();
+                                if (bStr.contains("water")) {
+                                    inWater = true;
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+
+                        if (inWater) {
+                            try {
+                                player.getClass().getMethod("method_5728", boolean.class).invoke(player, true);
                                 player.getClass().getMethod("method_5796", boolean.class).invoke(player, true);
                                 Class<?> poseCls = Class.forName("net.minecraft.class_4050", true, cl);
                                 Object swimPose = poseCls.getField("field_18079").get(null);
                                 player.getClass().getMethod("method_18380", poseCls).invoke(player, swimPose);
+                                if (sprint) {
+                                    double rad = Math.toRadians(yaw);
+                                    double speed = 0.18;
+                                    double vx = -Math.sin(rad) * speed;
+                                    double vz = Math.cos(rad) * speed;
+                                    player.getClass().getMethod("method_18799", double.class, double.class, double.class)
+                                            .invoke(player, vx, 0.0, vz);
+                                }
                             } catch (Throwable ignored) {}
                         } else {
                             try {

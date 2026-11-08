@@ -213,3 +213,45 @@
           res-escort @fut-escort]
       (is (= PathResult$Status/SUCCESS (.status res-xz)))
       (is (= PathResult$Status/SUCCESS (.status res-escort))))))
+
+(deftest ca-030-pathsolver3d-liquid-swimming-and-shore-transition-test
+  (testing "CA-030: PathSolver3D navega realisticamente em agua (SWIM) no nivel da superficie sem afundar no leito"
+    (let [w (wf/make-flat-world-state 59) ;; leito de areia em y=59
+          ;; Coluna de agua de y=60 a y=62 entre z=0 e z=5
+          _ (doseq [x [0 1 -1]
+                    z (range 0 6)
+                    y [60 61 62]]
+              (wf/set-block! w [x y z] {:id "minecraft:water" :collision CollisionType/LIQUID :hazard? false}))
+          vox (wf/->voxel-accessor w)
+          solver (PathSolver3D.)
+          caps (MovementCapabilities/defaults)
+          res (.solve solver vox 0 62 0 (GoalBlock. 0 62 5) caps 1000)]
+      (is (= PathResult$Status/SUCCESS (.status res)) "PathSolver3D deve encontrar rota navegavel pela agua")
+      (let [steps (.steps res)]
+        (is (pos? (count steps)))
+        (is (every? #(= PathNodeStep$StepAction/SWIM (.action %)) steps)
+            "Todos os passos dentro d'agua devem usar a acao SWIM")
+        (is (every? #(= 62 (.y %)) steps)
+            "A rota deve permanecer na superficie d'agua (y=62) sem afundar no leito (y=60)"))))
+
+  (testing "CA-030: Transicao suave rio -> margem (SWIM -> WALK na terra firme)"
+    (let [w (wf/make-flat-world-state 59)
+          ;; Agua em z=0..4, margem em terra firme em z=5..7 (bloco solido em y=62, topo transitavel em y=63)
+          _ (doseq [x [0 1 -1]
+                    z (range 0 5)
+                    y [60 61 62]]
+              (wf/set-block! w [x y z] {:id "minecraft:water" :collision CollisionType/LIQUID :hazard? false}))
+          _ (doseq [x [0 1 -1]
+                    z (range 5 8)]
+              (wf/set-block! w [x 62 z] {:id "minecraft:grass_block" :collision CollisionType/SOLID :height 1.0}))
+          vox (wf/->voxel-accessor w)
+          solver (PathSolver3D.)
+          caps (MovementCapabilities/defaults)
+          res (.solve solver vox 0 62 2 (GoalBlock. 0 63 6) caps 1000)]
+      (is (= PathResult$Status/SUCCESS (.status res)) "Deve encontrar rota da agua para a margem de terra")
+      (let [steps (.steps res)
+            last-step (last steps)]
+        (is (= [0 63 6] [(.x last-step) (.y last-step) (.z last-step)])
+            "Ultimo passo alcanca o bloco de grama na margem")
+        (is (not= PathNodeStep$StepAction/SWIM (.action last-step))
+            "Passo na terra firme nao deve ser SWIM")))))

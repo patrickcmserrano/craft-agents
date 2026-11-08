@@ -469,9 +469,10 @@
                                                      safe-ndist (max 0.001 ndist)
                                                      step-x (+ cx (* (/ ndx safe-ndist) step-d))
                                                      step-z (+ cz (* (/ ndz safe-ndist) step-d))
-                                                     safe-ny (if (and (< ny ty) (< ty 64.0) (>= ty 62.0))
-                                                               (max ny (- (double ty) 0.15))
-                                                               ny)]
+                                                     safe-ny (cond
+                                                               (= act :SWIM) (+ (double ny) 0.2)
+                                                               (and (< ny ty) (< ty 64.0) (>= ty 62.0)) (max ny (- (double ty) 0.15))
+                                                               :else ny)]
                                                  (send-bridge-cmd!
                                                   (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x safe-ny step-z nyaw))
                                                  (swap! nav-state assoc :pos [step-x safe-ny step-z] :yaw nyaw :follow-path active-path :follow-last-target [tx ty tz]))))

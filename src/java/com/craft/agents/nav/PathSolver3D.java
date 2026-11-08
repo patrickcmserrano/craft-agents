@@ -208,13 +208,19 @@ public final class PathSolver3D {
             return;
         }
 
-        // 2. Suporte sólido ou transitável sob os pés (canStandOn valida colisão, altura e lista de bloqueio)
-        if (!capabilities.canStandOn(world, nx, ny - 1, nz)) {
+        CollisionType footCol = world.getCollisionType(nx, ny, nz);
+        CollisionType belowCol = world.getCollisionType(nx, ny - 1, nz);
+        boolean inWater = (footCol == CollisionType.LIQUID) || (belowCol == CollisionType.LIQUID && footCol == CollisionType.EMPTY);
+
+        // 2. Suporte sólido ou flutuabilidade aquática (SWIM nativo sem afundar no leito)
+        if (inWater) {
+            action = PathNodeStep.StepAction.SWIM;
+            moveCost = capabilities.swimCost;
+        } else if (!capabilities.canStandOn(world, nx, ny - 1, nz)) {
             return;
         }
 
         // 3. Verifica espaço livre para o corpo e a cabeça
-        CollisionType footCol = world.getCollisionType(nx, ny, nz);
         CollisionType headCol = world.getCollisionType(nx, ny + 1, nz);
 
         PortalGroup portal = null;

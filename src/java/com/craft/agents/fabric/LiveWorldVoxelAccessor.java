@@ -73,6 +73,8 @@ public final class LiveWorldVoxelAccessor implements VoxelAccessor {
                     );
                     portalCache.put(p, pg);
                 }
+            } else if (id.contains("water")) {
+                collisionCache.put(p, CollisionType.LIQUID);
             } else if (noCollision) {
                 collisionCache.put(p, CollisionType.EMPTY);
             } else {
