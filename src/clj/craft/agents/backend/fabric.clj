@@ -1447,7 +1447,7 @@
       (let [reason (:reason synth-res)
             msg    (or (:message synth-res) (str reason))]
         (send-bridge-cmd! "CMD|playsound minecraft:block.note_block.bass master @a ~ ~ ~ 1.0 0.8")
-        (karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como '!karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))
+        (karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como 'karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))
 
 (defn- execute-tree-node!
   "Executa nó da Behavior Tree preservando semântica de controle (:fallback, :sequence, :parallel) e expandindo macros."
