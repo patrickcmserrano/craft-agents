@@ -233,6 +233,14 @@
          :target-id (try (Integer/parseInt tid) (catch Throwable _ target-id))
          :cooldown (try (Double/parseDouble cd) (catch Throwable _ 1.0))}))))
 
+(defn equip-item!
+  "Equipa item na mão principal ou secundária via opcode nativo EQUIP_ITEM da bridge (Zero CMD - CA-049)."
+  [player-name slot item-id]
+  (let [cmd (str "EQUIP_ITEM|" player-name "|" slot "|" item-id)
+        resp (transport/send-bridge-cmd! cmd)]
+    (when (and resp (str/starts-with? resp "OK"))
+      {:success? true :player player-name :slot slot :item item-id})))
+
 (defn mine-block!
   "Executa quebra segura de bloco in-JVM respeitando regras de ouro (CA-E3.1).
    Retorna {:success? true/false :block-id ... :tool-used ...} ou erro."

@@ -74,6 +74,13 @@
 (def locate-nearby-ores actions/locate-nearby-ores)
 (def raycast-player-look actions/raycast-player-look)
 (def auto-eat-food! actions/auto-eat-food!)
+(defn equip-item!
+  "Equipa item nativamente via opcode EQUIP_ITEM da bridge (Zero CMD - CA-049)."
+  [player-name slot item-id]
+  (let [cmd (str "EQUIP_ITEM|" player-name "|" slot "|" item-id)
+        resp (send-bridge-cmd! cmd)]
+    (when (some? resp)
+      {:success? true :player player-name :slot slot :item item-id :cmd cmd})))
 (def karlach-say! actions/karlach-say!)
 (def ore-pt-names actions/ore-pt-names)
 (def last-drop-ms actions/last-drop-ms)
@@ -148,3 +155,4 @@
 ;; ============================================================================
 
 (def start-live-karlach-loop! engine/start-live-karlach-loop!)
+(def evaluate-combat-preemption engine/evaluate-combat-preemption)

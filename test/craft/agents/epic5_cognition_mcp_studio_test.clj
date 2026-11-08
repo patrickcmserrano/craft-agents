@@ -322,3 +322,49 @@
              (composer/step->action-node "sair do barco" "Pace")))
       (is (= [:action :mount-vehicle {:speaker "Pace"}]
              (composer/step->action-node "subir no barco" "Pace"))))))
+
+(deftest ca-049-reactive-combat-preemption-and-tether-test
+  (testing "CA-049: Preempção de Combate Reativo, Tether Anti-Kiting (18m) e Equipamento Server-Native"
+
+    (testing "1. Preempção de Combate & Gap-Closing sem Sobrescrita do Follow-Path"
+      ;; Cenário do esqueleto a 6.0m: mesmo com líder a 1.5m (<= 2.6m),
+      ;; o combate assume e fecha distância até o hostil, sem limpar ou sobrescrever com caminho para o jogador
+      (let [bot-pos    [0.0 64.0 0.0]
+            leader-pos [1.5 64.0 0.0]  ;; dist = 1.5m (abaixo de 2.6m)
+            mob-target {:id 375651 :type "minecraft:skeleton" :x 6.0 :y 64.0 :z 0.0 :distance 6.0 :hp 10.9}
+            decision   (fabric/evaluate-combat-preemption bot-pos leader-pos [mob-target] false)]
+        (is (= :combat-intercept (:action decision))
+            "Deve selecionar ação :combat-intercept para fechar distância até o esqueleto")
+        (is (= [6.0 64.0 0.0] (:target-pos decision))
+            "Caminho deve apontar exclusivamente para o mob hostil")
+        (is (false? (:clear-follow-path? decision))
+            "NUNCA pode limpar :follow-path enquanto engajando o hostil")))
+
+    (testing "2. Tether Tático Anti-Kiting (Raio Máximo de 18.0m)"
+      ;; Se o líder se afasta além de 18.0m, Karlach aborta perseguição e retorna ao perímetro do líder
+      (let [bot-pos    [0.0 64.0 0.0]
+            leader-pos [22.0 64.0 0.0] ;; dist = 22.0m (> 18.0m)
+            mob-target {:id 375651 :type "minecraft:skeleton" :x 6.0 :y 64.0 :z 0.0 :distance 6.0 :hp 10.9}
+            decision   (fabric/evaluate-combat-preemption bot-pos leader-pos [mob-target] false)]
+        (is (= :tether-snap-recall (:action decision))
+            "Distância > 18.0m deve disparar recall forçado de escolta")
+        (is (= leader-pos (:target-pos decision))
+            "Deve direcionar retorno para o líder")))
+
+    (testing "3. Proteção de Regressão com o Barco (Preservação de Embarque)"
+      ;; Karlach embarcada no mesmo veículo que o líder NÃO deve desembarcar sozinha para caçar na margem
+      (let [bot-pos    [-100.0 62.0 180.0]
+            leader-pos [-100.0 62.0 180.0]
+            mob-bank   {:id 375651 :type "minecraft:skeleton" :x -90.0 :y 63.0 :z 180.0 :distance 10.0 :hp 10.9}
+            decision   (fabric/evaluate-combat-preemption bot-pos leader-pos [mob-bank] true)]
+        (is (= :remain-mounted-passive (:action decision))
+            "Enquanto embarcada, não deve desembarcar para perseguir hostil distante")
+        (is (nil? (:target-pos decision)))))
+
+    (testing "4. Equipamento Nativo de Escudo e Machado sem CMD string"
+      (let [sent (atom [])]
+        (with-redefs [fabric/send-bridge-cmd! (fn [c] (swap! sent conj c))]
+          (let [res (fabric/equip-item! "Karlach" "offhand" "minecraft:shield")]
+            (is (some? res))
+            (is (= ["EQUIP_ITEM|Karlach|offhand|minecraft:shield"] @sent)
+                "Deve despachar comando nativo EQUIP_ITEM sem console string CMD|item replace")))))))

@@ -448,6 +448,40 @@ public final class SyntheticPlayerFactory {
                 return "OK";
             }
 
+            if ("EQUIP_ITEM".equals(op) && parts.length >= 4) {
+                String name = parts[1];
+                String slot = parts[2];
+                String itemId = parts[3];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, name);
+                if (player != null) {
+                    runOnServerThread(server, () -> {
+                        try {
+                            Class<?> itemRegClass = Class.forName("net.minecraft.class_7923", true, cl);
+                            Object itemReg = itemRegClass.getField("field_41178").get(null);
+                            Class<?> idCls = Class.forName("net.minecraft.class_2960", true, cl);
+                            Object id = idCls.getMethod("method_60654", String.class).invoke(null, itemId);
+                            Object itemObj = itemReg.getClass().getMethod("method_10223", idCls).invoke(itemReg, id);
+                            Class<?> itemStackCls = Class.forName("net.minecraft.class_1799", true, cl);
+                            Class<?> itemConvertibleCls = Class.forName("net.minecraft.class_1935", true, cl);
+                            Object stack = itemStackCls.getConstructor(itemConvertibleCls, int.class).newInstance(itemObj, 1);
+                            Class<?> handClass = Class.forName("net.minecraft.class_1268", true, cl);
+                            if ("offhand".equalsIgnoreCase(slot)) {
+                                Object offHand = handClass.getField("field_5810").get(null);
+                                player.getClass().getMethod("method_6122", handClass, itemStackCls).invoke(player, offHand, stack);
+                            } else {
+                                Object mainHand = handClass.getField("field_5808").get(null);
+                                player.getClass().getMethod("method_6122", handClass, itemStackCls).invoke(player, mainHand, stack);
+                            }
+                        } catch (Throwable t) {
+                            System.out.println("[EQUIP_ITEM_ERROR] " + t);
+                        }
+                    });
+                    return "OK";
+                }
+                return "ERR|NO_PLAYER";
+            }
+
             if ("CMD".equals(op) && parts.length >= 2) {
                 String cmd = line.substring(4);
                 runOnServerThread(server, () -> {

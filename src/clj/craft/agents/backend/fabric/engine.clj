@@ -29,6 +29,61 @@
   (:import [java.io RandomAccessFile]
            [java.nio.charset StandardCharsets]))
 
+(defn evaluate-combat-preemption
+  "Avalia preempção de combate reativo, tether anti-kiting de escolta e proteção de embarque (CA-049).
+   Retorna mapa de decisão:
+     - :action (:combat-strike, :combat-intercept, :tether-snap-recall, :remain-mounted-passive, :follow-player)
+     - :target-pos [x y z]
+     - :target-id int
+     - :clear-follow-path? boolean"
+  [bot-pos leader-pos hostiles in-vehicle?]
+  (if in-vehicle?
+    ;; 1. Proteção de Regressão com o Barco (CA-048 + CA-049):
+    ;; Não desembarca sozinha para caçar na margem do rio.
+    (if-let [melee-mob (first (filter #(<= (:distance %) 3.5) hostiles))]
+      {:action :combat-strike
+       :target-pos [(:x melee-mob) (:y melee-mob) (:z melee-mob)]
+       :target-id (:id melee-mob)
+       :clear-follow-path? true}
+      {:action :remain-mounted-passive
+       :target-pos nil
+       :clear-follow-path? false})
+
+    ;; 2. Modo Terrestre (fora do barco):
+    (let [[bx by bz] (or bot-pos [0.0 64.0 0.0])
+          [lx ly lz] (or leader-pos bot-pos)
+          dist-to-leader (if leader-pos
+                           (Math/sqrt (+ (Math/pow (- (double lx) (double bx)) 2)
+                                         (Math/pow (- (double ly) (double by)) 2)
+                                         (Math/pow (- (double lz) (double bz)) 2)))
+                           0.0)
+          target-mob (first hostiles)]
+      (cond
+        ;; A) Tether Tático Anti-Kiting: líder está além de 18.0m -> recall de emergência
+        (> dist-to-leader 18.0)
+        {:action :tether-snap-recall
+         :target-pos leader-pos
+         :clear-follow-path? false}
+
+        ;; B) Hostil próximo engajável dentro do tether (<= 18m do líder e <= 14m de Karlach)
+        (and target-mob (<= (:distance target-mob) 14.0))
+        (let [mdist (:distance target-mob)]
+          (if (<= mdist 3.8)
+            {:action :combat-strike
+             :target-pos [(:x target-mob) (:y target-mob) (:z target-mob)]
+             :target-id (:id target-mob)
+             :clear-follow-path? true}
+            {:action :combat-intercept
+             :target-pos [(:x target-mob) (:y target-mob) (:z target-mob)]
+             :target-id (:id target-mob)
+             :clear-follow-path? false}))
+
+        ;; C) Sem hostis engajáveis: locomoção normal para o líder
+        :else
+        {:action :follow-player
+         :target-pos leader-pos
+         :clear-follow-path? false}))))
+
 (defn start-live-karlach-loop!
   "Inicia o loop de 20Hz da Karlach e do Capitão Picard no servidor Fabric e atualiza o engine-ctx do Agent Studio."
   [engine-ctx-atom]
@@ -281,80 +336,145 @@
                                    (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
                                    (swap! nav-state assoc :pos [tx ty tz] :follow-path [])))
 
-                               ;; Varredura tática de hostis e proteção do jogador (4 vezes por segundo)
-                               (when (zero? (mod tick 5))
-                                 (try
-                                   (let [hostiles (scan-nearby-hostiles "Karlach" 14.0)]
-                                     (when-let [target-mob (first hostiles)]
-                                       (let [mdist (:distance target-mob)]
-                                         (if (<= mdist 3.8)
-                                           (let [hdx (- (:x target-mob) cx)
-                                                 hdz (- (:z target-mob) cz)
-                                                 hyaw (compute-yaw hdx hdz)]
-                                             (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz hyaw))
-                                             (attack-hostile-target! "Karlach" (:id target-mob))
-                                             (send-bridge-cmd! "SWING|Karlach")
-                                             (send-bridge-cmd! (uformat "CMD|particle minecraft:crit %.2f %.2f %.2f 0.3 0.3 0.3 0.1 5 normal"
-                                                                       (:x target-mob) (+ (:y target-mob) 1.0) (:z target-mob)))
-                                             (when (zero? (mod tick 30))
-                                               (karlach-say! (str "Toma essa, " (:type target-mob) "! Não mexe com meu esquadrão! 🔥"))))
-                                           (when (and (= (:mode st) :bodyguard) (> mdist 3.8) (<= mdist 10.0))
-                                             (swap! nav-state assoc :follow-path (request-path3d [cx cy cz] [(:x target-mob) (:y target-mob) (:z target-mob)] 2.0)))))))
-                                   (catch Throwable _ nil)))
-                               (if (<= dist 2.6)
-                                 (do
-                                   (send-bridge-cmd!
-                                    (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
-                                   (swap! nav-state assoc :yaw yaw :follow-path []))
-                                 (let [path-queue (:follow-path st [])
-                                       last-target (or (:follow-last-target st) [0.0 0.0 0.0])
-                                       target-moved? (> (+ (Math/abs (- (double tx) (double (or (first last-target) 0.0))))
-                                                           (Math/abs (- (double tz) (double (or (nth last-target 2 nil) 0.0)))))
-                                                        3.0)
-                                       active-path (if (or (empty? path-queue) target-moved?)
-                                                     (request-path3d [cx cy cz] [tx ty tz] 2.2)
-                                                     path-queue)]
-                                   (if-let [next-node (first active-path)]
-                                     (let [nx (+ (double (:x next-node)) 0.5)
-                                           ny (double (:y next-node))
-                                           nz (+ (double (:z next-node)) 0.5)
-                                           act (:action next-node)
-                                           ndx (- nx cx)
-                                           ndz (- nz cz)
-                                           ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
-                                           nyaw (compute-yaw ndx ndz)]
-                                       (when (= act :TRAVERSE_PORTAL)
-                                         (let [pcoord [(:x next-node) (:y next-node) (:z next-node)]]
-                                           (open-portal-at-coord! pcoord)
-                                           (swap! nav-state assoc :opened-portal pcoord)))
-                                       (if (<= ndist 0.4)
-                                         (swap! nav-state #(-> %
-                                                               (assoc :follow-path (vec (rest active-path)))
-                                                               (assoc :follow-last-target [tx ty tz])))
-                                         (let [step-d (min 0.24 (max 0.05 ndist))
-                                               safe-ndist (max 0.001 ndist)
-                                               step-x (+ cx (* (/ ndx safe-ndist) step-d))
-                                               step-z (+ cz (* (/ ndz safe-ndist) step-d))]
-                                           (send-bridge-cmd!
-                                            (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x ny step-z nyaw))
-                                           (swap! nav-state assoc :pos [step-x ny step-z] :yaw nyaw :follow-path active-path :follow-last-target [tx ty tz]))))
-                                     ;; Sem caminho navegavel: gira na direcao do jogador e aguarda (NUNCA atravessa paredes!)
-                                     (do
-                                       (send-bridge-cmd!
-                                        (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
-                                       (swap! nav-state assoc :yaw yaw)))))
-                               (when-let [op-portal (:opened-portal @nav-state)]
-                                 (let [[ox _ oz] op-portal
-                                       pdist (Math/sqrt (+ (Math/pow (- cx (+ (double ox) 0.5)) 2)
-                                                           (Math/pow (- cz (+ (double oz) 0.5)) 2)))]
-                                   (when (> pdist 2.2)
-                                     (close-portal-at-coord! op-portal)
-                                     (swap! nav-state assoc :opened-portal nil))))
-                               (swap! engine-ctx-atom assoc
-                                      :tick tick
-                                      :leases {:legs {:owner :escort-player} :hands nil :gaze {:owner :social-gaze}}
-                                      :agents {:karlach (make-karlach-card (if (= (:mode st) :bodyguard) (str "🛡️ guarda-costas de " (:name target-p)) (str "escoltando " (:name target-p))) (:pos @nav-state))
-                                               :picard  picard-card}))
+                               ;; Varredura tática e preempção de combate reativo (CA-049)
+                               (let [hostiles (if (zero? (mod tick 4))
+                                                (try (let [h (scan-nearby-hostiles "Karlach" 14.0)]
+                                                       (swap! nav-state assoc :last-hostiles h)
+                                                       h)
+                                                     (catch Throwable _ (:last-hostiles @nav-state [])))
+                                                (:last-hostiles @nav-state []))
+                                     in-veh?  (:in-vehicle? st false)
+                                     decision (evaluate-combat-preemption [cx cy cz] [tx ty tz] hostiles in-veh?)]
+                                 (case (:action decision)
+                                   :combat-strike
+                                   (let [[mx my mz] (:target-pos decision)
+                                         target-id  (:target-id decision)
+                                         hdx        (- (double mx) (double cx))
+                                         hdz        (- (double mz) (double cz))
+                                         hyaw       (compute-yaw hdx hdz)]
+                                     (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz hyaw))
+                                     (when target-id (attack-hostile-target! "Karlach" target-id))
+                                     (send-bridge-cmd! "SWING|Karlach")
+                                     (send-bridge-cmd! (uformat "CMD|particle minecraft:crit %.2f %.2f %.2f 0.3 0.3 0.3 0.1 5 normal"
+                                                               (double mx) (+ (double my) 1.0) (double mz)))
+                                     (when (zero? (mod tick 30))
+                                       (karlach-say! "Toma essa! Não mexe com meu esquadrão! 🔥 🛡️"))
+                                     (swap! engine-ctx-atom assoc
+                                            :tick tick
+                                            :leases {:legs {:owner :combat-strike} :hands {:owner :combat-strike} :gaze {:owner :combat-strike}}
+                                            :agents {:karlach (make-karlach-card "⚔️ em combate defensivo" (:pos @nav-state))
+                                                     :picard  picard-card}))
+
+                                   :combat-intercept
+                                   (let [[mx my mz] (:target-pos decision)
+                                         path-queue (:follow-path st [])
+                                         last-target (or (:follow-last-target st) [0.0 0.0 0.0])
+                                         target-moved? (> (+ (Math/abs (- (double mx) (double (or (first last-target) 0.0))))
+                                                             (Math/abs (- (double mz) (double (or (nth last-target 2 nil) 0.0)))))
+                                                          2.5)
+                                         active-path (if (or (empty? path-queue) target-moved?)
+                                                       (request-path3d [cx cy cz] [mx my mz] 2.0)
+                                                       path-queue)]
+                                     (if-let [next-node (first active-path)]
+                                       (let [nx (+ (double (:x next-node)) 0.5)
+                                             ny (double (:y next-node))
+                                             nz (+ (double (:z next-node)) 0.5)
+                                             ndx (- nx cx)
+                                             ndz (- nz cz)
+                                             ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
+                                             nyaw (compute-yaw ndx ndz)]
+                                         (if (<= ndist 0.4)
+                                           (swap! nav-state #(-> %
+                                                                 (assoc :follow-path (vec (rest active-path)))
+                                                                 (assoc :follow-last-target [mx my mz])))
+                                           (let [step-d (min 0.28 (max 0.05 ndist))
+                                                 safe-ndist (max 0.001 ndist)
+                                                 step-x (+ cx (* (/ ndx safe-ndist) step-d))
+                                                 step-z (+ cz (* (/ ndz safe-ndist) step-d))]
+                                             (send-bridge-cmd!
+                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x ny step-z nyaw))
+                                             (swap! nav-state assoc :pos [step-x ny step-z] :yaw nyaw :follow-path active-path :follow-last-target [mx my mz]))))
+                                       (let [hdx (- (double mx) (double cx))
+                                             hdz (- (double mz) (double cz))
+                                             hyaw (compute-yaw hdx hdz)]
+                                         (send-bridge-cmd!
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz hyaw))
+                                         (swap! nav-state assoc :yaw hyaw)))
+                                     (swap! engine-ctx-atom assoc
+                                            :tick tick
+                                            :leases {:legs {:owner :combat-intercept} :hands nil :gaze {:owner :combat-intercept}}
+                                            :agents {:karlach (make-karlach-card "🏹 interceptando hostil" (:pos @nav-state))
+                                                     :picard  picard-card}))
+
+                                   :remain-mounted-passive
+                                   (do
+                                     (send-bridge-cmd!
+                                      (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                                     (swap! engine-ctx-atom assoc
+                                            :tick tick
+                                            :leases {:legs nil :hands nil :gaze {:owner :passenger-look}}
+                                            :agents {:karlach (make-karlach-card "⛵ navegando embarcada com você" (:pos @nav-state))
+                                                     :picard  picard-card}))
+
+                                   ;; Default: :tether-snap-recall ou :follow-player
+                                   (do
+                                     (if (and (<= dist 2.6) (not= (:action decision) :tether-snap-recall))
+                                       (do
+                                         (send-bridge-cmd!
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                                         (swap! nav-state assoc :yaw yaw :follow-path []))
+                                       (let [path-queue (:follow-path st [])
+                                             last-target (or (:follow-last-target st) [0.0 0.0 0.0])
+                                             target-moved? (> (+ (Math/abs (- (double tx) (double (or (first last-target) 0.0))))
+                                                                 (Math/abs (- (double tz) (double (or (nth last-target 2 nil) 0.0)))))
+                                                              3.0)
+                                             active-path (if (or (empty? path-queue) target-moved?)
+                                                           (request-path3d [cx cy cz] [tx ty tz] 2.2)
+                                                           path-queue)]
+                                         (if-let [next-node (first active-path)]
+                                           (let [nx (+ (double (:x next-node)) 0.5)
+                                                 ny (double (:y next-node))
+                                                 nz (+ (double (:z next-node)) 0.5)
+                                                 act (:action next-node)
+                                                 ndx (- nx cx)
+                                                 ndz (- nz cz)
+                                                 ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
+                                                 nyaw (compute-yaw ndx ndz)]
+                                             (when (= act :TRAVERSE_PORTAL)
+                                               (let [pcoord [(:x next-node) (:y next-node) (:z next-node)]]
+                                                 (open-portal-at-coord! pcoord)
+                                                 (swap! nav-state assoc :opened-portal pcoord)))
+                                             (if (<= ndist 0.4)
+                                               (swap! nav-state #(-> %
+                                                                     (assoc :follow-path (vec (rest active-path)))
+                                                                     (assoc :follow-last-target [tx ty tz])))
+                                               (let [step-d (min 0.24 (max 0.05 ndist))
+                                                     safe-ndist (max 0.001 ndist)
+                                                     step-x (+ cx (* (/ ndx safe-ndist) step-d))
+                                                     step-z (+ cz (* (/ ndz safe-ndist) step-d))]
+                                                 (send-bridge-cmd!
+                                                  (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x ny step-z nyaw))
+                                                 (swap! nav-state assoc :pos [step-x ny step-z] :yaw nyaw :follow-path active-path :follow-last-target [tx ty tz]))))
+                                           ;; Sem caminho navegavel: gira na direcao do jogador e aguarda (NUNCA atravessa paredes!)
+                                           (do
+                                             (send-bridge-cmd!
+                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                                             (swap! nav-state assoc :yaw yaw)))))
+                                     (when-let [op-portal (:opened-portal @nav-state)]
+                                       (let [[ox _ oz] op-portal
+                                             pdist (Math/sqrt (+ (Math/pow (- cx (+ (double ox) 0.5)) 2)
+                                                                 (Math/pow (- cz (+ (double oz) 0.5)) 2)))]
+                                         (when (> pdist 2.2)
+                                           (close-portal-at-coord! op-portal)
+                                           (swap! nav-state assoc :opened-portal nil))))
+                                     (swap! engine-ctx-atom assoc
+                                            :tick tick
+                                            :leases {:legs {:owner :escort-player} :hands nil :gaze {:owner :social-gaze}}
+                                            :agents {:karlach (make-karlach-card (if (= (:action decision) :tether-snap-recall)
+                                                                                   (str "⚡ retornando ao líder (tether snap)")
+                                                                                   (if (= (:mode st) :bodyguard) (str "🛡️ guarda-costas de " (:name target-p)) (str "escoltando " (:name target-p))))
+                                                                                 (:pos @nav-state))
+                                                     :picard  picard-card})))))
                              ;; Debounce para evitar cancelamento por oscilação momentânea do socket
                              (let [lost-cnt (inc (:follow-lost-ticks st 0))]
                                (if (>= lost-cnt 60)
