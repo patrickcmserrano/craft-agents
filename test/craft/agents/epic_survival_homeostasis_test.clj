@@ -151,4 +151,14 @@
         (let [drop-res (fabric/drop-inventory-items! "Karlach" "all")]
           (is (= 6 (:dropped-count drop-res)))
           (is (= 4 (get-in drop-res [:items "minecraft:raw_iron"])))
-          (is (= 2 (get-in drop-res [:items "minecraft:coal"]))))))))
+          (is (= 2 (get-in drop-res [:items "minecraft:coal"])))))
+
+    (testing "drop-inventory-items! com 'all' ou 'tudo' ejeta ferramentas, armas e armaduras sem reter itens valiosos dos jogadores"
+      (with-redefs [fabric/send-bridge-cmd! (fn [cmd]
+                                              (if (.startsWith cmd "DROP_ITEMS|Karlach|all")
+                                                "OK|3|minecraft:diamond_sword,1;minecraft:netherite_pickaxe,2"
+                                                "OK|0|"))]
+        (let [drop-res (fabric/drop-inventory-items! "Karlach" "all")]
+          (is (= 3 (:dropped-count drop-res)))
+          (is (= 1 (get-in drop-res [:items "minecraft:diamond_sword"])))
+          (is (= 2 (get-in drop-res [:items "minecraft:netherite_pickaxe"])))))))))

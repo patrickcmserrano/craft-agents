@@ -99,6 +99,21 @@ public final class SyntheticInventoryManager {
                 }
                 if (cannotPickup) continue;
 
+                // Não coleta itens dropados por jogadores humanos (ex: troca de itens entre jogadores)
+                try {
+                    Object thrower = null;
+                    try {
+                        thrower = e.getClass().getMethod("method_57388").invoke(e); // getThrower()
+                    } catch (Throwable ignored) {
+                        try {
+                            thrower = e.getClass().getMethod("getThrower").invoke(e);
+                        } catch (Throwable ignored2) {}
+                    }
+                    if (thrower != null) {
+                        continue;
+                    }
+                } catch (Throwable ignored) {}
+
                 Object stack = null;
                 try {
                     stack = e.getClass().getMethod("method_6983").invoke(e); // getStack
@@ -302,13 +317,15 @@ public final class SyntheticInventoryManager {
                 Object idObj = getIdMethod.invoke(itemReg, itemObj);
                 String itemId = idObj != null ? idObj.toString() : "";
 
-                // Não dropa ferramentas, armas, armaduras ou equipamentos essenciais
-                if (itemId.contains("pickaxe") || itemId.contains("axe") || itemId.contains("sword")
-                        || itemId.contains("shovel") || itemId.contains("hoe") || itemId.contains("shield")
-                        || itemId.contains("mace") || itemId.contains("bow") || itemId.contains("helmet")
-                        || itemId.contains("chestplate") || itemId.contains("leggings") || itemId.contains("boots")
-                        || itemId.contains("totem")) {
-                    continue;
+                // Não dropa ferramentas, armas, armaduras ou equipamentos essenciais a menos que solicitado com all/tudo/force_all
+                if (!"all".equals(targetFilter) && !"tudo".equals(targetFilter) && !"force_all".equals(targetFilter) && !"gear".equals(targetFilter)) {
+                    if (itemId.contains("pickaxe") || itemId.contains("axe") || itemId.contains("sword")
+                            || itemId.contains("shovel") || itemId.contains("hoe") || itemId.contains("shield")
+                            || itemId.contains("mace") || itemId.contains("bow") || itemId.contains("helmet")
+                            || itemId.contains("chestplate") || itemId.contains("leggings") || itemId.contains("boots")
+                            || itemId.contains("totem")) {
+                        continue;
+                    }
                 }
 
                 boolean matches = true;

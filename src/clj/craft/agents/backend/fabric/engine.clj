@@ -276,10 +276,6 @@
                           (uformat "CMD|particle minecraft:smoke %.2f %.2f %.2f 0.15 0.25 0.15 0.01 2 normal"
                                   kx (+ ky 1.2) kz))))
 
-                     ;; Coleta passiva de drops a 2Hz (a cada 10 ticks = 500ms num raio de 5.0m, pausando 5s apos drop)
-                     (when (and (zero? (mod tick 10))
-                                (> (- (System/currentTimeMillis) @last-drop-ms) 5000))
-                       (collect-nearby-drops! "Karlach" 5.0))
 
                      (let [st @nav-state
                            [cx cy cz] (:pos st)
