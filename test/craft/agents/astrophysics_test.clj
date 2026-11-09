@@ -316,3 +316,12 @@
       (is (< (:atmospheric-transmittance photo-sunset) 0.50) "No crepúsculo a extinção de Rayleigh deve reduzir a transmitância")
       (is (vector? (:chromaticity-rgb photo-sunset))))))
 
+(deftest test-stratospheric-mist-properties
+  (testing "CA-053: Parâmetros analíticos da bruma estratosférica etérea translúcida"
+    (let [mist (ephem/stratospheric-mist-state 6000)]
+      (is (= 24.5 (:altitude-km mist)))
+      (is (= :wispy-cirrus (:classification mist)))
+      (is (<= 0.70 (:translucency mist) 0.95) "A bruma deve ser altamente translúcida para não tampar astros")
+      (is (<= 0.10 (:optical-thickness mist) 0.35) "Espessura óptica deve manter estrelas e planetas visíveis"))))
+
+

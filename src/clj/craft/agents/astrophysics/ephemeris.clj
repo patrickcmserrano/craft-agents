@@ -167,3 +167,15 @@
      :atmospheric-transmittance   (double trans)
      :chromaticity-rgb            chroma}))
 
+(defn stratospheric-mist-state
+  "Propriedades analíticas da bruma estratosférica etérea translúcida (cirros não-obstrutivos)."
+  [world-time]
+  (let [wave (Math/sin (* 2.0 Math/PI (/ (double world-time) 12000.0)))
+        trans (+ 0.82 (* 0.06 wave))
+        tau   (- 1.0 trans)]
+    {:altitude-km       24.5
+     :classification    :wispy-cirrus
+     :translucency      (double trans)
+     :optical-thickness (double tau)}))
+
+

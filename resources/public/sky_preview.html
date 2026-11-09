@@ -400,6 +400,37 @@
         return (sunDisc + innerCoronaColor + outerCoronaColor + spikeColor) * extinctionTint * visFactor;
     }
 
+
+    // ============================================================================
+    // 6. BRUMA / NÉVOA ESTRATOSFÉRICA ETÉREA (Cirros Finos Não-Obstrutivos)
+    // ============================================================================
+    vec4 renderEtherealMist(vec3 rd) {
+        if (rd.y < 0.02) return vec4(0.0);
+        float h = 1.0 / max(0.04, rd.y);
+        vec2 cloudPos = rd.xz * h;
+        vec2 wind = vec2(uTime * 0.015, uTime * 0.006);
+        vec2 uv = cloudPos * 0.055 + wind;
+
+        float warp = noise3D(vec3(uv * 0.7, uTime * 0.008));
+        vec2 warpedUV = uv + vec2(warp * 0.45, -warp * 0.35);
+
+        float n1 = noise3D(vec3(warpedUV * 1.8, 1.4));
+        float n2 = noise3D(vec3(warpedUV * 4.2 + vec2(n1 * 0.6), 2.8));
+        float mistDensity = n1 * 0.65 + n2 * 0.35;
+
+        float cirrusMask = smoothstep(0.48, 0.78, mistDensity);
+        if (cirrusMask < 0.005) return vec4(0.0);
+
+        float horizonFade = smoothstep(0.02, 0.18, rd.y);
+        float alpha = cirrusMask * 0.22 * horizonFade;
+
+        float cosSun = dot(rd, normalize(uSunDir));
+        float forwardScatter = pow(max(0.0, cosSun), 5.0) * 0.65;
+        vec3 mistColor = mix(vec3(0.85, 0.94, 0.95), vec3(1.0, 0.98, 0.90), forwardScatter);
+
+        return vec4(mistColor, alpha);
+    }
+
     vec4 renderGasGiantAndRings(vec3 rd) {
         vec3 center = normalize(uGiantDir) * 4.0;
         float planetR = 0.62;
@@ -516,6 +547,10 @@
         // 3. Gigante Gasoso e Anéis
         vec4 giantLayer = renderGasGiantAndRings(rd);
         skyColor = mix(skyColor, giantLayer.rgb, giantLayer.a * smoothstep(-0.08, 0.04, rd.y));
+
+        // 3.5. Bruma Estratosférica Etérea Translúcida
+        vec4 mist = renderEtherealMist(rd);
+        skyColor = mix(skyColor, mist.rgb, mist.a);
 
         // 4. Tonemapping ACES Filmic
         skyColor = (skyColor * (2.51 * skyColor + 0.03)) / (skyColor * (2.43 * skyColor + 0.59) + 0.14);
