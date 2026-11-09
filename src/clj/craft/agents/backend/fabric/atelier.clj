@@ -262,6 +262,36 @@
           (say-fn :richeh (rand-nth (get-in @richeh-data [:agent/dialogues :reactions :near-coco]
                                             ["Hmph. Seu traço melhorou um pouquinho hoje, Coco... mas só um pouquinho."]))))))))
 
+(defn check-celestial-reaction!
+  "Reage a eventos celestes raros (eclipses, auroras ou alinhamento do gigante gasoso) (CA-052)."
+  [coco-st richeh-st celestial-snapshot send-cmd! say-fn]
+  (let [phenomenon (:phenomenon celestial-snapshot :nominal)
+        now (System/currentTimeMillis)]
+    (when (and (not= phenomenon :nominal)
+               (> (- now (:last-celestial-ms @coco-st 0)) 45000))
+      (swap! coco-st assoc :last-celestial-ms now)
+      (let [[cx cy cz] (:pos @coco-st)
+            [rx ry rz] (:pos @richeh-st)
+            [gx gy gz] (get-in celestial-snapshot [:gas-giant :vector] [0.0 0.8 0.6])
+            pitch (float (* (Math/asin (- gy)) (/ 180.0 Math/PI)))
+            yaw   (float (* (Math/atan2 (- gx) gz) (/ 180.0 Math/PI)))]
+        (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" cx cy cz yaw pitch))
+        (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" rx ry rz yaw pitch))
+        (send-cmd! "SWING|Coco")
+        (send-cmd! "SWING|Richeh")
+        (case phenomenon
+          :solar-eclipse
+          (do
+            (send-cmd! "CMD|execute at Coco run particle minecraft:witch ~ ~1.8 ~ 0.4 0.4 0.4 0.05 15 normal")
+            (say-fn :coco (rand-nth (get-in @coco-data [:agent/dialogues :celestial]
+                                            ["O gigante com anéis cobriu o sol! As sombras ficaram duplas! 🪐✨"]))))
+          :crystal-aurora
+          (do
+            (send-cmd! "CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.8 ~ 0.5 0.5 0.5 0.08 20 normal")
+            (say-fn :richeh (rand-nth (get-in @richeh-data [:agent/dialogues :celestial]
+                                              ["Olha a refração naquelas cortinas de luz no céu, Coco! 🔮"]))))
+          nil)))))
+
 ;; =============================================================================
 ;; Manipulação de Comandos de Chat para o Ateliê
 ;; =============================================================================
@@ -287,10 +317,20 @@
           (say-fn :coco "Entendido! Vou continuar mapeando os fluxos e runas aqui pelo castelo! 🖋️")
           true)
 
+        (or (str/includes? lower "céu") (str/includes? lower "ceu")
+            (str/includes? lower "estrela") (str/includes? lower "eclipse")
+            (str/includes? lower "planeta") (str/includes? lower "aurora"))
+        (do
+          (let [dialogues (get-in @coco-data [:agent/dialogues :celestial] [])
+                chosen (if (seq dialogues) (rand-nth dialogues) "A geometria dos céus desafia qualquer caderno de desenho! 🌌")]
+            (say-fn :coco chosen))
+          true)
+
         :else
         (do
           (let [dialogues (concat (get-in @coco-data [:agent/dialogues :social] [])
-                                  (get-in @coco-data [:agent/dialogues :castles] []))
+                                  (get-in @coco-data [:agent/dialogues :castles] [])
+                                  (get-in @coco-data [:agent/dialogues :celestial] []))
                 chosen (if (seq dialogues) (rand-nth dialogues) "A magia nasce do desejo de ajudar os outros! ✨")]
             (say-fn :coco chosen))
           true))
@@ -311,10 +351,20 @@
           (say-fn :richeh "Melhor mesmo. Preciso terminar de polir as matrizes de cristal ao redor do ateliê.")
           true)
 
+        (or (str/includes? lower "céu") (str/includes? lower "ceu")
+            (str/includes? lower "estrela") (str/includes? lower "eclipse")
+            (str/includes? lower "planeta") (str/includes? lower "aurora"))
+        (do
+          (let [dialogues (get-in @richeh-data [:agent/dialogues :celestial] [])
+                chosen (if (seq dialogues) (rand-nth dialogues) "Se a refração daquelas luzes no céu alinhar com o cristal, o feitiço não dissipa nunca. 🔮")]
+            (say-fn :richeh chosen))
+          true)
+
         :else
         (do
           (let [dialogues (concat (get-in @richeh-data [:agent/dialogues :social] [])
-                                  (get-in @richeh-data [:agent/dialogues :castles] []))
+                                  (get-in @richeh-data [:agent/dialogues :castles] [])
+                                  (get-in @richeh-data [:agent/dialogues :celestial] []))
                 chosen (if (seq dialogues) (rand-nth dialogues) "Eu só desenho a magia que tem o meu próprio traço.")]
             (say-fn :richeh chosen))
           true))

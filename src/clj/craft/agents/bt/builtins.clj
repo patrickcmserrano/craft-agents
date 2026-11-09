@@ -30,6 +30,16 @@
     :run-blackboard-directive
     {:status :success}
 
+    :gaze-at-celestial-body
+    (let [body-vec (get-in tick-ctx [:celestial :gas-giant :vector] [0.0 0.7071 0.7071])
+          [dx dy dz] body-vec
+          pitch (* (Math/asin (- dy)) (/ 180.0 Math/PI))
+          yaw   (* (Math/atan2 (- dx) dz) (/ 180.0 Math/PI))]
+      {:status :success
+       :leases [:gaze]
+       :yaw (float yaw)
+       :pitch (float pitch)})
+
     (:tether-follow-ally :crouch-and-inscribe :emote-sketch-notes
      :approach-and-sketch :ward-companion :evade-towards-ally :face-entity)
     {:status :success}

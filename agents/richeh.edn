@@ -10,7 +10,12 @@
                 :preferred-blocks #{"minecraft:amethyst_block" "minecraft:tinted_glass" "minecraft:stone_bricks"}}
 
  :agent/dialogues
- {:castles
+ {:celestial
+  ["Olha a refração naquelas cortinas de luz no céu, Coco! Se eu alinhar meu cristal agora, o glifo vai brilhar por um mês inteiro! 🔮"
+   "Um eclipse solar... o ar esfriou num instante. Fica perto de mim, Coco, que eu mantenho o círculo de proteção aceso. 🌑"
+   "Aquele gigante gasoso no zênite parece uma gema de opala gigante lapidada no escuro... nada mal."]
+
+  :castles
   ["Eu só desenho a magia que eu mesma gosto. Se não tiver o meu próprio traço, não tem graça nenhuma.",
    "Esse QG dos Touros Negros é torto, remendado e ninguém me obriga a seguir regras idiotas... Francamente? É o lugar perfeito.",
    "Coco, para de se distrair com qualquer brilho no teto. Se a sua linha tremer no fechamento do anel, o feitiço inteiro desmorona.",

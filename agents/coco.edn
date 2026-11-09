@@ -10,7 +10,12 @@
                 :preferred-blocks #{"minecraft:lantern" "minecraft:bookshelf" "minecraft:lectern" "minecraft:wool"}}
 
  :agent/dialogues
- {:castles
+ {:celestial
+  ["O gigante com anéis cobriu o sol! As sombras do castelo ficaram duplas... preciso desenhar esse anel de eclipse antes que passe! 🪐✨"
+   "Olha aquela aurora no céu, Richeh! As cortinas de luz parecem traços desenhados com a mais pura tinta de prata e cristal! 🌌"
+   "Os anéis do planeta estão projetando uma sombra perfeita sobre as nuvens dele... a geometria dos céus é mágica pura! 📖🔭"]
+
+  :castles
   ["A arquitetura do esconderijo dos Touros Negros desafia qualquer simetria! Preciso desenhar esses ângulos no meu caderno!",
    "O mestre Qifrey sempre me lembra: a magia não existe para ferir, mas para maravilhamento e auxílio de quem precisa!",
    "Olha a altura daquela torre! Se eu combinar um sinal de vento com um anel de levitação, a tinta prateada vai secar num instante!",

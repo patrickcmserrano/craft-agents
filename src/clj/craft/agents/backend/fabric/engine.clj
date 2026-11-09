@@ -26,6 +26,7 @@
              :refer [global-command-dispatcher record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport
              :refer [bridge-alive? send-bridge-cmd! uformat]]
+            [craft.agents.astrophysics.ephemeris :as ephem]
             [craft.agents.cognition.critic :as critic])
   (:import [java.io RandomAccessFile]
            [java.nio.charset StandardCharsets]))
@@ -279,6 +280,12 @@
                                                          (if (= who :coco)
                                                            (atelier/coco-say! text)
                                                            (atelier/richeh-say! text))))
+                         (let [cel (ephem/compute-celestial-state (mod tick 24000))]
+                           (atelier/check-celestial-reaction! coco-state richeh-state cel send-bridge-cmd!
+                                                              (fn [who text]
+                                                                (if (= who :coco)
+                                                                  (atelier/coco-say! text)
+                                                                  (atelier/richeh-say! text)))))
                          (catch Throwable t
                            (println "[craft-agents-atelier-ERROR]" (.getMessage t)))))
 
