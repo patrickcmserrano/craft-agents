@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌌 Céu Colossal Procedural — WebGL2 (CA-053)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Segoe UI', system-ui, sans-serif; color: #e2e8f0; }
+        #skyCanvas { width: 100vw; height: 100vh; display: block; cursor: grab; }
+        #skyCanvas:active { cursor: grabbing; }
+
+        .hud-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(15, 23, 42, 0.82);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+            max-width: 380px;
+            pointer-events: auto;
+            user-select: none;
+            z-index: 10;
+        }
+
+        .hud-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #a855f7, #38bdf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .badge {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 4px;
+            color: #38bdf8;
+            font-weight: 600;
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px 14px;
+            font-size: 0.82rem;
+            margin-top: 10px;
+        }
+
+        .stat-label { color: #94a3b8; }
+        .stat-val { font-family: 'JetBrains Mono', monospace; color: #f1f5f9; text-align: right; }
+
+        .cam-controls {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(148, 163, 184, 0.15);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .cam-select {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            outline: none;
+        }
+
+        .fps-badge {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(15, 23, 42, 0.75);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #4ade80;
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            pointer-events: none;
+        }
+
+        .instructions {
+            margin-top: 10px;
+            font-size: 0.74rem;
+            color: #64748b;
+            line-height: 1.3;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="skyCanvas"></canvas>
+
+    <div class="hud-overlay">
+        <div class="hud-title">
+            <span>🌌 Céu Colossal Procedural</span>
+            <span class="badge">WebGL2 Core</span>
+        </div>
+        <div style="font-size: 0.78rem; color: #94a3b8;">Shader: <code>colossal_galaxy_sky</code> (OpenGL 3.3 / WebGL2)</div>
+
+        <div class="stat-grid">
+            <span class="stat-label">Hora Solar:</span>
+            <span class="stat-val" id="valClock">--:--</span>
+
+            <span class="stat-label">Fenômeno:</span>
+            <span class="stat-val" id="valPhenomenon" style="color: #c084fc;">Nominal</span>
+
+            <span class="stat-label">Gigante Gasoso:</span>
+            <span class="stat-val" id="valGiantPhase">Carregando...</span>
+
+            <span class="stat-label">Aurora Boreal:</span>
+            <span class="stat-val" id="valAurora">0.0%</span>
+
+            <span class="stat-label">Obscuração Solar:</span>
+            <span class="stat-val" id="valEclipse">0.0%</span>
+
+            <span class="stat-label">Direção Olhar:</span>
+            <span class="stat-val" id="valCamAngle">0° / 0°</span>
+        </div>
+
+        <div class="cam-controls">
+            <label style="font-size: 0.78rem; color: #94a3b8;">Câmera de Observação:</label>
+            <select id="camSelect" class="cam-select">
+                <option value="free">🖱️ Livre (Arrastar com Mouse)</option>
+                <option value="karlach">⚔️ Karlach (Gaze Tracker)</option>
+                <option value="coco">🦉 Coco (Ateliê Witch Hat)</option>
+                <option value="richeh">💎 Richeh (Guardiã Cristalina)</option>
+            </select>
+            <div class="instructions">
+                • <b>Arrastar:</b> Rotaciona a abóbada em 360°<br>
+                • <b>Scroll:</b> Ajusta campo de visão (FOV)<br>
+                • <b>Sincronia:</b> Conectado a <code>ephemeris.clj</code> via WebSocket/API
+            </div>
+        </div>
+    </div>
+
+    <div class="fps-badge" id="fpsCounter">60 FPS</div>
+
+    <script id="vs-source" type="x-shader/x-vertex">#version 300 es
+    in vec2 aPos;
+    out vec2 vUV;
+    void main() {
+        vUV = aPos;
+        gl_Position = vec4(aPos, 0.0, 1.0);
+    }
+    </script>
+
+    <script id="fs-source" type="x-shader/x-fragment">#version 300 es
+    precision highp float;
+
+    in vec2 vUV;
+    out vec4 FragColor;
+
+    uniform float uTime;
+    uniform vec3  uSunDir;
+    uniform vec3  uGiantDir;
+    uniform vec3  uRingNormal;
+    uniform float uAuroraIntensity;
+    uniform float uEclipseFactor;
+    uniform vec2  uResolution;
+    uniform float uYaw;
+    uniform float uPitch;
+    uniform float uFov;
+
+    const float PI = 3.14159265359;
+
+    // ============================================================================
+    // PRIMITIVAS DE RUÍDO FRACTAL & DOMAIN WARP (colossal_galaxy_sky)
+    // ============================================================================
+    float hash31(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+    }
+
+    float noise3D(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+
+        return mix(
+            mix(mix(hash31(i + vec3(0,0,0)), hash31(i + vec3(1,0,0)), f.x),
+                mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), f.x), f.y),
+            mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), f.x),
+                mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), f.x), f.y),
+            f.z
+        );
+    }
+
+    float fbm(vec3 p) {
+        float v = 0.0;
+        float amp = 0.5;
+        mat3 rot = mat3(0.00,  0.80,  0.60,
+                       -0.80,  0.36, -0.48,
+                       -0.60, -0.48,  0.64);
+        for (int i = 0; i < 5; i++) {
+            v += amp * noise3D(p);
+            p = rot * p * 2.03 + vec3(13.7, 7.1, 3.3);
+            amp *= 0.5;
+        }
+        return v;
+    }
+
+    // ============================================================================
+    // CAMPO ESTELAR FOTOMÉTRICO (Diagrama HR + Planck)
+    // ============================================================================
+    vec3 blackbodyColor(float h) {
+        if (h < 0.55) return mix(vec3(1.0, 0.38, 0.18), vec3(1.0, 0.72, 0.45), h / 0.55);
+        if (h < 0.85) return mix(vec3(1.0, 0.72, 0.45), vec3(0.95, 0.97, 1.0), (h - 0.55) / 0.30);
+        return mix(vec3(0.95, 0.97, 1.0), vec3(0.45, 0.75, 1.0), (h - 0.85) / 0.15);
+    }
+
+    vec3 renderPhotometricStarfield(vec3 rd) {
+        vec3 stars = vec3(0.0);
+        for (int layer = 0; layer < 2; layer++) {
+            float scale = (layer == 0) ? 95.0 : 42.0;
+            vec3 p = rd * scale;
+            vec3 id = floor(p);
+            vec3 f = fract(p) - 0.5;
+
+            float rnd = hash31(id + float(layer) * 71.3);
+            if (rnd > 0.65) {
+                vec3 offset = (vec3(hash31(id + 1.0), hash31(id + 2.0), hash31(id + 3.0)) - 0.5) * 0.65;
+                float d = length(f - offset);
+                float mag = pow((rnd - 0.65) / 0.35, 3.0);
+                float radius = (layer == 0) ? 0.045 : 0.085;
+
+                float horizonFactor = clamp(1.0 - rd.y, 0.2, 1.0);
+                float twinkle = 0.75 + 0.25 * sin(uTime * 18.0 * horizonFactor + rnd * 62.8);
+
+                float core = smoothstep(radius, 0.0, d) * mag * twinkle;
+                float halo = exp(-d * ((layer == 0) ? 18.0 : 9.0)) * mag * 0.45;
+                vec3 col = blackbodyColor(hash31(id + 9.7));
+                stars += col * (core * 2.2 + halo);
+            }
+        }
+        return stars;
+    }
+
+    // ============================================================================
+    // GALÁXIA ESPIRAL COLOSSAL (Braços Logarítmicos + Poeira + H-Alpha 656nm)
+    // ============================================================================
+    vec3 renderColossalGalaxy(vec3 rd) {
+        vec3 galCenter = normalize(vec3(-0.45, 0.58, -0.67));
+        vec3 galUp     = normalize(vec3(0.52, 0.74, 0.42));
+        vec3 galRight  = normalize(cross(galCenter, galUp));
+        vec3 galFwd    = cross(galUp, galRight);
+
+        float planeDenom = dot(rd, galUp);
+        float gx = dot(rd - galCenter, galRight) * 2.1;
+        float gy = dot(rd - galCenter, galFwd) * 0.85;
+
+        float r = length(vec2(gx, gy));
+        if (r > 1.65) return vec3(0.0);
+
+        float theta = atan(gy, gx) + uTime * 0.015;
+        float twist = 4.2 * log(max(r, 0.025));
+        float armPhase1 = cos(2.0 * (theta - twist));
+        float armPhase2 = cos(4.0 * (theta - twist * 0.85) + 1.2);
+
+        vec3 noiseCoord = vec3(gx * 3.5, gy * 3.5, theta * 0.5);
+        float warp = fbm(noiseCoord + fbm(noiseCoord * 1.8));
+
+        float armDensity = smoothstep(-0.3, 0.85, armPhase1 * 0.7 + armPhase2 * 0.3 + (warp - 0.5) * 0.9);
+        float radialFalloff = exp(-r * 2.35) * (1.0 - smoothstep(1.1, 1.6, r));
+        float diskEnvelope = armDensity * radialFalloff;
+
+        float bulge = exp(-r * 7.5) * 1.65 + exp(-r * 2.8) * 0.45;
+        vec3 bulgeColor = vec3(1.0, 0.88, 0.68) * bulge;
+
+        vec3 armStarColor = mix(vec3(0.28, 0.58, 1.0), vec3(0.65, 0.42, 0.95), warp) * diskEnvelope * 1.35;
+
+        float hAlphaNoise = smoothstep(0.54, 0.78, fbm(vec3(gx * 8.0, gy * 8.0, 2.1)));
+        float hAlphaZones = hAlphaNoise * smoothstep(0.2, 0.9, armPhase1) * radialFalloff;
+        vec3 hAlphaColor  = vec3(1.0, 0.18, 0.55) * hAlphaZones * 2.4;
+
+        float dustRidge = 1.0 - abs(2.0 * fbm(vec3(gx * 5.2 + warp * 0.4, gy * 5.2 - warp * 0.4, 4.7)) - 1.0);
+        float dustMask  = smoothstep(0.55, 0.92, pow(dustRidge, 2.2)) * exp(-r * 1.4);
+        float transmittance = mix(1.0, 0.12, dustMask);
+
+        vec3 galaxyRgb = (bulgeColor + armStarColor + hAlphaColor) * transmittance;
+        galaxyRgb += vec3(0.45, 0.22, 0.35) * dustMask * bulge * 0.35;
+
+        return max(galaxyRgb, vec3(0.0));
+    }
+
+    // ============================================================================
+    // AURORAS VOLUMÉTRICAS EM CORTINAS (Raymarching)
+    // ============================================================================
+    vec3 renderVolumetricAurora(vec3 rd) {
+        if (rd.y <= 0.02 || uAuroraIntensity <= 0.01) return vec3(0.0);
+
+        vec3 accColor = vec3(0.0);
+        const int STEPS = 14;
+        for (int i = 0; i < STEPS; i++) {
+            float fi = float(i) / float(STEPS);
+            float height = 1.0 + fi * 0.85;
+            vec2 uv = rd.xz / (rd.y + 0.18) * height;
+
+            float wave = sin(uv.x * 3.2 + uTime * 0.35 + fbm(vec3(uv * 1.4, uTime * 0.1)) * 4.5);
+            float curtain = exp(-abs(wave) * 5.5) * smoothstep(0.02, 0.35, rd.y) * (1.0 - smoothstep(0.55, 0.95, rd.y));
+
+            vec3 auroraTint = mix(vec3(0.10, 0.95, 0.52), vec3(0.68, 0.22, 0.95), fi);
+            accColor += auroraTint * curtain * (1.0 - fi * 0.5) * 0.14;
+        }
+        return accColor * uAuroraIntensity;
+    }
+
+    // ============================================================================
+    // GIGANTE GASOSO + ANÉIS COM AUTO-SOMBREAMENTO ANALÍTICO
+    // ============================================================================
+    float ringShadowAtPoint(vec3 localPos, vec3 lightDir, vec3 ringN, float rInner, float rOuter) {
+        float denom = dot(lightDir, ringN);
+        if (abs(denom) < 1e-4) return 1.0;
+        float t = -dot(localPos, ringN) / denom;
+        if (t <= 0.0) return 1.0;
+
+        vec3 hit = localPos + lightDir * t;
+        float d = length(hit);
+        if (d >= rInner && d <= rOuter) {
+            float u = (d - rInner) / (rOuter - rInner);
+            float cassini = smoothstep(0.05, 0.12, abs(u - 0.58));
+            float rings = (0.5 + 0.5 * sin(u * 52.0)) * (0.5 + 0.5 * sin(u * 190.0)) * cassini;
+            return mix(1.0, 0.18, rings);
+        }
+        return 1.0;
+    }
+
+    vec4 renderGasGiantAndRings(vec3 rd) {
+        vec3 center = normalize(uGiantDir) * 4.0;
+        float planetR = 0.62;
+        float rInner  = 0.86;
+        float rOuter  = 1.58;
+        vec3 ringN    = normalize(uRingNormal);
+        vec3 L        = normalize(uSunDir);
+
+        vec3 oc = -center;
+        float b = dot(oc, rd);
+        float c = dot(oc, oc) - planetR * planetR;
+        float h = b * b - c;
+        float tPlanet = (h > 0.0) ? (-b - sqrt(h)) : 1e9;
+        if (tPlanet <= 0.0) tPlanet = 1e9;
+
+        float denom = dot(rd, ringN);
+        float tRing = 1e9;
+        vec4 ringColor = vec4(0.0);
+
+        if (abs(denom) > 1e-4) {
+            float tr = dot(center, ringN) / denom;
+            if (tr > 0.0) {
+                vec3 hitLocal = (rd * tr) - center;
+                float dist = length(hitLocal);
+                if (dist >= rInner && dist <= rOuter) {
+                    tRing = tr;
+                    float u = (dist - rInner) / (rOuter - rInner);
+                    float cassini = smoothstep(0.03, 0.08, abs(u - 0.58));
+                    float bands = (0.55 + 0.45 * sin(u * 55.0)) * (0.6 + 0.4 * cos(u * 175.0));
+                    float alpha = bands * cassini * smoothstep(0.0, 0.08, u) * (1.0 - smoothstep(0.88, 1.0, u)) * 0.85;
+
+                    float projOnSun = dot(hitLocal, L);
+                    float distToShadowAxis = length(hitLocal - projOnSun * L);
+                    float planetShadow = (projOnSun < 0.0) ? smoothstep(planetR * 0.94, planetR * 1.03, distToShadowAxis) : 1.0;
+
+                    vec3 rCol = mix(vec3(0.55, 0.64, 0.75), vec3(0.85, 0.78, 0.68), bands) * (0.08 + 0.92 * planetShadow);
+                    ringColor = vec4(rCol, alpha);
+                }
+            }
+        }
+
+        vec4 planetColor = vec4(0.0);
+        if (tPlanet < 1e8) {
+            vec3 hitPos   = rd * tPlanet;
+            vec3 localPos = hitPos - center;
+            vec3 N        = normalize(localPos);
+
+            float lat = asin(clamp(N.y, -1.0, 1.0));
+            float lon = atan(N.z, N.x) + uTime * 0.08;
+            float zonalWarp = fbm(vec3(N * 4.5 + vec3(uTime * 0.05, 0.0, 0.0)));
+            float bandPattern = sin(lat * 18.0 + zonalWarp * 3.2);
+
+            vec3 cloudAlb = mix(vec3(0.22, 0.36, 0.52), vec3(0.82, 0.64, 0.48), smoothstep(-0.7, 0.7, bandPattern));
+            cloudAlb = mix(cloudAlb, vec3(0.45, 0.78, 0.85), smoothstep(0.55, 0.85, zonalWarp));
+
+            float NdotL = dot(N, L);
+            float daylight = smoothstep(-0.15, 0.25, NdotL);
+            float rShadow  = ringShadowAtPoint(localPos, L, ringN, rInner, rOuter);
+
+            float fresnel = pow(1.0 - max(dot(-rd, N), 0.0), 3.2);
+            vec3 rimGlow  = vec3(0.25, 0.82, 1.0) * fresnel * smoothstep(-0.35, 0.45, NdotL) * 1.4;
+
+            vec3 darkSide = cloudAlb * vec3(0.03, 0.05, 0.09);
+            vec3 finalPlanet = mix(darkSide, cloudAlb, daylight * rShadow) + rimGlow;
+            planetColor = vec4(finalPlanet, 1.0);
+        }
+
+        if (tPlanet < tRing) {
+            return planetColor;
+        } else if (tRing < 1e8) {
+            vec3 comp = mix(planetColor.rgb, ringColor.rgb, ringColor.a);
+            float compA = max(planetColor.a, ringColor.a);
+            return vec4(comp, compA);
+        }
+        return vec4(0.0);
+    }
+
+    void main() {
+        // Constrói vetor de raio rd a partir de UV, aspect ratio e rotações de câmera
+        float aspect = uResolution.x / uResolution.y;
+        vec2 p = vUV * vec2(aspect, 1.0) * tan(uFov * 0.5);
+        vec3 camRay = normalize(vec3(p.x, p.y, -1.0));
+
+        // Rotação Pitch (X) e Yaw (Y)
+        float cp = cos(uPitch), sp = sin(uPitch);
+        float cy = cos(uYaw),   sy = sin(uYaw);
+
+        mat3 rX = mat3(1.0, 0.0, 0.0,
+                       0.0,  cp,  -sp,
+                       0.0,  sp,   cp);
+        mat3 rY = mat3( cy, 0.0,  sy,
+                       0.0, 1.0, 0.0,
+                       -sy, 0.0,  cy);
+
+        vec3 rd = rY * rX * camRay;
+
+        // 1. Gradiente atmosférico de fundo
+        float horizon = exp(-max(rd.y, 0.0) * 5.5);
+        vec3 zenithCol  = vec3(0.02, 0.04, 0.09);
+        vec3 horizonCol = mix(vec3(0.22, 0.14, 0.28), vec3(0.65, 0.35, 0.25), horizon * 0.65);
+        vec3 skyColor   = mix(zenithCol, horizonCol, horizon);
+
+        // 2. Campo Estelar + Galáxia Colossal + Auroras
+        if (rd.y > -0.05) {
+            float horizonFade = smoothstep(-0.05, 0.08, rd.y);
+            skyColor += renderPhotometricStarfield(rd) * horizonFade;
+            skyColor += renderColossalGalaxy(rd) * horizonFade;
+            skyColor += renderVolumetricAurora(rd) * horizonFade;
+        }
+
+        // 3. Gigante Gasoso e Anéis
+        vec4 giantLayer = renderGasGiantAndRings(rd);
+        skyColor = mix(skyColor, giantLayer.rgb, giantLayer.a * smoothstep(-0.08, 0.04, rd.y));
+
+        // 4. Tonemapping ACES Filmic
+        skyColor = (skyColor * (2.51 * skyColor + 0.03)) / (skyColor * (2.43 * skyColor + 0.59) + 0.14);
+
+        FragColor = vec4(skyColor, 1.0);
+    }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('skyCanvas');
+        const gl = canvas.getContext('webgl2');
+        if (!gl) {
+            alert('Seu navegador não suporta WebGL2!');
+        }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Erro de compilação GLSL:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vs = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs-source').text.trim());
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs-source').text.trim());
+        const program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Erro no link do programa GLSL:', gl.getProgramInfoLog(program));
+        }
+
+        const quadGeo = new Float32Array([
+            -1.0, -1.0,
+             1.0, -1.0,
+            -1.0,  1.0,
+            -1.0,  1.0,
+             1.0, -1.0,
+             1.0,  1.0
+        ]);
+
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, quadGeo, gl.STATIC_DRAW);
+
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const aPosLoc = gl.getAttribLocation(program, 'aPos');
+        gl.enableVertexAttribArray(aPosLoc);
+        gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 0, 0);
+
+        // Uniform locations
+        const uTimeLoc        = gl.getUniformLocation(program, 'uTime');
+        const uSunDirLoc      = gl.getUniformLocation(program, 'uSunDir');
+        const uGiantDirLoc    = gl.getUniformLocation(program, 'uGiantDir');
+        const uRingNormalLoc  = gl.getUniformLocation(program, 'uRingNormal');
+        const uAuroraLoc      = gl.getUniformLocation(program, 'uAuroraIntensity');
+        const uEclipseLoc     = gl.getUniformLocation(program, 'uEclipseFactor');
+        const uResolutionLoc  = gl.getUniformLocation(program, 'uResolution');
+        const uYawLoc         = gl.getUniformLocation(program, 'uYaw');
+        const uPitchLoc       = gl.getUniformLocation(program, 'uPitch');
+        const uFovLoc         = gl.getUniformLocation(program, 'uFov');
+
+        let camera = {
+            yaw: -0.65,
+            pitch: 0.38,
+            fov: 1.15,
+            mode: 'free'
+        };
+
+        let uniforms = {
+            uTime: 0.0,
+            uSunDir: [-0.65, 0.35, 0.67],
+            uGiantDir: [0.48, 0.42, -0.77],
+            uRingNormal: [0.22, 0.91, -0.35],
+            uAuroraIntensity: 0.85,
+            uEclipseFactor: 0.0
+        };
+
+        let agents = {};
+
+        // Sincronização periódica com backend Studio (:8095)
+        async function fetchSkyTelemetry() {
+            try {
+                const res = await fetch('/api/sky/uniforms');
+                if (res.ok) {
+                    const data = await res.json();
+                    Object.assign(uniforms, data);
+                    document.getElementById('valAurora').textContent = (uniforms.uAuroraIntensity * 100).toFixed(1) + '%';
+                    document.getElementById('valEclipse').textContent = (uniforms.uEclipseFactor * 100).toFixed(1) + '%';
+                }
+            } catch (e) {}
+
+            try {
+                const statusRes = await fetch('/api/status');
+                if (statusRes.ok) {
+                    const st = await statusRes.json();
+                    if (st.weather) {
+                        document.getElementById('valClock').textContent = st.weather.clock || '12:00';
+                    }
+                    if (st.agents) {
+                        agents = st.agents;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        setInterval(fetchSkyTelemetry, 1000);
+        fetchSkyTelemetry();
+
+        // WebSocket para telemetria em tempo real
+        function connectWs() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(`${proto}//${location.host}/ws`);
+            ws.onmessage = (e) => {
+                try {
+                    const frame = JSON.parse(e.data);
+                    if (frame.agents) agents = frame.agents;
+                    if (frame.weather && frame.weather.clock) {
+                        document.getElementById('valClock').textContent = frame.weather.clock;
+                    }
+                } catch (_) {}
+            };
+            ws.onclose = () => setTimeout(connectWs, 3000);
+        }
+        connectWs();
+
+        // Mouse drag controls
+        let isDragging = false;
+        let lastX = 0, lastY = 0;
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', () => isDragging = false);
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging || camera.mode !== 'free') return;
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            lastX = e.clientX;
+            lastY = e.clientY;
+
+            camera.yaw   -= dx * 0.004;
+            camera.pitch -= dy * 0.004;
+            camera.pitch = Math.max(-1.5, Math.min(1.5, camera.pitch));
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            camera.fov += e.deltaY * 0.001;
+            camera.fov = Math.max(0.4, Math.min(2.1, camera.fov));
+            e.preventDefault();
+        });
+
+        document.getElementById('camSelect').addEventListener('change', (e) => {
+            camera.mode = e.target.value;
+        });
+
+        // Loop de Renderização a 60 FPS
+        let lastFrameTime = performance.now();
+        let frameCount = 0;
+        let fpsTimer = performance.now();
+
+        function render(now) {
+            const dt = (now - lastFrameTime) * 0.001;
+            lastFrameTime = now;
+            uniforms.uTime += dt * 0.8;
+
+            // Tracking de agentes se selecionado
+            if (camera.mode !== 'free' && agents[camera.mode]) {
+                const ag = agents[camera.mode];
+                if (typeof ag.yaw === 'number')   camera.yaw   = (ag.yaw * Math.PI) / 180.0;
+                if (typeof ag.pitch === 'number') camera.pitch = (-ag.pitch * Math.PI) / 180.0;
+            }
+
+            // Redimensionamento responsivo
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            }
+
+            gl.useProgram(program);
+            gl.bindVertexArray(vao);
+
+            gl.uniform1f(uTimeLoc, uniforms.uTime);
+            gl.uniform3fv(uSunDirLoc, uniforms.uSunDir);
+            gl.uniform3fv(uGiantDirLoc, uniforms.uGiantDir);
+            gl.uniform3fv(uRingNormalLoc, uniforms.uRingNormal);
+            gl.uniform1f(uAuroraLoc, uniforms.uAuroraIntensity);
+            gl.uniform1f(uEclipseLoc, uniforms.uEclipseFactor);
+            gl.uniform2f(uResolutionLoc, canvas.width, canvas.height);
+            gl.uniform1f(uYawLoc, camera.yaw);
+            gl.uniform1f(uPitchLoc, camera.pitch);
+            gl.uniform1f(uFovLoc, camera.fov);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // FPS Counter
+            frameCount++;
+            if (now - fpsTimer >= 500) {
+                const fps = Math.round((frameCount * 1000) / (now - fpsTimer));
+                document.getElementById('fpsCounter').textContent = fps + ' FPS';
+                frameCount = 0;
+                fpsTimer = now;
+            }
+
+            // Atualiza indicadores de HUD
+            const yawDeg = Math.round((camera.yaw * 180) / Math.PI) % 360;
+            const pitchDeg = Math.round((camera.pitch * 180) / Math.PI);
+            document.getElementById('valCamAngle').textContent = `${yawDeg}° / ${pitchDeg}°`;
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

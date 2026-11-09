@@ -1,0 +1,23 @@
+{
+    "blend": {
+        "func": "add",
+        "srcrgb": "srcalpha",
+        "dstrgb": "1-srcalpha"
+    },
+    "vertex": "colossal_galaxy_sky",
+    "fragment": "colossal_galaxy_sky",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [],
+    "uniforms": [
+        { "name": "ModelViewMat", "type": "matrix4x4", "count": 16, "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "ProjMat", "type": "matrix4x4", "count": 16, "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "uTime", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "uSunDir", "type": "float", "count": 3, "values": [ 0.0, 1.0, 0.0 ] },
+        { "name": "uGiantDir", "type": "float", "count": 3, "values": [ 0.0, 1.0, 0.0 ] },
+        { "name": "uRingNormal", "type": "float", "count": 3, "values": [ 0.22, 0.91, -0.35 ] },
+        { "name": "uAuroraIntensity", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "uEclipseFactor", "type": "float", "count": 1, "values": [ 0.0 ] }
+    ]
+}

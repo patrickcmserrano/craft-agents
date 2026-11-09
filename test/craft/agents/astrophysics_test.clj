@@ -9,9 +9,11 @@
             [craft.agents.bt.engine :as bt]
             [craft.agents.bt.builtins :as builtins]
             [craft.agents.backend.fabric.atelier :as atelier]
+            [craft.agents.studio.server :as studio]
             [clojure.edn :as edn]
+            [clojure.data.json :as json]
             [clojure.java.io :as io])
-  (:import [com.craft.agents.client.sky AlienSkyGeometry]))
+  (:import [com.craft.agents.client.sky AlienSkyGeometry ColossalGalaxySkyRenderer]))
 
 ;; =============================================================================
 ;; CA-050: Efemérides Determinísticas & SceneDigest
@@ -180,3 +182,121 @@
         (is (= [:gaze] (:leases action-res)))
         (is (< (:pitch action-res) 0.0) "Olhar para o céu requer pitch negativo (-Y)")
         (is (float? (:yaw action-res)))))))
+
+;; =============================================================================
+;; CA-053: Procedural Colossal Galaxy, Volumetric Auroras & Ringed Gas Giant GLSL Pipeline
+;; =============================================================================
+
+(deftest test-glsl-shader-assets-integrity
+  (testing "Integridade e completude dos shaders GLSL 330 Core do Céu Colossal"
+    ;; 1. Vertex shader
+    (let [vsh-file (io/file "resources/assets/craft_agents/shaders/core/colossal_galaxy_sky.vsh")]
+      (is (.exists vsh-file) "colossal_galaxy_sky.vsh deve existir no classpath")
+      (let [vsh (slurp vsh-file)]
+        (is (re-find #"#version 330 core" vsh))
+        (is (re-find #"out vec3 vWorldRay;" vsh))
+        (is (re-find #"gl_Position = ProjMat \* ModelViewMat \* vec4\(Position, 1\.0\);" vsh))))
+
+    ;; 2. Fragment shader
+    (let [fsh-file (io/file "resources/assets/craft_agents/shaders/core/colossal_galaxy_sky.fsh")]
+      (is (.exists fsh-file) "colossal_galaxy_sky.fsh deve existir no classpath")
+      (let [fsh (slurp fsh-file)]
+        (is (re-find #"#version 330 core" fsh))
+        (is (re-find #"renderColossalGalaxy" fsh) "Deve implementar equacao dos bracos espirais e H-Alpha")
+        (is (re-find #"renderGasGiantAndRings" fsh) "Deve implementar intersecao analitica raio-esfera/raio-plano")
+        (is (re-find #"renderVolumetricAurora" fsh) "Deve implementar raymarching de cortinas volumétricas")
+        (is (re-find #"renderPhotometricStarfield" fsh) "Deve implementar campo estelar fotometrico com cintilacao")
+        (is (re-find #"ringShadowAtPoint" fsh) "Deve calcular auto-sombreamento analitico dos aneis")
+        (is (re-find #"blackbodyColor" fsh) "Deve implementar aproximacao de corpo negro Planck")
+        (is (re-find #"uTime" fsh))
+        (is (re-find #"uSunDir" fsh))
+        (is (re-find #"uGiantDir" fsh))
+        (is (re-find #"uRingNormal" fsh))
+        (is (re-find #"uAuroraIntensity" fsh))
+        (is (re-find #"uEclipseFactor" fsh))))
+
+    ;; 3. Core shader JSON definition
+    (let [json-file (io/file "resources/assets/craft_agents/shaders/core/colossal_galaxy_sky.json")]
+      (is (.exists json-file) "colossal_galaxy_sky.json deve existir no classpath")
+      (let [parsed (json/read-str (slurp json-file) :key-fn keyword)]
+        (is (= "colossal_galaxy_sky" (:vertex parsed)))
+        (is (= "colossal_galaxy_sky" (:fragment parsed)))
+        (is (some #(= "uGiantDir" (:name %)) (:uniforms parsed)))
+        (is (some #(= "uRingNormal" (:name %)) (:uniforms parsed)))))))
+
+(deftest test-shader-uniform-payload-bounds-and-structure
+  (testing "ephem/shader-uniform-payload gera payload estritamente compatível com os uniforms GLSL"
+    (let [payload (ephem/shader-uniform-payload 6000 0.5)]
+      (is (map? payload))
+      (is (contains? payload :uTime))
+      (is (contains? payload :uSunDir))
+      (is (contains? payload :uGiantDir))
+      (is (contains? payload :uRingNormal))
+      (is (contains? payload :uAuroraIntensity))
+      (is (contains? payload :uEclipseFactor))
+
+      ;; Tipos e limites
+      (is (float? (:uTime payload)))
+      (is (pos? (:uTime payload)))
+      (is (= 3 (count (:uSunDir payload))))
+      (is (= 3 (count (:uGiantDir payload))))
+      (is (= 3 (count (:uRingNormal payload))))
+
+      ;; Vetores unitarios (magnitude ~ 1.0)
+      (doseq [k [:uSunDir :uGiantDir :uRingNormal]]
+        (let [[x y z] (get payload k)
+              mag (Math/sqrt (+ (* x x) (* y y) (* z z)))]
+          (is (< (Math/abs (- mag 1.0)) 1.0e-4) (str k " deve ser unitario"))))
+
+      ;; Limites de intensidade [0.0 .. 1.0]
+      (is (<= 0.0 (:uAuroraIntensity payload) 1.0))
+      (is (<= 0.0 (:uEclipseFactor payload) 1.0))
+
+      ;; Durante o dia (tick 6000), aurora deve ser 0.0
+      (is (= 0.0 (:uAuroraIntensity payload)))
+
+      ;; A meia-noite (tick 18000), sol abaixo do horizonte, aurora elegivel
+      (let [p-night (ephem/shader-uniform-payload 18000)]
+        (is (number? (:uAuroraIntensity p-night)))
+        (is (<= 0.0 (:uAuroraIntensity p-night) 1.0))))))
+
+(deftest test-colossal-galaxy-sky-renderer-uniforms-bridge
+  (testing "ColossalGalaxySkyRenderer sincroniza e retém uniforms astrofísicos"
+    (let [sun (float-array [-0.65 0.35 0.67])
+          giant (float-array [0.48 0.42 -0.77])
+          ring (float-array [0.22 0.91 -0.35])
+          aurora (float 0.85)
+          eclipse (float 0.15)]
+      (ColossalGalaxySkyRenderer/updateCelestialUniforms sun giant ring aurora eclipse)
+      (is (= (float -0.65) (aget (ColossalGalaxySkyRenderer/getSunDir) 0)))
+      (is (= (float 0.48) (aget (ColossalGalaxySkyRenderer/getGiantDir) 0)))
+      (is (= (float 0.22) (aget (ColossalGalaxySkyRenderer/getRingNorm) 0)))
+      (is (= (float 0.85) (ColossalGalaxySkyRenderer/getAuroraIntensity)))
+      (is (= (float 0.15) (ColossalGalaxySkyRenderer/getEclipseFactor))))))
+
+(deftest test-studio-sky-preview-route
+  (testing "Craft Agents Studio expoe /sky-preview (WebGL2) e /api/sky/uniforms"
+    (let [ctx (atom {:tick 1200
+                     :agents {:karlach {:yaw -45.0 :pitch -20.0}
+                              :coco    {:yaw 120.0 :pitch -40.0}
+                              :richeh  {:yaw 80.0  :pitch -15.0}}})
+          handler (studio/create-app-handler ctx)]
+      ;; 1. Rota HTML /sky-preview
+      (let [res (handler {:uri "/sky-preview" :request-method :get})]
+        (is (= 200 (:status res)))
+        (is (re-find #"text/html" (get-in res [:headers "Content-Type"])))
+        (is (re-find #"WebGL2" (:body res)))
+        (is (re-find #"colossal_galaxy_sky" (:body res)))
+        (is (re-find #"canvas id=\"skyCanvas\"" (:body res))))
+
+      ;; 2. Rota JSON /api/sky/uniforms
+      (let [res (handler {:uri "/api/sky/uniforms" :request-method :get})]
+        (is (= 200 (:status res)))
+        (is (re-find #"application/json" (get-in res [:headers "Content-Type"])))
+        (let [body (json/read-str (:body res) :key-fn keyword)]
+          (is (contains? body :uTime))
+          (is (contains? body :uSunDir))
+          (is (contains? body :uGiantDir))
+          (is (contains? body :uRingNormal))
+          (is (contains? body :uAuroraIntensity))
+          (is (contains? body :uEclipseFactor)))))))

@@ -4,6 +4,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [craft.agents.astrophysics.ephemeris :as ephem]
             [craft.agents.backend.fabric :as fabric]
             [craft.agents.cognition.semantic-router :as router]
             [org.httpkit.server :as http]))
@@ -47,6 +48,7 @@
      :skills    (load-skill-library)
      :players   online-players
      :weather   weather-info
+     :celestial (ephem/shader-uniform-payload (:tick ctx 6000))
      :inventory {:karlach karlach-inv}}))
 
 (defn- serve-file [path content-type]
@@ -71,6 +73,18 @@
 
         (= uri "/app.js")
         (serve-file "public/app.js" "application/javascript; charset=utf-8")
+
+        (= uri "/sky-preview")
+        (serve-file "public/sky_preview.html" "text/html; charset=utf-8")
+
+        (= uri "/api/sky/uniforms")
+        (let [ctx (if (instance? clojure.lang.IDeref engine-ctx) @engine-ctx engine-ctx)
+              tick (or (:tick ctx) 6000)
+              payload (ephem/shader-uniform-payload tick)]
+          {:status 200
+           :headers {"Content-Type" "application/json; charset=utf-8"
+                     "Access-Control-Allow-Origin" "*"}
+           :body (json/write-str payload)})
 
         (= uri "/api/status")
         {:status 200

@@ -125,3 +125,21 @@
      :eclipse-obscuration (double obscuration)
      :aurora-intensity    0.0
      :phenomenon          (if eclipse? :solar-eclipse :nominal)}))
+
+(defn shader-uniform-payload
+  "Formata o payload de uniforms f(world-time) para consumo direto pelo shader GLSL 330 / WebGL2 (CA-053)."
+  ([world-time] (shader-uniform-payload world-time 0.0))
+  ([world-time tick-delta]
+   (let [state      (compute-celestial-state world-time)
+         time-sec   (float (* (+ (double world-time) (double tick-delta)) 0.001))
+         sun-v      (mapv float (:sun-vector state))
+         giant-v    (mapv float (get-in state [:gas-giant :vector]))
+         ring-n     (mapv float (get-in state [:gas-giant :ring-normal]))
+         aurora-int (float (:aurora-intensity state))
+         eclipse-f  (float (:eclipse-obscuration state))]
+     {:uTime             time-sec
+      :uSunDir           sun-v
+      :uGiantDir         giant-v
+      :uRingNormal       ring-n
+      :uAuroraIntensity  aurora-int
+      :uEclipseFactor    eclipse-f})))
