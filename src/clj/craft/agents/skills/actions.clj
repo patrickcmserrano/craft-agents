@@ -66,7 +66,9 @@
    :action-id :passive-passenger-look})
 
 (defmethod execute-action :walk-towards-leader
-  [_action-id _action-args _ctx]
+  [_action-id _action-args ctx]
+  (when-let [nav-state (:nav-state ctx)]
+    (swap! nav-state assoc :swimming? false))
   {:status :success
    :action-id :walk-towards-leader})
 

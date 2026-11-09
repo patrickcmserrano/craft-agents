@@ -416,7 +416,11 @@ public final class SyntheticPlayerFactory {
                         player.getClass().getMethod("method_5660", boolean.class).invoke(player, sneak);
                         boolean inWater = false;
                         try {
-                            inWater = (Boolean) player.getClass().getMethod("method_5799").invoke(player);
+                            // method_5816 = isTouchingWater(), method_5869 = isSubmergedInWater()
+                            inWater = (Boolean) player.getClass().getMethod("method_5816").invoke(player);
+                            if (!inWater) {
+                                inWater = (Boolean) player.getClass().getMethod("method_5869").invoke(player);
+                            }
                         } catch (Throwable t1) {
                             try {
                                 inWater = (Boolean) player.getClass().getMethod("method_5869").invoke(player);
@@ -1194,6 +1198,12 @@ public final class SyntheticPlayerFactory {
                 Object pm = server.getClass().getMethod("method_3760").invoke(server);
                 Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
                 if (player != null) {
+                    try {
+                        player.getClass().getMethod("method_5796", boolean.class).invoke(player, false);
+                        Class<?> poseCls = Class.forName("net.minecraft.class_4050", true, cl);
+                        Object standPose = poseCls.getField("field_18076").get(null);
+                        player.getClass().getMethod("method_18380", poseCls).invoke(player, standPose);
+                    } catch (Throwable ignored) {}
                     return SyntheticSeatManager.stand(server, player, cl);
                 }
                 return "ERR|NO_PLAYER";

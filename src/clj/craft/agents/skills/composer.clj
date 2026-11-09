@@ -368,8 +368,8 @@
       (re-find #"desc[ae]|desembarc|sai[ar].*(?:barco|veiculo)|desmont" norm)
       [:action :dismount-vehicle {:speaker speaker}]
 
-      ;; Nado / Seguir nadando pela água
-      (re-find #"nad\w*|mergulh\w*|agua|água" norm)
+      ;; Nado / Seguir nadando pela água (somente ordens explícitas de nado/mergulho)
+      (re-find #"nad(?:e|ar|ando)|mergulh(?:e|ar|ando)|pular na [áa]gua" norm)
       [:action :swim-follow {:speaker speaker}]
 
       ;; Subir no barco específico
