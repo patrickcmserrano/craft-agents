@@ -548,9 +548,7 @@
         vec4 giantLayer = renderGasGiantAndRings(rd);
         skyColor = mix(skyColor, giantLayer.rgb, giantLayer.a * smoothstep(-0.08, 0.04, rd.y));
 
-        // 3.5. Bruma Estratosférica Etérea Translúcida
-        vec4 mist = renderEtherealMist(rd);
-        skyColor = mix(skyColor, mist.rgb, mist.a);
+        // Nuvens e bruma 100% desativadas (Céu Cósmico Limpo)
 
         // 4. Tonemapping ACES Filmic
         skyColor = (skyColor * (2.51 * skyColor + 0.03)) / (skyColor * (2.43 * skyColor + 0.59) + 0.14);
