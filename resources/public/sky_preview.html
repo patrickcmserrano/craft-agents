@@ -339,6 +339,67 @@
         return 1.0;
     }
 
+
+    // ============================================================================
+    // 5. ESTRELA PROCEDURAL ANALÍTICA (Limb Darkening, Corona e Espículas Ópticas)
+    // ============================================================================
+    vec3 renderProceduralSun(vec3 rd) {
+        vec3 sunDir = normalize(uSunDir);
+        float cosTheta = dot(rd, sunDir);
+        if (cosTheta < 0.70) return vec3(0.0);
+
+        float sunHorizonExtinction = smoothstep(-0.04, 0.04, sunDir.y);
+        float rayHorizonExtinction = smoothstep(-0.02, 0.05, rd.y);
+        float visFactor = sunHorizonExtinction * rayHorizonExtinction;
+        if (visFactor < 0.001) return vec3(0.0);
+
+        // Efeito de avermelhamento atmosférico de Rayleigh no crepúsculo
+        float sunsetFactor = smoothstep(0.22, -0.02, sunDir.y);
+        vec3 extinctionTint = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.42, 0.12), sunsetFactor);
+
+        // Raio angular aparente da estrela (~2.3 graus)
+        const float COS_SUN_RADIUS = 0.99920; // cos(0.040 rad)
+        vec3 sunDisc = vec3(0.0);
+
+        if (cosTheta > COS_SUN_RADIUS) {
+            float r = clamp(sqrt(max(0.0, (1.0 - cosTheta) / (1.0 - COS_SUN_RADIUS))), 0.0, 1.0);
+            float mu = sqrt(max(0.0, 1.0 - r * r));
+            float limbDarkening = 0.38 + 0.62 * pow(mu, 0.72);
+
+            vec3 coreColor = vec3(1.0, 0.98, 0.92);
+            vec3 limbColor = vec3(1.0, 0.68, 0.28);
+            vec3 photosphere = mix(limbColor, coreColor, pow(mu, 0.55)) * limbDarkening;
+
+            float discAA = smoothstep(1.0, 0.94, r);
+            sunDisc = photosphere * 6.8 * discAA;
+        }
+
+        float distAngle = acos(clamp(cosTheta, -1.0, 1.0));
+        float innerCorona = exp(-distAngle * 42.0) * 1.8;
+        vec3 innerCoronaColor = vec3(1.0, 0.76, 0.40) * innerCorona;
+
+        float outerCorona = 0.35 / (1.0 + pow(distAngle * 14.0, 2.2));
+        vec3 outerCoronaColor = vec3(0.92, 0.82, 0.68) * outerCorona;
+
+        vec3 perp = rd - sunDir * cosTheta;
+        vec3 refUp = (abs(sunDir.y) > 0.95) ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+        vec3 right = normalize(cross(sunDir, refUp));
+        vec3 up = cross(right, sunDir);
+        float px = dot(perp, right);
+        float py = dot(perp, up);
+
+        float spikeX = exp(-abs(py) * 190.0) * exp(-abs(px) * 16.0);
+        float spikeY = exp(-abs(px) * 190.0) * exp(-abs(py) * 16.0);
+        float pDiag1 = (px + py) * 0.7071;
+        float pDiag2 = (px - py) * 0.7071;
+        float spikeD1 = exp(-abs(pDiag2) * 250.0) * exp(-abs(pDiag1) * 22.0) * 0.42;
+        float spikeD2 = exp(-abs(pDiag1) * 250.0) * exp(-abs(pDiag2) * 22.0) * 0.42;
+        float totalSpikes = (spikeX + spikeY + spikeD1 + spikeD2) * smoothstep(0.965, 1.0, cosTheta);
+        vec3 spikeColor = vec3(1.0, 0.92, 0.78) * totalSpikes * 1.35;
+
+        return (sunDisc + innerCoronaColor + outerCoronaColor + spikeColor) * extinctionTint * visFactor;
+    }
+
     vec4 renderGasGiantAndRings(vec3 rd) {
         vec3 center = normalize(uGiantDir) * 4.0;
         float planetR = 0.62;
@@ -448,6 +509,9 @@
             skyColor += renderColossalGalaxy(rd) * horizonFade;
             skyColor += renderVolumetricAurora(rd) * horizonFade;
         }
+
+        // 2.5. Estrela Procedural Analítica (G2V Realista)
+        skyColor += renderProceduralSun(rd);
 
         // 3. Gigante Gasoso e Anéis
         vec4 giantLayer = renderGasGiantAndRings(rd);

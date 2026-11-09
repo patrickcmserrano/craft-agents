@@ -143,3 +143,27 @@
       :uRingNormal       ring-n
       :uAuroraIntensity  aurora-int
       :uEclipseFactor    eclipse-f})))
+
+(defn solar-photometry
+  "Propriedades fotométricas e físicas da Estrela Principal (G2V) para renderização procedural analítica."
+  [world-time]
+  (let [sun-v     (solar-vector world-time)
+        elev-deg  (* (Math/asin (nth sun-v 1)) rad->deg)
+        ;; Air-mass / Transmitância atmosférica de Rayleigh f(elevação)
+        sin-elev  (max 0.01 (Math/sin (* (max 0.0 elev-deg) deg->rad)))
+        airmass   (/ 1.0 sin-elev)
+        trans     (if (> elev-deg 0.0)
+                    (Math/exp (* -0.09 airmass))
+                    0.0)
+        ;; Cromatismo fotométrico (de branco-dourado zenital a rubro-âmbar crepuscular)
+        sunset-t  (max 0.0 (min 1.0 (/ (- 15.0 (max 0.0 elev-deg)) 15.0)))
+        chroma    [(+ 1.0 (* 0.0 sunset-t))
+                   (- 0.95 (* 0.45 sunset-t))
+                   (- 0.88 (* 0.70 sunset-t))]]
+    {:spectral-type               "G2V"
+     :effective-temperature-k     5778.0
+     :angular-diameter-deg        2.29
+     :limb-darkening              {:u 0.62 :core-temp-k 6200.0 :limb-temp-k 4800.0}
+     :atmospheric-transmittance   (double trans)
+     :chromaticity-rgb            chroma}))
+

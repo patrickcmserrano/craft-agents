@@ -300,3 +300,19 @@
           (is (contains? body :uRingNormal))
           (is (contains? body :uAuroraIntensity))
           (is (contains? body :uEclipseFactor)))))))
+
+(deftest test-procedural-solar-photometry
+  (testing "CA-053: Fotometria analítica e escurecimento de bordo da Estrela Procedural"
+    ;; Meio-dia (tick 6000)
+    (let [photo-noon (ephem/solar-photometry 6000)]
+      (is (= "G2V" (:spectral-type photo-noon)))
+      (is (= 5778.0 (:effective-temperature-k photo-noon)))
+      (is (<= 2.0 (:angular-diameter-deg photo-noon) 3.0))
+      (is (= 0.62 (get-in photo-noon [:limb-darkening :u])))
+      (is (> (:atmospheric-transmittance photo-noon) 0.90) "Ao meio-dia a transmitância atmosférica deve ser máxima"))
+
+    ;; Crepúsculo (tick 12500)
+    (let [photo-sunset (ephem/solar-photometry 12500)]
+      (is (< (:atmospheric-transmittance photo-sunset) 0.50) "No crepúsculo a extinção de Rayleigh deve reduzir a transmitância")
+      (is (vector? (:chromaticity-rgb photo-sunset))))))
+
