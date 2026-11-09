@@ -498,8 +498,8 @@
 
         // 1. Gradiente atmosférico de fundo
         float horizon = exp(-max(rd.y, 0.0) * 5.5);
-        vec3 zenithCol  = vec3(0.02, 0.04, 0.09);
-        vec3 horizonCol = mix(vec3(0.22, 0.14, 0.28), vec3(0.65, 0.35, 0.25), horizon * 0.65);
+        vec3 zenithCol  = vec3(0.012, 0.025, 0.075);
+        vec3 horizonCol = mix(vec3(0.08, 0.12, 0.26), vec3(0.22, 0.38, 0.65), horizon * 0.70);
         vec3 skyColor   = mix(zenithCol, horizonCol, horizon);
 
         // 2. Campo Estelar + Galáxia Colossal + Auroras
