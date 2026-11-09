@@ -42,9 +42,8 @@ attach: jar
 	@PID_RESOLVED=$$( [ -n "$(PID)" ] && echo "$(PID)" || pgrep -f "[s]erver.jar nogui" | head -n 1 ); \
 	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[f]abric-server-launcher" | head -n 1); fi; \
 	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[K]notServer" | head -n 1); fi; \
-	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[K]notClient" | head -n 1); fi; \
 	if [ -z "$$PID_RESOLVED" ]; then \
-		echo "[-] Erro: Minecraft nao detectado em execucao!"; \
+		echo "[-] Erro: Servidor Minecraft nao detectado em execucao!"; \
 		exit 1; \
 	fi; \
 	echo "[+] Anexando craft-agents ao PID $$PID_RESOLVED..."; \
