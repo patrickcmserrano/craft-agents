@@ -39,7 +39,8 @@
     :sit-furniture :stand-up :social-dance :follow-player :patrol-sanctuary :teleport-to-player
     :drop-inventory :breed-animals :mining-cooperation :bodyguard :say-message :play-sound :move-to
     :traverse-portal :feed-nearby :mount-boat :ride-vehicle
-    :approach-vehicle :mount-vehicle :dismount-vehicle :passive-passenger-look :walk-towards-leader :swim-follow})
+    :approach-vehicle :mount-vehicle :dismount-vehicle :passive-passenger-look :walk-towards-leader :swim-follow
+    :detect-and-attack-dangerous-mobs})
 
 (def follow-player-multimodal-tree
   "Árvore Composta Multimodal de 4 Estágios com Isolamento de Leases (CA-048).
@@ -338,6 +339,11 @@
       (re-find #"sig[ae]|segui|vem com|acompanh" norm)
       [:action :follow-player {:speaker speaker}]
 
+      ;; Detectar e atacar inimigos perigosos (enderman, etc.) antes que ataquem
+      ;; DEVE vir ANTES de :bodyguard para não ser capturado por "defend"
+      (re-find #"detect\w*.*(?:inimig|perigos|hostil|amea)|(?:inimig|perigos|hostil|amea)\w*.*(?:detect|atac|combat)|enderman|endermen|atac\w*.*(?:antes|primeiro)|defend\w*.*(?:amea|inimig|perigos)" norm)
+      [:action :detect-and-attack-dangerous-mobs {:speaker speaker}]
+
       ;; Guarda-costas / Proteger
       (re-find #"proteg|guard|defend|costas" norm)
       [:action :bodyguard {:speaker speaker}]
@@ -402,18 +408,29 @@
           (catch Throwable e
             {:ok? false :reason :EDN_SYNTAX_ERROR :message (str "Erro de sintaxe EDN: " (.getMessage e))}))
         ;; Tentativa 2: Parse de passos em Linguagem Natural
-        (let [raw-steps (str/split trimmed #"(?i)\s*(?:,|;|\be\b|\bdepois\b|\bentao\b|\bentão\b|\bthen\b|\band\b)\s*")
-              clean-steps (filter #(not (str/blank? %)) raw-steps)
-              actions     (keep #(step->action-node % speaker) clean-steps)]
-          (if (seq actions)
-            (let [tree (into [:sequence] actions)
+        ;; Caso especial: instrução de detecção/ataque a inimigos perigosos deve ser
+        ;; tratada como UMA única ação (evita split indevido por "e" em "enderman e ataque").
+        (let [dangerous-re #"(?i)detect\w*.*(?:inimig|perigos|hostil|amea)|(?:inimig|perigos|hostil|amea)\w*.*(?:detect|atac|combat)|enderman|endermen|atac\w*.*(?:antes|primeiro)|defend\w*.*(?:amea|inimig|perigos)"
+              single-action (when (re-find dangerous-re trimmed)
+                              (step->action-node trimmed speaker))]
+          (if single-action
+            (let [tree (into [:sequence] [single-action])
                   skill-name (or suggested-name
-                                 (slugify (first clean-steps))
-                                 "nova-skill")]
+                                 (slugify trimmed)
+                                 "detectar-inimigos")]
               {:ok? true :tree tree :name skill-name})
-            {:ok? false
-             :reason :UNRECOGNIZED_STEPS
-             :message (str "Não foi possível reconhecer ações válidas em: '" trimmed "'")}))))))
+            (let [raw-steps (str/split trimmed #"(?i)\s*(?:,|;|\be\b|\bdepois\b|\bentao\b|\bentão\b|\bthen\b|\band\b)\s*")
+                  clean-steps (filter #(not (str/blank? %)) raw-steps)
+                  actions     (keep #(step->action-node % speaker) clean-steps)]
+              (if (seq actions)
+                (let [tree (into [:sequence] actions)
+                      skill-name (or suggested-name
+                                     (slugify (first clean-steps))
+                                     "nova-skill")]
+                  {:ok? true :tree tree :name skill-name})
+                {:ok? false
+                 :reason :UNRECOGNIZED_STEPS
+                 :message (str "Não foi possível reconhecer ações válidas em: '" trimmed "'")}))))))))
 
 (defn synthesize-and-register-skill-from-chat!
   "Sintetizador do Sistema 2 para Linguagem Natural via Chat (CA-037/CA-040).

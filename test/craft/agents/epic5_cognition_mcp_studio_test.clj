@@ -393,3 +393,57 @@
 
     (testing "3. Atribuição de Canal de Lease :legs"
       (is (= :legs (get schemas/action->lease-channel :swim-follow))))))
+
+(deftest ca-051-detect-and-attack-dangerous-mobs-test
+  (testing "CA-051: Detecção e Ataque Preventivo a Inimigos Perigosos (Enderman, etc.)"
+
+    (testing "1. Ação está no catálogo default-known-actions"
+      (is (contains? composer/default-known-actions :detect-and-attack-dangerous-mobs)))
+
+    (testing "2. Mapeamento de Linguagem Natural em step->action-node"
+      (is (= [:action :detect-and-attack-dangerous-mobs {:speaker "Pace"}]
+             (composer/step->action-node
+              "a detectar inimigos perigosos próximos como enderman e ataque-os antes que nos ataquem"
+              "Pace")))
+      (is (= [:action :detect-and-attack-dangerous-mobs {:speaker "Pace"}]
+             (composer/step->action-node "detectar inimigos perigosos" "Pace")))
+      (is (= [:action :detect-and-attack-dangerous-mobs {:speaker "Pace"}]
+             (composer/step->action-node "atacar enderman antes que ataquem" "Pace")))
+      (is (= [:action :detect-and-attack-dangerous-mobs {:speaker "Pace"}]
+             (composer/step->action-node "defender de ameaças hostis" "Pace"))))
+
+    (testing "3. Execução da Ação Motora com Ancoragem Espacial Obrigatória"
+      (let [sent (atom [])
+            nav-state (atom {:combat-mode? false})
+            ctx {:send-cmd! (fn [c] (swap! sent conj c))
+                 :agent-name "Karlach"
+                 :speaker "Pace"
+                 :nav-state nav-state}
+            res (actions/execute-action :detect-and-attack-dangerous-mobs {} ctx)]
+        (is (= :success (:status res)))
+        (is (= :detect-and-attack-dangerous-mobs (:action-id res)))
+        (is (true? (:combat-mode? @nav-state)))
+        (is (pos? (count @sent)) "Deve despachar comandos de combate")
+        (is (every? #(re-find #"execute at Karlach run" %) @sent)
+            "TODOS os comandos devem ser ancorados espacialmente em Karlach (nunca em [0,0,0])")
+        (is (some #(re-find #"minecraft:enderman" %) @sent)
+            "Deve incluir seletor para enderman no catálogo de mobs perigosos")))
+
+    (testing "4. Sintetização via chat gera skill válida com a nova ação"
+      (let [tmp-skills (io/file (System/getProperty "java.io.tmpdir") (str "ca-detect-mobs-" (System/nanoTime)))
+            tmp-routes (io/file (System/getProperty "java.io.tmpdir") (str "ca-detect-routes-" (System/nanoTime)))
+            registry   (atom {:known-actions composer/default-known-actions
+                              :composite-skills {}})]
+        (.mkdirs tmp-skills)
+        (.mkdirs tmp-routes)
+        (try
+          (let [res (composer/synthesize-and-register-skill-from-chat!
+                     registry tmp-skills
+                     "detectar-inimigos: detectar inimigos perigosos como enderman e atacar antes que ataquem"
+                     "Pace" {:routes-dir (.getPath tmp-routes)})]
+            (is (:ok? res))
+            (is (= [:sequence [:action :detect-and-attack-dangerous-mobs {:speaker "Pace"}]]
+                   (get-in res [:skill-def :skill/tree]))))
+          (finally
+            (doseq [f (reverse (file-seq tmp-skills))] (.delete f))
+            (doseq [f (reverse (file-seq tmp-routes))] (.delete f))))))))

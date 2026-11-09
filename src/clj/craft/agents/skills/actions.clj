@@ -152,3 +152,33 @@
     {:status :success
      :action-id :face-entity
      :facing target}))
+
+;; =============================================================================
+;; Detecção e Ataque Preventivo a Inimigos Perigosos (Enderman, etc.)
+;; =============================================================================
+
+(def ^:private dangerous-mob-types
+  "Tipos de mobs hostis perigosos que devem ser interceptados preventivamente."
+  #{"minecraft:enderman" "minecraft:endermite" "minecraft:witch" "minecraft:ravager"
+    "minecraft:warden" "minecraft:blaze" "minecraft:ghast" "minecraft:creeper"
+    "minecraft:phantom" "minecraft:piglin_brute" "minecraft:hoglin" "minecraft:zoglin"})
+
+(defmethod execute-action :detect-and-attack-dangerous-mobs
+  [_action-id action-args ctx]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")
+        radius (or (:radius action-args) 16)
+        mobs   (or (:mob-types action-args) dangerous-mob-types)]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      ;; Ancoragem espacial obrigatória: executa na origem do bot para que os seletores
+      ;; @e e coordenadas relativas sejam resolvidos a partir de Karlach, não de [0,0,0].
+      (doseq [mob mobs]
+        (send-cmd! (str "CMD|execute at " target " run kill @e[type=" mob ",distance=.." radius ",sort=nearest,limit=1]")))
+      ;; Feedback visual e sonoro ancorado na origem do bot
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:crit ~ ~1 ~ 0.5 0.5 0.5 0.1 20 normal"))
+      (send-cmd! (str "CMD|execute at " target " run playsound minecraft:entity.player.attack.crit master @a ~ ~ ~ 1.0 1.2")))
+    (when-let [nav-state (:nav-state ctx)]
+      (swap! nav-state assoc :combat-mode? true :last-combat-target :dangerous-mobs))
+    {:status :success
+     :action-id :detect-and-attack-dangerous-mobs
+     :radius radius
+     :mob-types (vec mobs)}))
