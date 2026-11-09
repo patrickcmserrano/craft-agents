@@ -418,11 +418,11 @@
         float n2 = noise3D(vec3(warpedUV * 4.2 + vec2(n1 * 0.6), 2.8));
         float mistDensity = n1 * 0.65 + n2 * 0.35;
 
-        float cirrusMask = smoothstep(0.48, 0.78, mistDensity);
+        float cirrusMask = smoothstep(0.35, 0.65, mistDensity);
         if (cirrusMask < 0.005) return vec4(0.0);
 
         float horizonFade = smoothstep(0.02, 0.18, rd.y);
-        float alpha = cirrusMask * 0.22 * horizonFade;
+        float alpha = cirrusMask * 0.42 * horizonFade;
 
         float cosSun = dot(rd, normalize(uSunDir));
         float forwardScatter = pow(max(0.0, cosSun), 5.0) * 0.65;
