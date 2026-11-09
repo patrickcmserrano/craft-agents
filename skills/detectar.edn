@@ -1,0 +1,1 @@
+{:skill/id :detectar, :skill/name "Habilidade detectar", :skill/author "Player-Lizzie", :skill/trigger :chat-command, :skill/timeout-ms 30000, :skill/tree [:sequence [:action :detect-and-attack-dangerous-mobs {:speaker "Lizzie"}]]}
