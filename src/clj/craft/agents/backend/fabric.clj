@@ -11,6 +11,7 @@
      - telemetry  : Eventos cognitivos e dispatcher para o Agent Studio
      - engine     : Loop de 20 TPS ao vivo da Karlach e Picard"
   (:require [craft.agents.backend.fabric.actions :as actions]
+            [craft.agents.backend.fabric.atelier :as atelier]
             [craft.agents.backend.fabric.engine :as engine]
             [craft.agents.backend.fabric.goals :as goals]
             [craft.agents.backend.fabric.navigation :as nav]
@@ -96,6 +97,14 @@
 (def picard-broadcast-weather! picard/picard-broadcast-weather!)
 (def build-picard-stations picard/build-picard-stations)
 (def picard-stations picard/picard-stations)
+
+;; ============================================================================
+;; Re-exportacoes de Atelie (Coco & Richeh)
+;; ============================================================================
+
+(def coco-say! atelier/coco-say!)
+(def richeh-say! atelier/richeh-say!)
+(def castle-waypoints atelier/castle-waypoints)
 
 ;; ============================================================================
 ;; Re-exportacoes de Santuario e Geografia

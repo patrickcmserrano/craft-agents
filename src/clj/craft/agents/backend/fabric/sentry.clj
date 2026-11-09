@@ -2,6 +2,7 @@
   "Escolta Ativa (deteccao proativa de animais fugitivos) e manipulacao de comandos de jogadores via chat."
   (:require [clojure.string :as str]
             [craft.agents.backend.fabric.actions :as actions]
+            [craft.agents.backend.fabric.atelier :as atelier]
             [craft.agents.backend.fabric.goals :as goals]
             [craft.agents.backend.fabric.picard :as picard]
             [craft.agents.backend.fabric.sanctuary :as sanctuary]
@@ -129,11 +130,23 @@
 
 (defn handle-player-command!
   "Processa comandos de chat (recebidos via bridge CHAT_POLL, log tailer ou Studio UI)
-   e orquestra as reações dos agentes Karlach e Picard."
-  [speaker msg engine-ctx-atom nav-state picard-state sanctuary-route]
-  (when-not (chat-duplicate? speaker msg)
-    (let [lower (str/lower-case (str/trim msg))]
-      ;; 1. Comandos para Karlach (Pipeline Cognitivo Desacoplado: Router -> Grounding -> Multimethod)
+   e orquestra as reações dos agentes Karlach, Picard, Coco e Richeh."
+  ([speaker msg engine-ctx-atom nav-state picard-state sanctuary-route]
+   (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route nil nil))
+  ([speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state]
+   (when-not (chat-duplicate? speaker msg)
+     (let [lower (str/lower-case (str/trim msg))]
+       ;; 0. Comandos para o Ateliê (Coco & Richeh)
+       (when (and (or (str/includes? lower "coco") (str/includes? lower "richeh"))
+                  coco-state richeh-state)
+         (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+         (atelier/handle-atelier-chat! speaker msg coco-state richeh-state
+                                      (fn [who text]
+                                        (if (= who :coco)
+                                          (atelier/coco-say! text)
+                                          (atelier/richeh-say! text)))))
+
+       ;; 1. Comandos para Karlach (Pipeline Cognitivo Desacoplado: Router -> Grounding -> Multimethod)
       (when (or (str/includes? lower "karlach")
                 (str/starts-with? lower "!karlach"))
         (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
@@ -227,7 +240,7 @@
           (record-cognitive-event! engine-ctx-atom :motor "Picard Bridge" "Retornando à ponte")
           (swap! picard-state assoc :mode :bridge-command :follow-target nil :pos [-65.0 145.0 101.0] :phase :walk)
           (transport/send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
-          (picard/picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D."))))))
+          (picard/picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))))
 
 (defonce ^:private log-file-pos (atom 0))
 (def ^:private server-log-path "/home/pace/minecraft-server/logs/latest.log")

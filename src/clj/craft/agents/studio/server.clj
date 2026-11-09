@@ -150,7 +150,10 @@
   (let [port (or (some-> (first args) parse-long) 8095)
         live-ctx (atom {:tick 0
                         :leases {:legs nil :hands nil :gaze nil}
-                        :agents {:karlach {:status "starting" :pos [-175.0 65.0 180.0]}}
+                        :agents {:karlach {:status "starting" :pos [-175.0 65.0 180.0]}
+                                 :picard  {:status "starting" :pos [-65.0 145.0 101.0]}
+                                 :coco    {:status "starting" :pos [-30.0 66.0 190.0]}
+                                 :richeh  {:status "starting" :pos [-30.0 66.0 192.0]}}
                         :events []})]
     (router/load-persisted-routes! "agents/routes")
     (fabric/start-live-karlach-loop! live-ctx)

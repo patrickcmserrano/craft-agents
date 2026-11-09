@@ -13,7 +13,8 @@
             [craft.agents.cognition.critic-test]
             [craft.agents.epic-survival-homeostasis-test]
             [craft.agents.epic-rsi-curriculum-test]
-            [craft.agents.rsi.bench-test]))
+            [craft.agents.rsi.bench-test]
+            [craft.agents.atelier-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -28,7 +29,8 @@
    {:epic 9 :title "Epico 9 — Environmental Critic & Reflexion Loop (CA-041)"     :ns 'craft.agents.cognition.critic-test}
    {:epic 10 :title "Epico I (AGI) — Homeostase, Fisiologia e Autopreservacao (CA-E1.1..E1.4)" :ns 'craft.agents.epic-survival-homeostasis-test}
    {:epic 11 :title "Epico II (RSI) — Curriculum Agent & Recursive Self-Improvement (CA-RSI.1..RSI.4)" :ns 'craft.agents.epic-rsi-curriculum-test}
-   {:epic 12 :title "Epico III (Bench) — Craft-Bench & Gate de Promocao Falsificavel (CA-RSI-P2)" :ns 'craft.agents.rsi.bench-test}])
+   {:epic 12 :title "Epico III (Bench) — Craft-Bench & Gate de Promocao Falsificavel (CA-RSI-P2)" :ns 'craft.agents.rsi.bench-test}
+   {:epic 13 :title "Epico IV (Atelier) — Witch Hat Atelier: Coco e Richeh (CA-WHA)" :ns 'craft.agents.atelier-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]

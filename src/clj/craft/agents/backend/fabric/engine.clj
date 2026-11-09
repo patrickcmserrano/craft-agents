@@ -8,6 +8,7 @@
                      last-drop-ms locate-dropped-items locate-nearby-ores mine-block!
                      ore-pt-names query-leash-status query-online-players
                      query-sitting-status scan-nearby-hostiles]]
+            [craft.agents.backend.fabric.atelier :as atelier]
             [craft.agents.backend.fabric.navigation :as nav
              :refer [compute-pitch compute-yaw expand-route-microsteps
                      generate-walk-steps request-path3d]]
@@ -110,13 +111,15 @@
                             :last-bark-ms 0
                             :last-weather-ms 0
                             :status "Comando da Ponte (Enterprise-D)"})
+        coco-state   (atelier/create-coco-state)
+        richeh-state (atelier/create-richeh-state)
         running?     (atom true)]
 
     ;; 1. Registrar Dispatcher Global para comandos via Web UI e Testes
     (reset! global-command-dispatcher
       (fn [spk m]
         (send-bridge-cmd! (str "CMD|tellraw @a [\"\",{\"text\":\"<" spk "> \",\"color\":\"white\"},{\"text\":\"" (str/replace m "\"" "\\\"") "\"}]"))
-        (handle-player-command! spk m engine-ctx-atom nav-state picard-state sanctuary-route)))
+        (handle-player-command! spk m engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state)))
 
     ;; 2. Chat listener thread monitorando client & server latest.log em paralelo (latência de 100ms)
     (doto (Thread.
@@ -160,7 +163,7 @@
                                       (not (contains? @seen-msgs dedup-key)))
                              (swap! seen-msgs assoc dedup-key now)
                              (println (str "[craft-agents-chat] 📨 Chat capturado do jogo: <" clean-spk "> " clean-msg))
-                             (handle-player-command! clean-spk clean-msg engine-ctx-atom nav-state picard-state sanctuary-route)))))
+                             (handle-player-command! clean-spk clean-msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state)))))
                      (recur new-s-pos new-c-pos))))))
            "craft-agents-chat-listener")
       (.setDaemon true)
@@ -183,7 +186,7 @@
                                (when-not (str/blank? item)
                                  (let [[speaker msg] (str/split item #"\|" 2)]
                                    (when (and speaker msg (not (#{"Karlach" "Picard" "Antigravity"} speaker)))
-                                     (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route)))))))))
+                                     (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state)))))))))
                      ;; Periodically verify bridge connection & weather cache
                      (when (zero? (mod tick 200))
                        (refresh-real-world-weather-async!)
@@ -265,7 +268,22 @@
                                  (swap! picard-state assoc :wait-left rem)))))))
 
                      ;; ========================================================
-                     ;; B) Tick da Guardiã Karlach (Santuário de Animais)
+                     ;; B) Tick do Ateliê: Coco e Richeh (Castelo Touros Negros)
+                     ;; ========================================================
+                     (let [online-p (try (query-online-players) (catch Throwable _ []))]
+                       (try
+                         (atelier/step-coco-tick! coco-state send-bridge-cmd! tick online-p)
+                         (atelier/step-richeh-tick! richeh-state coco-state send-bridge-cmd! tick online-p)
+                         (atelier/check-duo-synchrony! coco-state richeh-state send-bridge-cmd!
+                                                       (fn [who text]
+                                                         (if (= who :coco)
+                                                           (atelier/coco-say! text)
+                                                           (atelier/richeh-say! text))))
+                         (catch Throwable t
+                           (println "[craft-agents-atelier-ERROR]" (.getMessage t)))))
+
+                     ;; ========================================================
+                     ;; C) Tick da Guardiã Karlach (Santuário de Animais)
                      ;; ========================================================
                      (when (zero? (mod tick 25))
                        (let [[kx ky kz] (:pos @nav-state)]
@@ -284,10 +302,17 @@
                                           :pos [(/ (Math/round (* px 10.0)) 10.0)
                                                 (double py)
                                                 (/ (Math/round (* pz 10.0)) 10.0)]})
+                           coco-card   {:status (:status @coco-state) :pos (:pos @coco-state)}
+                           richeh-card {:status (:status @richeh-state) :pos (:pos @richeh-state)}
                            k-skills (vec (or (get-in @engine-ctx-atom [:agents :karlach :skills]) []))
                            make-karlach-card (fn [status pos]
                                                (cond-> {:status status :pos pos}
-                                                 (seq k-skills) (assoc :skills k-skills)))]
+                                                 (seq k-skills) (assoc :skills k-skills)))
+                           make-agents-map (fn [k-status k-pos]
+                                             {:karlach (make-karlach-card k-status k-pos)
+                                              :picard  picard-card
+                                              :coco    coco-card
+                                              :richeh  richeh-card})]
                        (cond
                          ;; 1. Dance override
                          (pos? (:dance-ticks st 0))
@@ -305,8 +330,7 @@
                            (swap! engine-ctx-atom assoc
                                   :tick tick
                                   :leases {:legs {:owner :dance} :hands {:owner :dance} :gaze {:owner :dance}}
-                                  :agents {:karlach (make-karlach-card "dancing 🔥" [cx cy cz])
-                                           :picard  picard-card}))
+                                  :agents (make-agents-map "dancing 🔥" [cx cy cz])))
 
                          ;; 2. Follow player & Bodyguard mode (Navegação Universal via A* 3D, Voxels Reais e Autodefesa)
                          (or (= (:mode st) :follow) (= (:mode st) :bodyguard))
@@ -375,8 +399,7 @@
                                      (swap! engine-ctx-atom assoc
                                             :tick tick
                                             :leases {:legs {:owner :combat-strike} :hands {:owner :combat-strike} :gaze {:owner :combat-strike}}
-                                            :agents {:karlach (make-karlach-card "⚔️ em combate defensivo" (:pos @nav-state))
-                                                     :picard  picard-card}))
+                                            :agents (make-agents-map "⚔️ em combate defensivo" (:pos @nav-state))))
 
                                    :combat-intercept
                                    (let [[mx my mz] (:target-pos decision)
@@ -416,8 +439,7 @@
                                      (swap! engine-ctx-atom assoc
                                             :tick tick
                                             :leases {:legs {:owner :combat-intercept} :hands nil :gaze {:owner :combat-intercept}}
-                                            :agents {:karlach (make-karlach-card "🏹 interceptando hostil" (:pos @nav-state))
-                                                     :picard  picard-card}))
+                                            :agents (make-agents-map "🏹 interceptando hostil" (:pos @nav-state))))
 
                                    :remain-mounted-passive
                                    (do
@@ -426,8 +448,7 @@
                                      (swap! engine-ctx-atom assoc
                                             :tick tick
                                             :leases {:legs nil :hands nil :gaze {:owner :passenger-look}}
-                                            :agents {:karlach (make-karlach-card "⛵ navegando embarcada com você" (:pos @nav-state))
-                                                     :picard  picard-card}))
+                                            :agents (make-agents-map "⛵ navegando embarcada com você" (:pos @nav-state))))
 
                                    ;; Default: :tether-snap-recall ou :follow-player
                                    (do
@@ -766,8 +787,7 @@
                                          (swap! engine-ctx-atom assoc
                                                 :tick tick
                                                 :leases {:legs {:owner :patrol-waypoints} :hands nil :gaze {:owner :path-look}}
-                                                :agents {:karlach (make-karlach-card (:label cur-step) [(/ (Math/round (* nx 10.0)) 10.0) (double ty) (/ (Math/round (* nz 10.0)) 10.0)])
-                                                         :picard  picard-card})))))
+                                                :agents (make-agents-map (:label cur-step) [(/ (Math/round (* nx 10.0)) 10.0) (double ty) (/ (Math/round (* nz 10.0)) 10.0)]))))))
 
                                  :gate
                                  (do
@@ -782,8 +802,7 @@
                                           :leases {:legs {:owner :portal-traversal}
                                                    :hands {:owner :toggle-double-gate}
                                                    :gaze {:owner :portal-traversal}}
-                                          :agents {:karlach (make-karlach-card (:label cur-step) [cx cy cz])
-                                                   :picard  picard-card}))
+                                          :agents (make-agents-map (:label cur-step) [cx cy cz])))
 
                                  :feed
                                  (do
@@ -803,8 +822,7 @@
                                           :leases {:legs {:owner :care-for-enclosure}
                                                    :hands {:owner :feed-animals}
                                                    :gaze {:owner :care-for-enclosure}}
-                                          :agents {:karlach (make-karlach-card (:label cur-step) [cx cy cz])
-                                                   :picard  picard-card}))
+                                          :agents (make-agents-map (:label cur-step) [cx cy cz])))
 
                                  :attach-lead
                                  (let [species (or (:species cur-step) "animal")
@@ -877,8 +895,7 @@
                                               :leases {:legs {:owner :await-contained}
                                                        :hands nil
                                                        :gaze {:owner :portal-watch}}
-                                              :agents {:karlach (make-karlach-card (:label cur-step) [cx cy cz])
-                                                       :picard  picard-card})
+                                              :agents (make-agents-map (:label cur-step) [cx cy cz]))
                                        (swap! nav-state update-in [:steps 0 :elapsed-ticks] (fnil inc 0)))))
 
                                  :critic
@@ -996,8 +1013,7 @@
                                    (swap! engine-ctx-atom assoc
                                           :tick tick
                                           :leases {:legs nil :hands nil :gaze {:owner :social-gaze}}
-                                          :agents {:karlach (make-karlach-card (:label cur-step) [(/ (Math/round (* cx 10.0)) 10.0) cy (/ (Math/round (* cz 10.0)) 10.0)])
-                                                   :picard  picard-card})))))))))
+                                          :agents (make-agents-map (:label cur-step) [(/ (Math/round (* cx 10.0)) 10.0) cy (/ (Math/round (* cz 10.0)) 10.0)]))))))))))
                      (catch Throwable t
                       (println "[craft-agents-20hz-ERROR]" (.getMessage t))
                       (.printStackTrace t)))
@@ -1010,4 +1026,6 @@
       (.start))
     {:stop-fn #(reset! running? false)
      :nav-state nav-state
-     :picard-state picard-state}))
+     :picard-state picard-state
+     :coco-state coco-state
+     :richeh-state richeh-state}))
