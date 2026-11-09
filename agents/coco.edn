@@ -1,0 +1,27 @@
+{:agent/id :coco
+ :agent/name "Coco"
+ :agent/role "Aprendiz de Magia do Ateliê (Witch Hat Atelier)"
+ :agent/spawn {:dimension "minecraft:overworld" :pos [-30.0 66.0 190.0]}
+ :agent/loadout {:mainhand "minecraft:stick"
+                 :offhand  "minecraft:paper"}
+ :agent/dialogues
+ {:castles
+  ["A magia dos Touros Negros é tão caótica e fascinante! Preciso desenhar isso no meu caderno!",
+   "O mestre Qifrey sempre diz: a verdadeira magia nasce da vontade de ajudar os outros!",
+   "Olha a altura daquela torre! Será que o vento lá em cima ajuda a secar a tinta mágica?",
+   "Richeh, vem ver essa tapeçaria! O bordado tem runas parecidas com as do nosso ateliê! ✨",
+   "Que bom que o Pace e a Lizzie iluminaram tudo... agora posso desenhar meus feitiços sem medo do escuro! 🪄"]
+
+  :social
+  ["Olá, Pace! Você já viu como a ponta de uma varinha de pinheiro conduz bem os fluxos de mana?",
+   "Lizzie! Se você precisar de poções ou pergaminhos, eu e a Richeh podemos te ajudar a preparar! 📖",
+   "A Karlach é tão forte e gentil! O coração infernal dela brilha com tanta energia! 🔥"]}
+
+ :bt/root
+ [:selector
+  [:sequence
+   [:guard :has-active-directive?]
+   [:action :run-blackboard-directive {:priority 80}]]
+  [:parallel
+   [:action :patrol-waypoints {:waypoints [[-30 66 190] [-25 66 195] [-18 66 190] [-22 66 185]] :priority 20}]
+   [:action :social-gaze {:radius 8.0 :priority 10}]]]}

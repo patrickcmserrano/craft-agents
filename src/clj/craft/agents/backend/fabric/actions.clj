@@ -62,6 +62,24 @@
       (transport/send-bridge-cmd! "CMD|item replace entity Picard weapon.mainhand with minecraft:spyglass")
       (transport/send-bridge-cmd! "CMD|item replace entity Picard weapon.offhand with minecraft:compass")
       (println "[craft-agents] 🖖 Capitão Picard Server-Native conectado:" resp))
+
+    ;; 3. Spawn Coco no Castelo dos Touros Negros (Witch Hat Atelier)
+    (let [{:keys [value signature]} (load-skin-meta "coco_meta.json")
+          resp (transport/send-bridge-cmd! (str "SPAWN|Coco|-30.0|66.0|190.0|" value "|" signature))]
+      (transport/send-bridge-cmd! "CMD|gamemode survival Coco")
+      (transport/send-bridge-cmd! "CMD|effect give Coco minecraft:resistance infinite 4 true")
+      (transport/send-bridge-cmd! "CMD|item replace entity Coco weapon.mainhand with minecraft:stick")
+      (transport/send-bridge-cmd! "CMD|item replace entity Coco weapon.offhand with minecraft:paper")
+      (println "[craft-agents] ✨ Coco (Witch Hat Atelier) conectada:" resp))
+
+    ;; 4. Spawn Richeh no Castelo dos Touros Negros (Witch Hat Atelier)
+    (let [{:keys [value signature]} (load-skin-meta "richeh_meta.json")
+          resp (transport/send-bridge-cmd! (str "SPAWN|Richeh|-30.0|66.0|192.0|" value "|" signature))]
+      (transport/send-bridge-cmd! "CMD|gamemode survival Richeh")
+      (transport/send-bridge-cmd! "CMD|effect give Richeh minecraft:resistance infinite 4 true")
+      (transport/send-bridge-cmd! "CMD|item replace entity Richeh weapon.mainhand with minecraft:book")
+      (transport/send-bridge-cmd! "CMD|item replace entity Richeh weapon.offhand with minecraft:feather")
+      (println "[craft-agents] 📖 Richeh (Witch Hat Atelier) conectada:" resp))
     true))
 
 (defn query-online-players []

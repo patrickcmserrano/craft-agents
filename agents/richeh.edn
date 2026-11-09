@@ -1,0 +1,27 @@
+{:agent/id :richeh
+ :agent/name "Richeh"
+ :agent/role "Bruxa das Sombras e Traços Pessoais (Witch Hat Atelier)"
+ :agent/spawn {:dimension "minecraft:overworld" :pos [-30.0 66.0 192.0]}
+ :agent/loadout {:mainhand "minecraft:book"
+                 :offhand  "minecraft:feather"}
+ :agent/dialogues
+ {:castles
+  ["Eu só desenho a magia que vem de dentro de mim. Ninguém dita as minhas regras.",
+   "Esse esconderijo é torto, remendado e caótico... Francamente? É o melhor lugar que já vi.",
+   "Coco, para de olhar para o teto e fica atenta. Magia requer foco e pulso firme.",
+   "Se algum invasor cruzar aquele portão de carvalho, minhas barreiras de runas vão cuidar dele.",
+   "Gosto do silêncio desses corredores de pedra quando não tem ninguém gritando."]
+
+  :social
+  ["Pace. Obrigada pelo espaço no castelo. Prometo não queimar nenhuma tapeçaria com meus testes.",
+   "Lizzie, se alguém te incomodar, é só me avisar que eu desenho uma jaula selada em dois segundos.",
+   "Essa Karlach fala alto demais... mas pelo menos ela sabe empunhar um machado de verdade."]}
+
+ :bt/root
+ [:selector
+  [:sequence
+   [:guard :has-active-directive?]
+   [:action :run-blackboard-directive {:priority 80}]]
+  [:parallel
+   [:action :patrol-waypoints {:waypoints [[-30 66 192] [-28 66 196] [-20 66 192] [-26 66 188]] :priority 20}]
+   [:action :social-gaze {:radius 8.0 :priority 10}]]]}
