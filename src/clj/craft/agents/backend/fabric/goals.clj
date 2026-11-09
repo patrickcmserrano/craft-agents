@@ -621,6 +621,33 @@
                                         2.0)]
                            (<= dist 3.5))
 
+                         :has-active-directive?
+                         (boolean (or (get-in @engine-ctx-atom [:active-directive])
+                                      (get-in @engine-ctx-atom [:directive])))
+
+                         :hostile-nearby?
+                         (let [radius (or (:radius (second args)) 10.0)]
+                           (boolean (some #(<= (:distance %) radius) (get-in @engine-ctx-atom [:perception :hostiles] []))))
+
+                         :ally-within-range?
+                         (let [max-dist (or (:max-dist (second args)) 3.5)
+                               cur-dist (or (get-in @engine-ctx-atom [:perception :ally :distance]) 2.5)]
+                           (<= cur-dist max-dist))
+
+                         :ally-distance-exceeds?
+                         (let [min-dist (or (:min-dist (second args)) 8.0)
+                               cur-dist (or (get-in @engine-ctx-atom [:perception :ally :distance]) 2.5)]
+                           (> cur-dist min-dist))
+
+                         :cooldown-ready?
+                         true
+
+                         :interesting-block-nearby?
+                         true
+
+                         :in-quiet-corner?
+                         true
+
                          true)]
           (if eval-res
             {:status :success}

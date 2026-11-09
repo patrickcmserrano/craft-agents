@@ -10,3 +10,5 @@ state/*.jsonl
 *.jar
 /.ai-factory/index/
 .ai-factory/
+__pycache__/
+*.pyc

@@ -1,27 +1,60 @@
 {:agent/id :coco
  :agent/name "Coco"
- :agent/role "Aprendiz de Magia do Ateliê (Witch Hat Atelier)"
+ :agent/role "Aprendiz do Ateliê de Qifrey & Tecelã de Glifos (Witch Hat Atelier)"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-30.0 66.0 190.0]}
- :agent/loadout {:mainhand "minecraft:stick"
-                 :offhand  "minecraft:paper"}
+ :agent/loadout {:mainhand "minecraft:feather"
+                 :offhand  "minecraft:writable_book"}
+ :agent/traits {:personality :curious-optimistic
+                :companion-id :richeh
+                :flee-target :karlach
+                :preferred-blocks #{"minecraft:lantern" "minecraft:bookshelf" "minecraft:lectern" "minecraft:wool"}}
+
  :agent/dialogues
  {:castles
-  ["A magia dos Touros Negros é tão caótica e fascinante! Preciso desenhar isso no meu caderno!",
-   "O mestre Qifrey sempre diz: a verdadeira magia nasce da vontade de ajudar os outros!",
-   "Olha a altura daquela torre! Será que o vento lá em cima ajuda a secar a tinta mágica?",
-   "Richeh, vem ver essa tapeçaria! O bordado tem runas parecidas com as do nosso ateliê! ✨",
-   "Que bom que o Pace e a Lizzie iluminaram tudo... agora posso desenhar meus feitiços sem medo do escuro! 🪄"]
+  ["A arquitetura do esconderijo dos Touros Negros desafia qualquer simetria! Preciso desenhar esses ângulos no meu caderno!",
+   "O mestre Qifrey sempre me lembra: a magia não existe para ferir, mas para maravilhamento e auxílio de quem precisa!",
+   "Olha a altura daquela torre! Se eu combinar um sinal de vento com um anel de levitação, a tinta prateada vai secar num instante!",
+   "Richeh, vem ver essa tapeçaria! Se a gente seguir a trama dos fios como linhas de contenção, dá quase um círculo mágico completo! ✨",
+   "Que alívio que o Pace e a Lizzie iluminaram os salões... desenhar glifos de luz à mão livre no escuro ainda me deixa nervosa! 🖋️"]
 
   :social
-  ["Olá, Pace! Você já viu como a ponta de uma varinha de pinheiro conduz bem os fluxos de mana?",
-   "Lizzie! Se você precisar de poções ou pergaminhos, eu e a Richeh podemos te ajudar a preparar! 📖",
-   "A Karlach é tão forte e gentil! O coração infernal dela brilha com tanta energia! 🔥"]}
+  ["Olá, Pace! Descobri que se eu ajustar os sinais de direção na borda do pergaminho, o feitiço responde muito mais rápido!",
+   "Lizzie! Costurar vestes encantadas ou preparar pergaminhos de emergência é comigo mesma. É só me dizer do que precisa! 📖",
+   "A Karlach é incrível! O motor infernal no peito dela parece uma fornalha de signos de fogo perpétuos... mas o sorriso dela é tão acolhedor! 🔥",
+   "Richeh, me mostra de novo como você consegue fechar um círculo tão pequenininho sem borrar a tinta prateada?"]
+
+  :reactions
+  {:near-richeh ["Richeh! Olha só esse novo arranjo de sinais que tentei rascunhar!"
+                 "Trabalhar no nosso pequeno ateliê com você deixa tudo mais divertido, Richeh! ✨"]
+   :under-threat ["Cuidado! Meus círculos de proteção ainda não estão prontos! Karlach, ajuda aqui!"
+                  "Preciso fechar o anel do glifo de luz rápido para afastar essas criaturas!"]}}
 
  :bt/root
  [:selector
+  ;; 1. Diretiva direta via Blackboard / Chat (Prioridade Máxima)
   [:sequence
    [:guard :has-active-directive?]
-   [:action :run-blackboard-directive {:priority 80}]]
+   [:action :run-blackboard-directive {:priority 90}]]
+
+  ;; 2. Instinto de Sobrevivência: Aprendiz não luta melee; recua para perto da Karlach ou da Richeh
+  [:sequence
+   [:guard :hostile-nearby? {:radius 10.0}]
+   [:action :evade-towards-ally {:ally-ids [:karlach :richeh] :safe-dist 4.0 :priority 85}]]
+
+  ;; 3. Interação de Dupla: Quando está perto da Richeh e ociosa, conversa/estuda glifos juntas
+  [:sequence
+   [:guard :ally-within-range? {:ally-id :richeh :max-dist 3.5}]
+   [:guard :cooldown-ready? {:key :duo-study :seconds 45}]
+   [:action :face-entity {:target :richeh :priority 50}]
+   [:action :emote-sketch-notes {:duration-ticks 60 :priority 50}]]
+
+  ;; 4. Estudo Ambiental: Para diante de estantes, lanternas ou tapeçarias para desenhar no caderno
+  [:sequence
+   [:guard :interesting-block-nearby? {:radius 5.0}]
+   [:guard :cooldown-ready? {:key :inspect-block :seconds 30}]
+   [:action :approach-and-sketch {:max-dist 2.2 :duration-ticks 80 :priority 40}]]
+
+  ;; 5. Rotina Base: Patrulha alegre pelo castelo + Olhar social amplo e receptivo
   [:parallel
    [:action :patrol-waypoints {:waypoints [[-30 66 190] [-25 66 195] [-18 66 190] [-22 66 185]] :priority 20}]
-   [:action :social-gaze {:radius 8.0 :priority 10}]]]}
+   [:action :social-gaze {:radius 10.0 :priority 15}]]]}

@@ -81,3 +81,74 @@
       (swap! nav-state assoc :swimming? true))
     {:status :success
      :action-id :swim-follow}))
+
+;; =============================================================================
+;; Witch Hat Atelier (Coco & Richeh) Sinergias e Ações de Glifos
+;; =============================================================================
+
+(defmethod execute-action :tether-follow-ally
+  [_action-id action-args ctx]
+  (let [ally (name (:ally-id action-args :coco))
+        target (or (:agent-name ctx) (:bot-name ctx) "Richeh")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:glow_squid_ink ~ ~0.5 ~ 0.2 0.1 0.2 0.02 4 normal")))
+    {:status :success
+     :action-id :tether-follow-ally
+     :target ally}))
+
+(defmethod execute-action :crouch-and-inscribe
+  [_action-id action-args ctx]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) "Richeh")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "SWING|" target))
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:enchant ~ ~0.1 ~ 0.3 0.05 0.3 0.05 12 normal"))
+      (send-cmd! (str "CMD|execute at " target " run playsound minecraft:block.amethyst_block.hit master @a ~ ~ ~ 0.8 1.6")))
+    {:status :success
+     :action-id :crouch-and-inscribe}))
+
+(defmethod execute-action :emote-sketch-notes
+  [_action-id _action-args ctx]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) "Coco")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "SWING|" target))
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:witch ~ ~1.2 ~ 0.2 0.2 0.2 0.02 6 normal"))
+      (send-cmd! (str "CMD|execute at " target " run playsound minecraft:item.book.page_turn master @a ~ ~ ~ 0.9 1.1")))
+    {:status :success
+     :action-id :emote-sketch-notes}))
+
+(defmethod execute-action :approach-and-sketch
+  [_action-id action-args ctx]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) "Coco")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "SWING|" target))
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:enchant ~ ~1.0 ~ 0.3 0.2 0.3 0.05 8 normal")))
+    {:status :success
+     :action-id :approach-and-sketch}))
+
+(defmethod execute-action :ward-companion
+  [_action-id action-args ctx]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) "Richeh")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "SWING|" target))
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:block_marker minecraft:amethyst_block ~ ~1 ~ 0.5 0.5 0.5 0.1 15 normal"))
+      (send-cmd! (str "CMD|execute at " target " run playsound minecraft:block.amethyst_cluster.break master @a ~ ~ ~ 1.0 1.3")))
+    {:status :success
+     :action-id :ward-companion}))
+
+(defmethod execute-action :evade-towards-ally
+  [_action-id action-args ctx]
+  (let [target (or (:agent-name ctx) (:bot-name ctx) "Coco")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "CMD|execute at " target " run particle minecraft:poof ~ ~0.5 ~ 0.3 0.2 0.3 0.05 10 normal")))
+    {:status :success
+     :action-id :evade-towards-ally}))
+
+(defmethod execute-action :face-entity
+  [_action-id action-args ctx]
+  (let [target (name (or (:target action-args) :richeh))
+        self-name (or (:agent-name ctx) (:bot-name ctx) "Coco")]
+    (when-let [send-cmd! (:send-cmd! ctx)]
+      (send-cmd! (str "CMD|execute at " self-name " run tp " self-name " ~ ~ ~ facing entity " target " feet")))
+    {:status :success
+     :action-id :face-entity
+     :facing target}))

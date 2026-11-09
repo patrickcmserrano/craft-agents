@@ -30,4 +30,8 @@
     :run-blackboard-directive
     {:status :success}
 
+    (:tether-follow-ally :crouch-and-inscribe :emote-sketch-notes
+     :approach-and-sketch :ward-companion :evade-towards-ally :face-entity)
+    {:status :success}
+
     {:status :failure :reason :UNKNOWN_ACTION}))
