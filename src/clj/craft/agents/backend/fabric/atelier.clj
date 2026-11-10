@@ -33,7 +33,7 @@
 
 (defn coco-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "tellraw @a [\"\",{\"text\":\"<\",\"color\":\"dark_gray\"},"
+        json-cmd (str "tellraw @a [{\"text\":\"<\",\"color\":\"dark_gray\"},"
                       "{\"text\":\"Coco\",\"color\":\"gold\",\"bold\":true},"
                       "{\"text\":\"> \",\"color\":\"dark_gray\"},"
                       "{\"text\":\"" safe-msg "\",\"color\":\"yellow\"}]")]
@@ -43,10 +43,10 @@
 
 (defn richeh-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "tellraw @a [\"\",{\"text\":\"<\",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"Richeh\",\"color\":\"dark_purple\",\"bold\":true},"
+        json-cmd (str "tellraw @a [{\"text\":\"<\",\"color\":\"dark_gray\"},"
+                      "{\"text\":\"Richeh\",\"color\":\"aqua\",\"bold\":true},"
                       "{\"text\":\"> \",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"" safe-msg "\",\"color\":\"light_purple\"}]")]
+                      "{\"text\":\"" safe-msg "\",\"color\":\"aqua\"}]")]
     (send-bridge-cmd! (str "CMD|" json-cmd))
     (send-bridge-cmd! "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.hit master @a[distance=..24] ~ ~ ~ 0.8 1.6")
     (send-bridge-cmd! "SWING|Richeh")))
