@@ -106,6 +106,38 @@
           (is (not (str/includes? tellraw "distance="))
               "Nenhum filtro de distancia — a mensagem precisa ser global"))))))
 
+(deftest ca-060p-shelter-sits-on-bench-test
+  (testing "CA-060p: Chegando ao quarto, ela SENTA no banco"
+    (let [sent (atom [])]
+      (with-redefs [transport/send-bridge-cmd! (fn [c] (swap! sent conj c))]
+        (fabric/sit-karlach-at-quarters! [-131.0 65.0 198.0])
+        (let [sit (first (filter #(str/starts-with? % "SIT|") @sent))]
+          (is (some? sit) "Deve emitir um op SIT pela ponte")
+          (is (= "SIT|Karlach|-131|65|198" sit)
+              "O SIT leva as coordenadas do banco declarado no EDN")))))
+
+  (testing "CA-060q: Sem cadeira declarada, o assento degrada com seguranca"
+    (let [sent (atom [])]
+      (with-redefs [transport/send-bridge-cmd! (fn [c] (swap! sent conj c))]
+        (fabric/sit-karlach-at-quarters! nil)
+        (is (empty? (filter #(str/starts-with? % "SIT|") @sent))
+            "Sem cadeira configurada, nao emite SIT (nao explode, nao senta no ar)")))))
+
+(deftest ca-060r-shelter-stands-on-exit-test
+  (testing "CA-060r: Ao retomar a patrulha, ela LEVANTA do banco"
+    (let [sent (atom [])]
+      (with-redefs [transport/send-bridge-cmd! (fn [c] (swap! sent conj c))]
+        (fabric/stand-karlach!)
+        (is (some #(= % "STAND|Karlach") @sent)
+            "Deve emitir STAND|Karlach antes de sair")))))
+
+(deftest ca-060s-seat-comes-from-edeclared-quarters-test
+  (testing "CA-060s: O banco do quarto vem do EDN (karlach.edn :agent/quarters :seat-pos)"
+    (let [route    (fabric/build-sanctuary-route)
+          quarters (some #(when (= (:type %) :quarters) %) route)]
+      (is (= [-131.0 65.0 198.0] (:seat-pos quarters))
+          "O banco declarado e o another_furniture:acacia_bench medido em [-131,65,198]"))))
+
 (deftest ca-060f-shelter-goal-and-quarters-wiring-test
   (testing "CA-060f: A decisao de abrigo leva ao Quarto da Karlach da rota real"
     (let [route    (fabric/build-sanctuary-route)

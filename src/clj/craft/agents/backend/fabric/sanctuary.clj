@@ -97,6 +97,8 @@
                        :id               (:id q :karlach-bedroom)
                        :name             (:name q "Quarto da Karlach")
                        :pos              (:pos q [-131.0 65.0 195.0])
+                       :seat-pos         (:seat-pos q)
+                       :seat-block       (:seat-block q)
                        :waypoints        (:waypoints q [[-136.0 65.0 183.0] [-133.0 65.0 194.0] (:pos q [-131.0 65.0 195.0])])
                        :return-waypoints (:return-waypoints q [[-133.0 65.0 194.0] [-136.0 65.0 183.0] [-173.0 65.0 180.0]])
                        :hold-item        (:hold-item q "minecraft:golden_apple")

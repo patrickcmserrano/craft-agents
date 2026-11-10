@@ -137,6 +137,27 @@
        (= (second (str/split resp #"\|")) "true")
        false))))
 
+(defn sit-agent!
+  "Senta o agente num assento nativo (CA-060). Com `seat-pos` [x y z] manda as
+   coordenadas exatas do banco; sem elas, deixa a ponte procurar o assento mais
+   proximo. Devolve true se a ponte respondeu OK."
+  ([player-name] (sit-agent! player-name nil))
+  ([player-name seat-pos]
+   (let [cmd (if (and seat-pos (= 3 (count seat-pos)))
+               (uformat "SIT|%s|%d|%d|%d" player-name
+                        (int (Math/floor (double (nth seat-pos 0))))
+                        (int (Math/floor (double (nth seat-pos 1))))
+                        (int (Math/floor (double (nth seat-pos 2)))))
+               (str "SIT|" player-name))
+         resp (transport/send-bridge-cmd! cmd)]
+     (boolean (and resp (str/starts-with? resp "OK"))))))
+
+(defn stand-agent!
+  "Levanta o agente do assento (CA-060). Devolve true se a ponte respondeu OK."
+  [player-name]
+  (let [resp (transport/send-bridge-cmd! (str "STAND|" player-name))]
+    (boolean (and resp (str/starts-with? resp "OK")))))
+
 (defn locate-dropped-items
   "Escaneia ItemEntity caidos no chao em um raio via bridge (CA-E1.4)."
   ([player-name] (locate-dropped-items player-name {}))

@@ -170,3 +170,5 @@
 (def rain-shelter-decision engine/rain-shelter-decision)
 (def weather-transition engine/weather-transition)
 (def shelter-route-steps engine/shelter-route-steps)
+(def sit-karlach-at-quarters! engine/sit-karlach-at-quarters!)
+(def stand-karlach! engine/stand-karlach!)

@@ -6,6 +6,8 @@
  :agent/quarters {:id :karlach-bedroom
                   :name "Quarto da Karlach"
                   :pos [-131.0 65.0 195.0]
+                  :seat-pos [-131.0 65.0 198.0]
+                  :seat-block "another_furniture:acacia_bench"
                   :waypoints [[-136.0 65.0 183.0] [-133.0 65.0 194.0] [-131.0 65.0 195.0]]
                   :return-waypoints [[-133.0 65.0 194.0] [-136.0 65.0 183.0] [-173.0 65.0 180.0]]
                   :hold-item "minecraft:golden_apple"

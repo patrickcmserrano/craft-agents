@@ -8,7 +8,8 @@
                      inspect-inventory karlach-say!
                      last-drop-ms locate-dropped-items locate-nearby-ores mine-block!
                      ore-pt-names query-leash-status query-online-players
-                     query-sitting-status scan-nearby-hostiles]]
+                     query-sitting-status scan-nearby-hostiles
+                     sit-agent! stand-agent!]]
             [craft.agents.backend.fabric.atelier :as atelier]
             [craft.agents.backend.fabric.navigation :as nav
              :refer [compute-pitch compute-yaw expand-route-microsteps
@@ -151,6 +152,19 @@
         (vec (take (inc rest-idx) all-steps))
         all-steps))))
 
+(defn sit-karlach-at-quarters!
+  "Senta a Karlach no banco do quarto enquanto ela espera a chuva passar (CA-060).
+   `seat-pos` e [x y z] do banco; se ausente/nil, nao emite nada (degrada com
+   seguranca - melhor ficar de pe do que sentar no ar)."
+  [seat-pos]
+  (when (and seat-pos (= 3 (count seat-pos)))
+    (sit-agent! "Karlach" seat-pos)))
+
+(defn stand-karlach!
+  "Levanta a Karlach do banco antes de retomar a ronda (CA-060)."
+  []
+  (stand-agent! "Karlach"))
+
 (defn start-live-karlach-loop!
   "Inicia o loop de 20Hz da Karlach e do Capitão Picard no servidor Fabric e atualiza o engine-ctx do Agent Studio."
   [engine-ctx-atom]
@@ -166,6 +180,7 @@
                             :steps (vec (expand-route-microsteps (first sanctuary-route) [-175.0 65.0 180.0]))
                             :wait-left 0
                             :sheltering? false
+                            :seated? false
                             :last-weather nil
                             :last-bark-ms 0})
         picard-state (atom {:pos [-65.0 145.0 101.0]
@@ -804,12 +819,14 @@
                                       :leases {:legs {:owner :rain-shelter} :hands nil :gaze {:owner :path-look}}
                                       :agents (make-agents-map "Abrigada da chuva 🌧️" [cx cy cz])))
 
-                             ;; :resume — tempo abriu: limpa o abrigo e devolve a rota
-                             ;; normal (o ramo :else re-expande no proximo ciclo).
+                             ;; :resume — tempo abriu: levanta do banco, limpa o abrigo
+                             ;; e devolve a rota normal (o :else re-expande no proximo ciclo).
                              (do
                                (when (:speak? shelter)
                                  (karlach-say! "O tempo abriu! Voltando à ronda do santuário, soldado! ☀️"))
-                               (swap! nav-state assoc :sheltering? false :steps [])
+                               (when (:seated? st false)
+                                 (stand-karlach!))
+                               (swap! nav-state assoc :sheltering? false :seated? false :steps [])
                                (swap! engine-ctx-atom assoc :tick tick
                                       :leases nil
                                       :agents (make-agents-map "Retomando a patrulha ☀️" [cx cy cz])))))
@@ -825,12 +842,18 @@
                          (let [steps (:steps st)]
                            (if (empty? steps)
                              (if (:sheltering? st false)
-                               ;; Abrigada e sem steps: permanece no quarto ate o
-                               ;; tempo abrir (nao re-expande a rota de patrulha).
-                               (swap! engine-ctx-atom assoc
-                                      :tick tick
-                                      :leases {:legs {:owner :rain-shelter} :hands nil :gaze {:owner :path-look}}
-                                      :agents (make-agents-map "Descansando no quarto 🌧️" [cx cy cz]))
+                               ;; Abrigada e sem steps: ja esta no quarto. Senta no
+                               ;; banco UMA vez (flag :seated?) e espera o tempo abrir.
+                               (do
+                                 (when-not (:seated? st false)
+                                   (let [quarters (some #(when (= (:type %) :quarters) %) sanctuary-route)]
+                                     (when (sit-karlach-at-quarters! (:seat-pos quarters))
+                                       (karlach-say! "Ah, um banquinho pra descansar as canelas... melhor que ficar de pé na chuva! 🔥🪑"))
+                                     (swap! nav-state assoc :seated? true)))
+                                 (swap! engine-ctx-atom assoc
+                                        :tick tick
+                                        :leases {:legs {:owner :rain-shelter} :hands nil :gaze {:owner :social-gaze}}
+                                        :agents (make-agents-map "Sentada no banco do quarto 🌧️🪑" [cx cy cz])))
                                (let [next-idx (mod (inc (:route-idx st 0)) (count sanctuary-route))
                                      next-stop (nth sanctuary-route next-idx)]
                                  (swap! nav-state assoc
