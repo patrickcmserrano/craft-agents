@@ -13,6 +13,8 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -119,8 +121,19 @@ public final class SyntheticPlayerFactory {
             return;
         }
         Thread serverThread = new Thread(() -> {
-            try (ServerSocket ss = new ServerSocket(bridgePort, 50, InetAddress.getByName("127.0.0.1"))) {
-                System.out.println("[craft-agents] In-Server Fabric Bridge ativo em 127.0.0.1:" + bridgePort);
+            int port = bridgePort;
+            ServerSocket ss = null;
+            try {
+                try {
+                    ss = new ServerSocket(port, 50, InetAddress.getByName("127.0.0.1"));
+                } catch (Throwable t) {
+                    port = bridgePort + 1;
+                    ss = new ServerSocket(port, 50, InetAddress.getByName("127.0.0.1"));
+                }
+                try {
+                    Files.writeString(Path.of("/tmp/craft-agents-bridge.port"), String.valueOf(port));
+                } catch (Throwable ignored) {}
+                System.out.println("[craft-agents] In-Server Fabric Bridge ativo em 127.0.0.1:" + port);
                 while (true) {
                     Socket client = ss.accept();
                     client.setTcpNoDelay(true);
@@ -129,6 +142,10 @@ public final class SyntheticPlayerFactory {
             } catch (Throwable t) {
                 System.err.println("[craft-agents] Erro no In-Server Bridge: " + t.getMessage());
                 BRIDGE_RUNNING.set(false);
+            } finally {
+                if (ss != null) {
+                    try { ss.close(); } catch (Throwable ignored) {}
+                }
             }
         }, "craft-agents-fabric-bridge");
         serverThread.setDaemon(true);
@@ -338,7 +355,10 @@ public final class SyntheticPlayerFactory {
     private static String processCommand(String line, Instrumentation inst) {
         try {
             if (line == null || line.isEmpty()) return "ERR|EMPTY";
-            if (line.equals("PING")) return "PONG";
+            if (line.equals("PING")) {
+                Object server = resolveServerInstance(inst);
+                return server != null ? "PONG" : "PONG|NO_SERVER";
+            }
 
             Object server = resolveServerInstance(inst);
             if (server == null) return "ERR|NO_SERVER";

@@ -17,8 +17,36 @@
   ^String [^String fmt & args]
   (String/format java.util.Locale/ROOT fmt (to-array args)))
 
+(defn- active-bridge-port []
+  (let [f (java.io.File. "/tmp/craft-agents-bridge.port")]
+    (if (.exists f)
+      (try (Integer/parseInt (clojure.string/trim (slurp f)))
+           (catch Throwable _ 25595))
+      25595)))
+
+(defn- connect-bridge-socket! []
+  (let [ports (distinct [(active-bridge-port) 25596 25595])]
+    (some (fn [p]
+            (try
+              (let [s (Socket. "127.0.0.1" (int p))]
+                (.setTcpNoDelay s true)
+                (.setSoTimeout s 2500)
+                (let [in  (BufferedReader. (InputStreamReader. (.getInputStream s) StandardCharsets/UTF_8))
+                      out (PrintWriter. (OutputStreamWriter. (.getOutputStream s) StandardCharsets/UTF_8) true)]
+                  (.println out "PING")
+                  (let [resp (.readLine in)]
+                    (if (= resp "PONG")
+                      (do
+                        (reset! bridge-conn-atom {:sock s :in in :out out :port p})
+                        true)
+                      (do
+                        (try (.close s) (catch Throwable _ nil))
+                        nil)))))
+              (catch Throwable _ nil)))
+          ports)))
+
 (defn raw-send-bridge-cmd!
-  "Envia linha de comando ao In-Server Bridge em 127.0.0.1:25595 com reconexao automatica."
+  "Envia linha de comando ao In-Server Bridge em 127.0.0.1 com reconexao automatica."
   [line]
   (locking bridge-conn-atom
     (loop [attempt 0]
@@ -27,22 +55,18 @@
         (let [res (try
                     (when (or (nil? @bridge-conn-atom)
                               (.isClosed ^Socket (:sock @bridge-conn-atom)))
-                      (let [s (Socket. "127.0.0.1" 25595)]
-                        (.setTcpNoDelay s true)
-                        (.setSoTimeout s 2500)
-                        (reset! bridge-conn-atom
-                                {:sock s
-                                 :in   (BufferedReader. (InputStreamReader. (.getInputStream s) StandardCharsets/UTF_8))
-                                 :out  (PrintWriter. (OutputStreamWriter. (.getOutputStream s) StandardCharsets/UTF_8) true)})))
-                    (let [{:keys [^BufferedReader in ^PrintWriter out]} @bridge-conn-atom]
-                      (.println out (str line))
-                      (when (.checkError out)
-                        (throw (java.io.IOException. "Falha de escrita no socket")))
-                      (if-let [l (.readLine in)]
-                        l
-                        (do
-                          (close-bridge-conn!)
-                          nil)))
+                      (connect-bridge-socket!))
+                    (if-let [{:keys [^BufferedReader in ^PrintWriter out]} @bridge-conn-atom]
+                      (do
+                        (.println out (str line))
+                        (when (.checkError out)
+                          (throw (java.io.IOException. "Falha de escrita no socket")))
+                        (if-let [l (.readLine in)]
+                          l
+                          (do
+                            (close-bridge-conn!)
+                            nil)))
+                      nil)
                     (catch Throwable _
                       (close-bridge-conn!)
                       nil))]
