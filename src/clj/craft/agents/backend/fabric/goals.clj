@@ -517,7 +517,7 @@
             (try
               (curriculum/dispatch-curiosity-to-swe!
                hyp
-               {:repo-dir "/home/pace/dev/craft-agents"
+               {:repo-dir "/home/pace/dev/minecraft/craft-agents"
                 :task-id tid
                 :model "deepseek-v4-1-flash"
                 :test-cmd "make test"

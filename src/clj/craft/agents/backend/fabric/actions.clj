@@ -16,7 +16,7 @@
     (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:block.campfire.crackle master @a[distance=..24] ~ ~ ~ 0.9 1.2")))
 
 (defn load-skin-meta [skin-filename]
-  (let [f (io/file (str "/home/pace/minecraft-server/skins/" skin-filename))]
+  (let [f (io/file (str "/home/pace/dev/minecraft/server/skins/" skin-filename))]
     (if (.exists f)
       (try
         (let [m (json/read-str (slurp f) :key-fn keyword)]
@@ -36,7 +36,7 @@
         (reset! last-attach-attempt-ms now)
         (println "[craft-agents] Anexando In-Server Bridge ao servidor Fabric (rate-limited)...")
         (try
-          (sh/sh "make" "attach" :dir "/home/pace/dev/craft-agents")
+          (sh/sh "make" "attach" :dir "/home/pace/dev/minecraft/craft-agents")
           (Thread/sleep 1000)
           (catch Throwable t
             (println "[craft-agents] Aviso ao anexar bridge:" (.getMessage t)))))))

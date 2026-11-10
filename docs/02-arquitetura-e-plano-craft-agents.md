@@ -1,6 +1,6 @@
 # Especificação de Arquitetura & Plano de Implementação: `craft-agents`
 
-Documento consolidado com todas as decisões de design fechadas para o **`craft-agents`** (`/home/pace/dev/craft-agents`, Licença **MIT**) — motor de agentes autônomos, NPCs vivos e IA incorporada projetado para substituir e superar o Mineflayer.
+Documento consolidado com todas as decisões de design fechadas para o **`craft-agents`** (`/home/pace/dev/minecraft/craft-agents`, Licença **MIT**) — motor de agentes autônomos, NPCs vivos e IA incorporada projetado para substituir e superar o Mineflayer.
 
 ---
 
@@ -8,7 +8,7 @@ Documento consolidado com todas as decisões de design fechadas para o **`craft-
 
 | Eixo de Design | Decisão Fechada | Benefício Direto sobre o Mineflayer |
 | :--- | :--- | :--- |
-| **Identidade & Licença** | `/home/pace/dev/craft-agents` (**MIT**) | Produto independente em sinergia com o [craft-repl](file:///home/pace/dev/craft-repl/README.md). |
+| **Identidade & Licença** | `/home/pace/dev/minecraft/craft-agents` (**MIT**) | Produto independente em sinergia com o [craft-repl](file:///home/pace/dev/minecraft/craft-repl/README.md). |
 | **Arquitetura de Transporte** | **Dual-Backend (`AgentBackend` + `VoxelAccessor`)** | `v0.1` usa Backend Server-Native JVM; `v0.2` adiciona Backend Cliente Headless TCP (`MCProtocolLib` + Virtual Threads). |
 | **Stack do Núcleo** | **Clojure 1.12 + Java 21/25** | Clojure para estado imutável, Behavior Trees, Malli e MCP; Java 21 primitivo zero-allocation para A\* 3D e ponte Netty/Fabric. |
 | **Entidade no Servidor (`v0.1`)** | **`ServerPlayerEntity` + Netty `EmbeddedChannel`** | Jogador 100% real para todos os mods (*JEG*, *Naturalist*, *FabricTailor*), `<500 KB` RAM/bot e zero serialização/desync de rede. |
@@ -90,10 +90,10 @@ stateDiagram-v2
 
 ---
 
-## 3. Estrutura do Repositório (`/home/pace/dev/craft-agents`)
+## 3. Estrutura do Repositório (`/home/pace/dev/minecraft/craft-agents`)
 
 ```text
-/home/pace/dev/craft-agents/
+/home/pace/dev/minecraft/craft-agents/
 ├── deps.edn                                  # Clojure 1.12, core.async, malli, data.json, http-kit, nrepl
 ├── Makefile                                  # compile-java, uberjar, attach, test, studio
 ├── README.md                                 # Documentação técnica e guia MCP / Behavior Trees
@@ -152,12 +152,12 @@ flowchart LR
 > **Meta de Aceite do MVP `v0.1`:** Aposentar `mc-karlach.service`, `mc-picard.service` e `mc-npc.service` (Node.js/Mineflayer), rodando **Karlach**, **Picard** e **Antigravity** dentro do `craft-agents` com consumo `< 2 MB` totais para os 3 bots, zero erros de pacote com armas *JEG*, e travessia perfeita (abrir -> entrar -> alimentar animais *Naturalist* -> sair -> trancar) nos cercados de portão duplo.
 
 ### Fase 1: Fundação do Projeto, Contratos Malli & Dual-Boot (Attach + Fabric Mod)
-1. Inicializar `/home/pace/dev/craft-agents` com `deps.edn`, `Makefile` e schemas Malli em `craft.agents.schemas`.
+1. Inicializar `/home/pace/dev/minecraft/craft-agents` com `deps.edn`, `Makefile` e schemas Malli em `craft.agents.schemas`.
 2. Implementar `CraftAgentsAgent.java` (suportando tanto `agentmain` Zero-Install no `KnotClassLoader` quanto `ModInitializer` via `fabric.mod.json`) e o hook de tick seguro no `ServerThread`.
 3. Definir os protocolos de fronteira Dual-Backend (`IAgentBackend`, `IVoxelWorld`) garantindo zero vazamento de classes Minecraft para fora do pacote `fabric`.
 
 ### Fase 2: Jogador Sintético In-Memory (`EmbeddedChannel` + `ServerPlayerEntity`)
-1. Implementar `FakeNettyChannel.java` e `SyntheticPlayerFactory.java` (resolvendo nomes Intermediary/Mojmap dinamicamente no Fabric 1.21.1 como feito em [core.clj](file:///home/pace/dev/craft-repl/src/clj/craft/core.clj)).
+1. Implementar `FakeNettyChannel.java` e `SyntheticPlayerFactory.java` (resolvendo nomes Intermediary/Mojmap dinamicamente no Fabric 1.21.1 como feito em [core.clj](file:///home/pace/dev/minecraft/craft-repl/src/clj/craft/core.clj)).
 2. Suportar spawn persistente, aplicação de skin (*FabricTailor* / propriedades `GameProfile`), controle físico real por tick (`forward`, `strafe`, `jump`, `sprint`, `sneak`, `yaw`/`pitch`), inventário completo, uso de itens/blocos (`interactionManager`) e disparo/ataque com itens de mods (*JEG*).
 
 ### Fase 3: Motor Numérico `PathSolver3D` (Java 21 Zero-Allocation) + Portais Semânticos

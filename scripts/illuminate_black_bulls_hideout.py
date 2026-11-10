@@ -10,7 +10,7 @@ import socket
 import sys
 import time
 
-sys.path.append("/home/pace/dev/craft-agents/scripts")
+sys.path.append("/home/pace/dev/minecraft/craft-agents/scripts")
 from paste_black_bulls_hideout import parse_schematic, SCHEMATIC_PATH, ORIGIN_X, ORIGIN_Y, ORIGIN_Z
 
 BRIDGE_HOST = "127.0.0.1"

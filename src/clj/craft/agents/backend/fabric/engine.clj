@@ -125,7 +125,7 @@
     ;; 2. Chat listener thread monitorando client & server latest.log em paralelo (latência de 100ms)
     (doto (Thread.
            (fn []
-             (let [server-log (io/file "/home/pace/minecraft-server/logs/latest.log")
+             (let [server-log (io/file "/home/pace/dev/minecraft/server/logs/latest.log")
                    client-log (io/file "/home/pace/.minecraft/logs/latest.log")
                    seen-msgs  (atom {})]
                (loop [s-pos (if (.exists server-log) (.length server-log) 0)

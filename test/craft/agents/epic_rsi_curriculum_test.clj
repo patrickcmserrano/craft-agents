@@ -384,11 +384,11 @@
                       :prompt/directive "Sintetize uma rotina de aproximação e carinho para a capivara."}
           swe-task (curriculum/generate-swe-task-from-hypothesis
                     hypothesis
-                    {:repo-dir "/home/pace/dev/craft-agents"
+                    {:repo-dir "/home/pace/dev/minecraft/craft-agents"
                      :task-id "task-capybara-care"
                      :model "deepseek-v4-1-flash"})]
       (is (= "task-capybara-care" (:task-id swe-task)))
-      (is (= "/home/pace/dev/craft-agents" (:repo-dir swe-task)))
+      (is (= "/home/pace/dev/minecraft/craft-agents" (:repo-dir swe-task)))
       (is (= "deepseek-v4-1-flash" (:model swe-task)))
       (is (= :edn (:envelope-format swe-task)))
       (is (= "make test" (:test-cmd swe-task)))
@@ -401,7 +401,7 @@
                       :prompt/directive "Rotina de capivara"}
           dispatch (curriculum/dispatch-curiosity-to-swe!
                     hypothesis
-                    {:repo-dir "/home/pace/dev/craft-agents"
+                    {:repo-dir "/home/pace/dev/minecraft/craft-agents"
                      :task-id "task-capybara-queue"
                      :queue-dir (.getPath tmp-queue)})]
       (is (true? (:dispatched? dispatch)))

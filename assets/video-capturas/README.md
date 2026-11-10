@@ -1,6 +1,6 @@
 # Assets Visuais em 1080p — Roteiro de Vídeo `craft-agents`
 
-Todos os **23 assets visuais** abaixo foram gerados autonomamente em resolução nativa **1920x1080 (16:9 Full HD)** com tema escuro de estúdio e já estão disponíveis no diretório [`assets/video-capturas/`](file:///home/pace/dev/craft-agents/assets/video-capturas/). Eles estão prontos para importação direta na timeline do seu software de edição (DaVinci Resolve, Premiere Pro, Final Cut).
+Todos os **23 assets visuais** abaixo foram gerados autonomamente em resolução nativa **1920x1080 (16:9 Full HD)** com tema escuro de estúdio e já estão disponíveis no diretório [`assets/video-capturas/`](file:///home/pace/dev/minecraft/craft-agents/assets/video-capturas/). Eles estão prontos para importação direta na timeline do seu software de edição (DaVinci Resolve, Premiere Pro, Final Cut).
 
 | Arquivo | Tempo no Roteiro | Categoria | Conteúdo / Callout na Edição |
 | :--- | :--- | :--- | :--- |

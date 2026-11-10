@@ -744,7 +744,7 @@ public final class SyntheticPlayerFactory {
                 int tz = (int) Math.floor(Double.parseDouble(to[2]));
                 try {
                     java.net.URLClassLoader pathLoader = new java.net.URLClassLoader(
-                            new java.net.URL[]{ new java.io.File("/home/pace/dev/craft-agents/target/classes/").toURI().toURL() },
+                            new java.net.URL[]{ new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/").toURI().toURL() },
                             cl
                     );
                     Class<?> voxCls = pathLoader.loadClass("com.craft.agents.fabric.LiveWorldVoxelAccessor");
@@ -1119,7 +1119,7 @@ public final class SyntheticPlayerFactory {
                 String className = parts[1];
                 try {
                     Class<?> target = Class.forName(className);
-                    java.io.File f = new java.io.File("/home/pace/dev/craft-agents/target/classes/" + className.replace('.', '/') + ".class");
+                    java.io.File f = new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/" + className.replace('.', '/') + ".class");
                     if (f.exists() && inst != null && inst.isRedefineClassesSupported()) {
                         byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
                         inst.redefineClasses(new java.lang.instrument.ClassDefinition(target, b));

@@ -16,7 +16,7 @@ public final class BridgeReloadAgent {
 
     public static void agentmain(String agentArgs, Instrumentation inst) {
         try {
-            File jarFile = new File("/home/pace/dev/craft-agents/target/craft-agents.jar");
+            File jarFile = new File("/home/pace/dev/minecraft/craft-agents/target/craft-agents.jar");
             if (jarFile.exists() && inst != null) {
                 try {
                     inst.appendToSystemClassLoaderSearch(new java.util.jar.JarFile(jarFile));
@@ -33,12 +33,12 @@ public final class BridgeReloadAgent {
                 defMethod.setAccessible(true);
             } catch (Throwable ignored) {}
 
-            File root = new File("/home/pace/dev/craft-agents/target/classes");
+            File root = new File("/home/pace/dev/minecraft/craft-agents/target/classes");
             if (root.exists() && defMethod != null && targetCl != null) {
                 loadClassesRecursively(root, root, targetCl, defMethod, inst);
             }
 
-            File clsFile = new File("/home/pace/dev/craft-agents/target/classes/com/craft/agents/fabric/SyntheticPlayerFactory.class");
+            File clsFile = new File("/home/pace/dev/minecraft/craft-agents/target/classes/com/craft/agents/fabric/SyntheticPlayerFactory.class");
             if (clsFile.exists() && inst != null && inst.isRedefineClassesSupported()) {
                 byte[] bytes = Files.readAllBytes(clsFile.toPath());
                 inst.redefineClasses(new ClassDefinition(SyntheticPlayerFactory.class, bytes));
@@ -53,7 +53,7 @@ public final class BridgeReloadAgent {
                 com.craft.agents.fabric.SyntheticItemCollector.class
             };
             for (Class<?> hc : helperClasses) {
-                File f = new File("/home/pace/dev/craft-agents/target/classes/" + hc.getName().replace('.', '/') + ".class");
+                File f = new File("/home/pace/dev/minecraft/craft-agents/target/classes/" + hc.getName().replace('.', '/') + ".class");
                 if (f.exists() && inst != null && inst.isRedefineClassesSupported()) {
                     try {
                         byte[] b = Files.readAllBytes(f.toPath());

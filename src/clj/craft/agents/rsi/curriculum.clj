@@ -248,7 +248,7 @@
 (defn generate-swe-task-from-hypothesis
   "Converte uma hipótese de curiosidade do Curriculum Agent em uma tarefa executável para o SWE-Runner."
   [hypothesis & [{:keys [repo-dir task-id model test-cmd target-files]
-                  :or {repo-dir "/home/pace/dev/craft-agents"
+                  :or {repo-dir "/home/pace/dev/minecraft/craft-agents"
                        model "deepseek-v4-1-flash"
                        test-cmd "make test"
                        target-files ["src/clj/craft/agents/bt/builtins.clj"

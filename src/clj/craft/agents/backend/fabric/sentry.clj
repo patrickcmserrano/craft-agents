@@ -243,7 +243,7 @@
           (picard/picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))))
 
 (defonce ^:private log-file-pos (atom 0))
-(def ^:private server-log-path "/home/pace/minecraft-server/logs/latest.log")
+(def ^:private server-log-path "/home/pace/dev/minecraft/server/logs/latest.log")
 
 (defn poll-server-log-chat!
   "Le novas linhas do latest.log do Minecraft server em tempo real (fallback robusto de chat)."

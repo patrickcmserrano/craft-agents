@@ -230,7 +230,7 @@ Marcações de direção:
 
 ## 3. Shot List & Direção Visual Sincronizada (YouTube 16:9)
 
-Todos os **23 assets gráficos e capturas autônomas (1920x1080)** abaixo já estão prontos em [`assets/video-capturas/`](file:///home/pace/dev/craft-agents/assets/video-capturas/).
+Todos os **23 assets gráficos e capturas autônomas (1920x1080)** abaixo já estão prontos em [`assets/video-capturas/`](file:///home/pace/dev/minecraft/craft-agents/assets/video-capturas/).
 
 | Tempo | Cena / Visual na Tela (Assets Prontos + Takes) | Texto / Callout Gráfico | Notas de Ritmo e Edição |
 | :--- | :--- | :--- | :--- |
@@ -255,7 +255,7 @@ Todos os **23 assets gráficos e capturas autônomas (1920x1080)** abaixo já es
 
 ## 4. Checklist Prático de Gravação e Pós-Produção (OBS + Whisper)
 
-> **Status dos Assets:** Todos os **23 slides, diagramas, cards de código e capturas web em 1080p** já estão gerados em [`assets/video-capturas/`](file:///home/pace/dev/craft-agents/assets/video-capturas/). O **OBS Studio** já está configurado com cadeia vocal (`RNNoise` + `Compressor` + `Limiter -1.5dB`) e gravação multicanal (`Faixa 1 = Mix`, `Faixa 2 = Voz Isolada`, `Faixa 3 = Jogo/SFX Isolado`).
+> **Status dos Assets:** Todos os **23 slides, diagramas, cards de código e capturas web em 1080p** já estão gerados em [`assets/video-capturas/`](file:///home/pace/dev/minecraft/craft-agents/assets/video-capturas/). O **OBS Studio** já está configurado com cadeia vocal (`RNNoise` + `Compressor` + `Limiter -1.5dB`) e gravação multicanal (`Faixa 1 = Mix`, `Faixa 2 = Voz Isolada`, `Faixa 3 = Jogo/SFX Isolado`).
 
 1. **Takes Manuais Restantes (Minecraft + Câmera):**
    - **Take In-Game 1 (~20s):** Santuário em `[-171, 65, 171]` mostrando os portões duplos de cerca, capivaras (*Naturalist*) e fuzil (*JEG*).

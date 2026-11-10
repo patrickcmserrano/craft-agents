@@ -99,7 +99,7 @@ flowchart TB
 
 - [ ] **`CA-008` — Entrypoint Nativo de Mod Fabric (`fabric.mod.json` + `FabricModInit.java`)**
   - **Arquivos:** `resources/fabric.mod.json`, `src/java/com/craft/agents/fabric/FabricModInit.java`
-  - **Escopo:** Permitir que o mesmo JAR, se colocado em `/home/pace/minecraft-server/mods/`, inicialize automaticamente no evento `SERVER_STARTED` e desligue limpamente em `SERVER_STOPPING`.
+  - **Escopo:** Permitir que o mesmo JAR, se colocado em `/home/pace/dev/minecraft/server/mods/`, inicialize automaticamente no evento `SERVER_STARTED` e desligue limpamente em `SERVER_STOPPING`.
   - **Bloqueado por:** `CA-007`.
   - **DoD:** Manifesto válido reconhecido pelo `FabricLoader` sem conflitar com o modo Attach.
 
@@ -361,7 +361,7 @@ flowchart TB
   - **DoD:** Teste real invocando um `Ravager` confirma detecção, mira suave, combate com armas *JEG* sem nenhum erro `Chunk size...` de pacote e retorno automático à escolta.
 
 - [ ] **`CA-047` — Descomissionamento dos Serviços Mineflayer e Serviço Único `craft-agents`**
-  - **Arquivos:** Configuração systemd / auto-boot em `/home/pace/minecraft-server/mods/` (ou serviço de attach)
+  - **Arquivos:** Configuração systemd / auto-boot em `/home/pace/dev/minecraft/server/mods/` (ou serviço de attach)
   - **Escopo:** Parar e desabilitar `mc-karlach.service`, `mc-picard.service` e `mc-npc.service`, ativando o `craft-agents` como runtime oficial dos 3 agentes.
   - **Bloqueado por:** `CA-044`, `CA-045`, `CA-046`.
   - **DoD:** `ps aux` confirma **zero processos Node.js de bots**, economia comprovada de **`~600 MB` de RAM** no host Linux e `20.0 TPS` estáveis no servidor.
