@@ -347,12 +347,40 @@
        {:found? false}))))
 
 (defn auto-eat-food!
-  "Consome alimento para restaurar barra de fome e curar vida."
-  ([player-name] (auto-eat-food! player-name "minecraft:apple"))
-  ([player-name food-item]
-   (transport/send-bridge-cmd! (str "CMD|item replace entity " player-name " weapon.mainhand with " food-item))
-   (transport/send-bridge-cmd! (str "SWING|" player-name))
-   (transport/send-bridge-cmd! (str "CMD|execute at " player-name " run playsound minecraft:entity.generic.eat neutral @a ~ ~ ~ 1.0 1.0"))
-   (transport/send-bridge-cmd! (str "CMD|effect give " player-name " minecraft:saturation 2 1 true"))
-   (transport/send-bridge-cmd! (str "CMD|effect give " player-name " minecraft:instant_health 1 0 true"))
-   {:eaten? true :item food-item}))
+  "Restaura a vida e a barra de fome de um agente pela escrita direta (SET_VITALS).
+
+  NAO usa `effect give`: medido em 2026-11-10, NENHUM efeito (`saturation`,
+  `instant_health`, `regeneration`) move a barra destas entidades, e o `data merge`
+  tambem nao cola — elas tem um ServerPlayNetworkHandler sobre um EmbeddedChannel
+  vazio, SEM tick de jogador, entao o valor e re-derivado do estado de spawn. O
+  unico caminho que pega e escrever no objeto vivo: `SET_VITALS` chama `setHealth`
+  (method_6033) e os setters do HungerManager (method_7580/method_7583) direto.
+
+  A versao anterior ainda equipava uma maca na mainhand e swingava, destruindo a
+  arma do agente (Picard perdia o spyglass). Aqui nao se toca no inventario."
+  ([player-name] (auto-eat-food! player-name nil))
+  ([player-name _food-item]
+   (let [resp (transport/send-bridge-cmd! (str "SET_VITALS|" player-name "|20.0|20|5.0"))]
+     {:fed? (and resp (str/starts-with? resp "OK")) :player player-name :resp resp})))
+
+(def ^:private all-agent-names
+  "Os quatro agentes server-native spawnados pelo boot do craft-agents."
+  ["Karlach" "Picard" "Coco" "Richeh"])
+
+(defn feed-hungry-agents!
+  "Alimenta qualquer agente cuja barra de fome tenha caido abaixo de `threshold`.
+
+  Existe porque o boot so da `resistance` a todos e nunca alimenta ninguem: medido
+  em 2026-11-10, o Picard chegou a hp=1 food=0 e nada o socorria (a funcao de
+  comer existia mas nunca era chamada). Um agente faminto perde vida.
+
+  Devolve a lista de nomes alimentados nesta passada (vazia se nenhum)."
+  ([] (feed-hungry-agents! 6))
+  ([threshold]
+   (vec
+    (keep (fn [nm]
+            (let [{:keys [food alive?]} (query-health-status nm)]
+              (when (and alive? (some? food) (< food threshold))
+                (auto-eat-food! nm)
+                nm)))
+          all-agent-names))))

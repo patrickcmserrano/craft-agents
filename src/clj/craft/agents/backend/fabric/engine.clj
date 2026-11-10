@@ -4,7 +4,8 @@
             [clojure.string :as str]
             [craft.agents.backend.fabric.actions :as actions
              :refer [attack-hostile-target! auto-eat-food! collect-nearby-drops!
-                     ensure-live-bridge-and-agents! inspect-inventory karlach-say!
+                     ensure-live-bridge-and-agents! feed-hungry-agents!
+                     inspect-inventory karlach-say!
                      last-drop-ms locate-dropped-items locate-nearby-ores mine-block!
                      ore-pt-names query-leash-status query-online-players
                      query-sitting-status scan-nearby-hostiles]]
@@ -193,6 +194,12 @@
                        (refresh-real-world-weather-async!)
                        (when-not (bridge-alive?)
                          (ensure-live-bridge-and-agents!)))
+
+                     ;; Vigilancia de fome: sem isto um agente chega a hp=1/food=0
+                     ;; e morre (medido: Picard em 2026-11-10). Alimenta os quatro
+                     ;; a cada ~10 s (tick de 100 ms).
+                     (when (zero? (mod tick 100))
+                       (feed-hungry-agents!))
 
                      ;; ========================================================
                      ;; A) Tick do Capitão Picard (Ponte da Enterprise-D + Clima)

@@ -76,6 +76,7 @@
 (def locate-nearby-ores actions/locate-nearby-ores)
 (def raycast-player-look actions/raycast-player-look)
 (def auto-eat-food! actions/auto-eat-food!)
+(def feed-hungry-agents! actions/feed-hungry-agents!)
 (defn equip-item!
   "Equipa item nativamente via opcode EQUIP_ITEM da bridge (Zero CMD - CA-049)."
   [player-name slot item-id]

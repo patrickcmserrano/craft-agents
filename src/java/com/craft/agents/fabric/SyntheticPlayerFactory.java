@@ -1080,6 +1080,43 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            if ("SET_VITALS".equals(op) && parts.length >= 4) {
+                // Escrita de vida/fome no objeto vivo. `data merge` NAO serve: as
+                // entidades server-native tem um ServerPlayNetworkHandler sobre um
+                // EmbeddedChannel vazio, sem tick de jogador, e o valor volta ao de
+                // spawn (medido: `data merge {Health:5}` na Karlach com hp 20 devolveu
+                // 20; effects de cura/saturation nao movem a barra). Escrever direto no
+                // HungerManager e no setHealth e o que pega.
+                //
+                // NAO usa runOnServerThread/lambda aqui: adicionar um lambda cria uma
+                // classe sintetica nova, e o JVM recusa redefinir a classe viva
+                // ("attempted to add a method"). Chamada direta, sem lambda.
+                String pName = parts[1];
+                float hp = Float.parseFloat(parts[2]);
+                int food = Integer.parseInt(parts[3]);
+                float sat = parts.length >= 5 ? Float.parseFloat(parts[4]) : 5.0f;
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player == null) return "ERR|NO_PLAYER";
+                try {
+                    player.getClass().getMethod("method_6033", float.class).invoke(player, hp);
+                    Object hunger = null;
+                    for (Method m : player.getClass().getMethods()) {
+                        if ("method_7344".equals(m.getName()) || "getHungerManager".equals(m.getName())) {
+                            hunger = m.invoke(player);
+                            break;
+                        }
+                    }
+                    if (hunger != null) {
+                        hunger.getClass().getMethod("method_7580", int.class).invoke(hunger, food);
+                        hunger.getClass().getMethod("method_7583", float.class).invoke(hunger, sat);
+                    }
+                    return "OK|SET|" + pName;
+                } catch (Throwable t) {
+                    return "ERR|SET_FAILED:" + t.getMessage();
+                }
+            }
+
             if ("POSE_STATUS".equals(op) && parts.length >= 2) {
                 // Postura viva da entidade. NAO e campo NBT: so existe como metodo
                 // (`method_18376` = getPose, devolve class_4050). `getPose` NAO tem
