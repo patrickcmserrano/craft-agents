@@ -43,7 +43,6 @@ public final class SyntheticPlayerFactory {
 
     public static void hookChatEvents(ClassLoader cl) {
         if (cl == null || "true".equals(System.getProperty("craft.agents.chat.hooked"))) return;
-        System.setProperty("craft.agents.chat.hooked", "true");
         try {
             Class<?> smeClass = Class.forName("net.fabricmc.fabric.api.message.v1.ServerMessageEvents", true, cl);
             Field f = smeClass.getField("CHAT_MESSAGE");
@@ -53,7 +52,10 @@ public final class SyntheticPlayerFactory {
                 cl,
                 new Class<?>[]{chatIface},
                 (p, m, args) -> {
-                    if ("onChatMessage".equals(m.getName()) && args != null && args.length >= 2) {
+                    // A interface do Fabric tem um unico metodo (o callback). Casar
+                    // por nome e fragil — no runtime obfuscado ele pode nao ser
+                    // "onChatMessage" — por isso basta ser void com 2+ argumentos.
+                    if (m.getReturnType() == void.class && args != null && args.length >= 2) {
                         try {
                             Object msg = args[0];
                             Object player = args[1];
@@ -80,10 +82,19 @@ public final class SyntheticPlayerFactory {
                 }
             );
             Method regMethod = chatEvent.getClass().getMethod("register", Object.class);
+            // O CHAT_MESSAGE e um ArrayBackedEvent do Fabric, classe de impl NAO
+            // publica. Sem setAccessible o getMethod("register") acha o metodo mas
+            // o invoke explode com IllegalAccessException (a classe declarante nao
+            // e acessivel por este loader) — era o que jogava todo o hook no
+            // fallback e deixava o chat do jogo fora da fila para sempre.
+            regMethod.setAccessible(true);
             regMethod.invoke(chatEvent, proxy);
+            // So marca depois do sucesso: um registro falho antes deixava a flag
+            // ligada e o hook nunca mais era tentado (nem com re-attach).
+            System.setProperty("craft.agents.chat.hooked", "true");
             System.out.println("[craft-agents] ✅ Hook de Chat Fabric nativo registrado via ServerMessageEvents!");
         } catch (Throwable t) {
-            System.out.println("[craft-agents] ℹ️ Hook ServerMessageEvents (fallback para chat poll/injecao): " + t.getMessage());
+            System.out.println("[craft-agents] ⚠️ Hook ServerMessageEvents indisponivel (cai no fallback de poll/injecao): " + t);
         }
     }
 
