@@ -103,7 +103,7 @@
 
 (defn picard-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "tellraw @a [\"\",{\"text\":\"<\",\"color\":\"dark_gray\"},"
+        json-cmd (str "execute at Picard run tellraw @a[distance=..16] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
                       "{\"text\":\"Picard\",\"color\":\"aqua\",\"bold\":true},"
                       "{\"text\":\"> \",\"color\":\"dark_gray\"},"
                       "{\"text\":\"" safe-msg "\",\"color\":\"white\"}]")]

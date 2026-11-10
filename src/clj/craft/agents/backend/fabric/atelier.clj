@@ -33,7 +33,7 @@
 
 (defn coco-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "tellraw @a [{\"text\":\"<\",\"color\":\"dark_gray\"},"
+        json-cmd (str "execute at Coco run tellraw @a[distance=..16] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
                       "{\"text\":\"Coco\",\"color\":\"yellow\",\"bold\":true},"
                       "{\"text\":\"> \",\"color\":\"dark_gray\"},"
                       "{\"text\":\"" safe-msg "\",\"color\":\"yellow\"}]")]
@@ -43,7 +43,7 @@
 
 (defn richeh-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "tellraw @a [{\"text\":\"<\",\"color\":\"dark_gray\"},"
+        json-cmd (str "execute at Richeh run tellraw @a[distance=..16] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
                       "{\"text\":\"Richeh\",\"color\":\"aqua\",\"bold\":true},"
                       "{\"text\":\"> \",\"color\":\"dark_gray\"},"
                       "{\"text\":\"" safe-msg "\",\"color\":\"aqua\"}]")]
