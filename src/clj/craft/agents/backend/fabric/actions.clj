@@ -8,10 +8,10 @@
 
 (defn karlach-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "tellraw @a [\"\",{\"text\":\"<\",\"color\":\"dark_gray\"},"
+        json-cmd (str "tellraw @a [{\"text\":\"<\",\"color\":\"dark_gray\"},"
                       "{\"text\":\"Karlach\",\"color\":\"red\",\"bold\":true},"
                       "{\"text\":\"> \",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"" safe-msg "\",\"color\":\"gold\"}]")]
+                      "{\"text\":\"" safe-msg "\",\"color\":\"red\"}]")]
     (transport/send-bridge-cmd! (str "CMD|" json-cmd))
     (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:block.campfire.crackle master @a[distance=..24] ~ ~ ~ 0.9 1.2")))
 

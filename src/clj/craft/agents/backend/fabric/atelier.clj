@@ -34,7 +34,7 @@
 (defn coco-say! [msg]
   (let [safe-msg (str/replace msg "\"" "\\\"")
         json-cmd (str "tellraw @a [{\"text\":\"<\",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"Coco\",\"color\":\"gold\",\"bold\":true},"
+                      "{\"text\":\"Coco\",\"color\":\"yellow\",\"bold\":true},"
                       "{\"text\":\"> \",\"color\":\"dark_gray\"},"
                       "{\"text\":\"" safe-msg "\",\"color\":\"yellow\"}]")]
     (send-bridge-cmd! (str "CMD|" json-cmd))
