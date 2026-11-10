@@ -28,7 +28,7 @@ flowchart TB
     subgraph EXT["Interfaces Externas e DevTools"]
         MCP["MCP Server (stdio e HTTP SSE)"]
         WS["WebSocket JSON-RPC e Agent Studio UI (Porta 8095)"]
-        REPL["nREPL Live Coding e Hot-Reload Watcher (EDN)"]
+        REPL["nREPL Live Coding: :7891 no engine (craft.agents.*) e :7890 in-server (KnotClassLoader, entidades e pose)"]
     end
 
     subgraph BRAIN["Camada Clojure 1.12 (Estado Imutável e Orquestração)"]

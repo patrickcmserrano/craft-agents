@@ -60,6 +60,7 @@ O **Craft Agents** é um framework e sistema operacional cognitivo para agentes 
 * **🗣️ Roteamento Semântico em Linguagem Natural:** Roteamento por similaridade de cossenos em subwords (< 1ms) permitindo comandos livres, variações e gírias sem necessidade de `/` ou sintaxes pré-definidas.
 * **🛋️ Seat Manager & Raycasting 3D:** Identificação espacial ativa de blocos de sofá e cadeiras, sentando e levantando sem demandar mods de terceiros no cliente.
 * **📡 Craft Agents Studio (`:8095`):** Dashboard web responsivo em tempo real com Radar 3D interativo, feeds de decisão cognitiva e biblioteca visual de skills.
+* **🧬 nREPL de Inspeção em Duas JVMs (`:7891` engine, `:7890` in-server):** Avaliação de Clojure/Java ao vivo contra o estado real dos agentes — `:7891` enxerga o engine (`craft.agents.*`, rotas, blackboard); `:7890` roda dentro da JVM do servidor, no `KnotClassLoader`, e alcança as classes nativas (`SyntheticPlayerFactory`, entidade viva, pose).
 * **🔌 Suporte Nativo a MCP (Model Context Protocol):** Servidor JSON-RPC 2.0 padrão da indústria para controle e inspeção por ferramentas de IA externas (Claude Desktop, Cursor, Antigravity).
 
 ---
@@ -86,15 +87,43 @@ O **Craft Agents** é um framework e sistema operacional cognitivo para agentes 
 # Compilar contratos e módulos nativos Java 21
 make compile-java
 
-# Executar toda a suíte de testes TDD (75 suítes / 1005 asserções)
+# Executar toda a suíte de testes TDD (118 suítes / 1412 asserções)
 make test
 
 # Executar apenas um épico específico (ex: Épico 3 - Navegação 3D)
 make test-epic EPIC=3
 
 # Iniciar o Craft Agents Studio na porta 8095
+# (sobe também o nREPL do engine em :7891)
 make studio
+
+# Gerar a lista de classpath consumida pelo nREPL in-server (:7890)
+make classpath-list
+
+# Acoplar o agente ao servidor vivo e subir o nREPL in-server em :7890
+make attach
 ```
+
+## 🧬 Inspeção por nREPL
+
+O `craft-agents` expõe **duas portas nREPL** para avaliar Clojure/Java contra o
+estado vivo — cada uma no seu classloader:
+
+| Porta | JVM / Loader | Alcança |
+| :--- | :--- | :--- |
+| `:7891` | engine (`clojure -M`, carregado pelo `make studio`) | `craft.agents.*` — rotas, blackboard, `backend.fabric`, decisões |
+| `:7890` | **servidor Minecraft** (`KnotClassLoader`, via `make attach`) | classes nativas (`SyntheticPlayerFactory`), entidade viva, pose |
+
+```bash
+# Avaliar uma forma contra o engine vivo
+scripts/nrepl.py --port 7891 '(craft.agents.backend.fabric/query-online-players)'
+
+# Avaliar dentro da JVM do servidor (classe nativa por reflection)
+scripts/nrepl.py --port 7890 '(java.lang.Class/forName "com.craft.agents.fabric.SyntheticPlayerFactory")'
+```
+
+> **Atenção:** o nREPL `1.3.0` **não responde** se o cliente enviar o campo `id`;
+> o `scripts/nrepl.py` já omite `id` e casa as respostas pela `session`.
 
 ---
 
