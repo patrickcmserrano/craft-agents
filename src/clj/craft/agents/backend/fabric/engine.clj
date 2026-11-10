@@ -21,7 +21,7 @@
              :refer [barks-for-current-position close-portal-at-coord!
                      compute-enclosure-funnel current-enclosure-id
                      feed-enclosure-animals! open-portal-at-coord!
-                     sanctuary-enclosures-by-id sanctuary-route
+                     patrol-route sanctuary-enclosures-by-id sanctuary-route
                      set-double-gate!]]
             [craft.agents.backend.fabric.sentry :as sentry
              :refer [handle-player-command! proactive-sentry-scan!]]
@@ -854,8 +854,8 @@
                                         :tick tick
                                         :leases {:legs {:owner :rain-shelter} :hands nil :gaze {:owner :social-gaze}}
                                         :agents (make-agents-map "Sentada no banco do quarto 🌧️🪑" [cx cy cz])))
-                               (let [next-idx (mod (inc (:route-idx st 0)) (count sanctuary-route))
-                                     next-stop (nth sanctuary-route next-idx)]
+                               (let [next-idx (mod (inc (:route-idx st 0)) (count patrol-route))
+                                     next-stop (nth patrol-route next-idx)]
                                  (swap! nav-state assoc
                                         :route-idx next-idx
                                         :steps (vec (expand-route-microsteps next-stop [cx cy cz])))))

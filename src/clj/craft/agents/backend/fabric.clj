@@ -117,6 +117,8 @@
 (def barks-for-current-position sanctuary/barks-for-current-position)
 (def build-sanctuary-route sanctuary/build-sanctuary-route)
 (def sanctuary-route sanctuary/sanctuary-route)
+(def build-patrol-route sanctuary/build-patrol-route)
+(def patrol-route sanctuary/patrol-route)
 (def sanctuary-portals-by-pos sanctuary/sanctuary-portals-by-pos)
 (def sanctuary-enclosures-by-id sanctuary/sanctuary-enclosures-by-id)
 (def compute-enclosure-funnel sanctuary/compute-enclosure-funnel)

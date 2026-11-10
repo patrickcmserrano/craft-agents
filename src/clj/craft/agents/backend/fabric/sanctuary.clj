@@ -111,6 +111,15 @@
 
 (def sanctuary-route (build-sanctuary-route))
 
+(defn build-patrol-route
+  "Rota de PATRULHA: os postos do santuario SEM o Quarto da Karlach (CA-061).
+   A patrulha nao deve visitar o quarto — ele so e usado em duas ocasiões, ambas
+   explicitas: descanso pedido pelo jogador ou abrigo de chuva (CA-060)."
+  [route]
+  (vec (remove #(= (:type %) :quarters) route)))
+
+(def patrol-route (build-patrol-route sanctuary-route))
+
 (def sanctuary-portals-by-pos
   (try
     (let [reg (regions/load-region-file "agents/regions/sanctuary.edn")]

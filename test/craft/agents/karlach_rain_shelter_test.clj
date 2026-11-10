@@ -138,6 +138,26 @@
       (is (= [-131.0 65.0 198.0] (:seat-pos quarters))
           "O banco declarado e o another_furniture:acacia_bench medido em [-131,65,198]"))))
 
+(deftest ca-061-patrol-never-visits-quarters-test
+  (testing "CA-061a: A patrulha NAO passa pelo Quarto da Karlach"
+    (let [patrol fabric/patrol-route]
+      (is (seq patrol) "A rota de patrulha nao pode ficar vazia")
+      (is (not-any? #(= (:type %) :quarters) patrol)
+          "Nenhuma parada :quarters no ciclo de patrulha — ela nao visita o quarto a toa")))
+
+  (testing "CA-061b: O Quarto continua no catalogo (o abrigo precisa dele)"
+    (let [route (fabric/build-sanctuary-route)
+          q (some #(when (= (:type %) :quarters) %) route)]
+      (is (some? q) "O quarto segue na rota completa, com :pos e :seat-pos para o abrigo/descanso")
+      (is (= [-131.0 65.0 198.0] (:seat-pos q)))))
+
+  (testing "CA-061c: A patrulha e a rota completa menos o quarto"
+    (let [full   (fabric/build-sanctuary-route)
+          patrol (fabric/build-patrol-route full)]
+      (is (= (dec (count full)) (count patrol))
+          "So o quarto sai da rota de patrulha")
+      (is (= (vec (remove #(= (:type %) :quarters) full)) patrol)))))
+
 (deftest ca-060f-shelter-goal-and-quarters-wiring-test
   (testing "CA-060f: A decisao de abrigo leva ao Quarto da Karlach da rota real"
     (let [route    (fabric/build-sanctuary-route)
