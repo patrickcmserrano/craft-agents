@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "tasks": {
+    "architecture": {
+      "description": "how craft-agents is put together: build, the dual cognitive architecture, the docs and the entry namespaces",
+      "roots": [
+        {
+          "id": "project-manifests",
+          "node_types": ["file"],
+          "path_globs": ["deps.edn", "Makefile", "mise.toml"],
+          "priority": "critical",
+          "why": "how this project is built and run"
+        },
+        {
+          "id": "architecture-docs",
+          "node_types": ["file"],
+          "path_globs": ["README*", "AGENTS.md", "docs/08-*.md", "docs/02-*.md"],
+          "priority": "critical",
+          "why": "the thesis (08) and the architecture plan (02). Other docs are pulled on demand, not by default, because doc 05 (video script) and doc 04 (backlog) are large and only relevant to their own tasks"
+        },
+        {
+          "id": "entry-namespaces",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.core", "craft.agents.cognition", "craft.agents.cognition.intent"],
+          "defined_in_repository": true,
+          "why": "the two cognitive entry points"
+        }
+      ],
+      "expand": {
+        "edge_types": ["requires"],
+        "hops": 1,
+        "direction": "out"
+      },
+      "closure": ["declares:both"]
+    },
+
+    "cognition": {
+      "description": "the dual cognitive architecture (System 2): Voyager skill synthesis, the Malli gatekeeper, the semantic router, the negative-memory ledger and the environmental critic",
+      "roots": [
+        {
+          "id": "cognition-core",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.cognition.**", "craft.agents.cognition"],
+          "defined_in_repository": true,
+          "why": "the System-2 layer: intent routing, grounding, critic, ledger"
+        },
+        {
+          "id": "behavior-trees",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.bt.**"],
+          "defined_in_repository": true,
+          "why": "the Behavior Tree engine and builtins the synthesizer emits into"
+        },
+        {
+          "id": "skill-library",
+          "node_types": ["file"],
+          "path_globs": ["skills/**", "agents/**"],
+          "priority": "normal",
+          "why": "the persisted Voyager skills and agent definitions"
+        }
+      ],
+      "expand": {
+        "edge_types": ["requires"],
+        "hops": 2,
+        "direction": "out"
+      },
+      "closure": ["declares:both"]
+    },
+
+    "backend-fabric": {
+      "description": "System 1: the server-native reactive engine over ServerPlayerEntity — transport, sanctuary, sentry, navigation, picard and the synthetic player",
+      "roots": [
+        {
+          "id": "fabric-backend",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.backend.fabric.**", "craft.agents.backend.fabric"],
+          "defined_in_repository": true,
+          "why": "the 20Hz reactive layer that runs inside the Minecraft server JVM"
+        },
+        {
+          "id": "backend-protocol",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.backend.protocol", "craft.agents.backend.tcp"],
+          "defined_in_repository": true,
+          "why": "the bridge protocol between the cognitive layer and the server"
+        }
+      ],
+      "expand": {
+        "edge_types": ["requires"],
+        "hops": 2,
+        "direction": "out"
+      },
+      "closure": ["declares:both"]
+    },
+
+    "astrophysics": {
+      "description": "the celestial/ephemeris line: deterministic starfield, HR-diagram math and the celestial agent consciousness",
+      "roots": [
+        {
+          "id": "astro-ns",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.astrophysics**"],
+          "defined_in_repository": true,
+          "why": "the ephemeris and celestial consciousness namespaces"
+        },
+        {
+          "id": "astro-assets",
+          "node_types": ["file"],
+          "path_globs": ["assets/**", "resources/**"],
+          "priority": "normal",
+          "why": "the GLSL sky shaders and pack assets the line renders from"
+        }
+      ],
+      "expand": {
+        "edge_types": ["requires"],
+        "hops": 1,
+        "direction": "out"
+      },
+      "closure": ["declares:both"]
+    },
+
+    "testing": {
+      "description": "the test suite, what it covers and how it is run (make test / make test-epic)",
+      "roots": [
+        {
+          "id": "test-namespaces",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.**-test", "craft.agents.**.*-test"],
+          "defined_in_repository": true,
+          "why": "the TDD suite: 118 tests / 1412 assertions by default"
+        },
+        {
+          "id": "test-runner",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.test-runner", "craft.agents.fixtures.**"],
+          "defined_in_repository": true,
+          "why": "how the suite is invoked and what it fixtures"
+        }
+      ],
+      "expand": {
+        "edge_types": ["requires"],
+        "hops": 1,
+        "direction": "out"
+      },
+      "closure": ["declares:both"]
+    }
+  }
+}

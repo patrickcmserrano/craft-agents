@@ -8,7 +8,10 @@ state/*.jsonl
 !state/.gitkeep
 *.class
 *.jar
+# repo-index artifacts: the index is generated (regenerate with `repo-index scan`),
+# but navigation/tasks.json is policy and is versioned.
 /.ai-factory/index/
-.ai-factory/
+/.ai-factory/policy/
+/.ai-factory/benchmarks/
 __pycache__/
 *.pyc
