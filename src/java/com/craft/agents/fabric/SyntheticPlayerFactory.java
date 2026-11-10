@@ -454,7 +454,13 @@ public final class SyntheticPlayerFactory {
                                         (int) Math.floor(x), (int) Math.floor(y + 0.1), (int) Math.floor(z));
                                 Object bState = overworld.getClass().getMethod("method_8320", bpCls).invoke(overworld, bp);
                                 String bStr = bState.toString().toLowerCase();
-                                if (bStr.contains("water")) {
+                                // O fallback antigo aceitava qualquer bloco cujo toString
+                                // contivesse "water" — e o toString de um bloco SECO
+                                // waterlogged traz "waterlogged=false", que CONTEM a
+                                // substring "water". Isso ligava inWater em terra seca e
+                                // grudava a pose SWIMMING. So aceita agua de facto.
+                                if (bStr.contains("minecraft:water[") || bStr.equals("minecraft:water")
+                                        || bStr.startsWith("block{minecraft:water}")) {
                                     inWater = true;
                                 }
                             } catch (Throwable ignored) {}
@@ -479,12 +485,24 @@ public final class SyntheticPlayerFactory {
                         } else {
                             try {
                                 player.getClass().getMethod("method_5796", boolean.class).invoke(player, false);
-                                if (!sneak) {
-                                    Class<?> poseCls = Class.forName("net.minecraft.class_4050", true, cl);
+                                // O reset para STANDING estava gated em `!sneak`: com
+                                // sneak=true a pose SWIMMING ficava grudada para sempre
+                                // (medido: Karlach e Picard em terra seca com
+                                // Pose=SWIMMING). Fora da agua, LIMPA sempre a pose de
+                                // natação — so mantem agachado se sneak.
+                                Class<?> poseCls = Class.forName("net.minecraft.class_4050", true, cl);
+                                Object posingNow = player.getClass().getMethod("method_18376").invoke(player);
+                                Object swimPose = poseCls.getField("field_18079").get(null);
+                                boolean stuckSwimming = posingNow != null && posingNow.equals(swimPose);
+                                if (!sneak || stuckSwimming) {
                                     Object standPose = poseCls.getField("field_18076").get(null);
                                     player.getClass().getMethod("method_18380", poseCls).invoke(player, standPose);
                                 }
-                            } catch (Throwable ignored) {}
+                            } catch (Throwable t) {
+                                // Falha aqui deixa a pose presa e, antes, era engolida em
+                                // silencio. Loga para nao repetir o defeito invisivel.
+                                System.out.println("[craft-agents] Aviso: reset de pose falhou: " + t.getMessage());
+                            }
                         }
                         try {
                             Object overworld = player.getClass().getMethod("method_51469").invoke(player);
@@ -1060,6 +1078,43 @@ public final class SyntheticPlayerFactory {
                     return SyntheticPhysiology.inspectPlayerHealth(player, cl).toProtocolString();
                 }
                 return "ERR|NO_PLAYER";
+            }
+
+            if ("POSE_STATUS".equals(op) && parts.length >= 2) {
+                // Postura viva da entidade. NAO e campo NBT: so existe como metodo
+                // (`method_18376` = getPose, devolve class_4050). `getPose` NAO tem
+                // nome com "pose" no runtime Fabric: so o stub Polymer aparece, por
+                // isso o nome correto se descobre por TIPO DE RETORNO (class_4050),
+                // nao por nome. Le-se aqui, inline, e nao num helper: redefinir
+                // SyntheticPhysiology para ganhar o metodo falha no JVM
+                // ("class redefinition failed: attempted to change the class
+                // NestHost, NestMembers, Record...").
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player == null) return "ERR|NO_PLAYER";
+                String pose = "UNKNOWN";
+                boolean water = false, submerged = false, onGround = false, swimming = false;
+                double vx = 0.0, vy = 0.0, vz = 0.0;
+                try {
+                    Object p = player.getClass().getMethod("method_18376").invoke(player);
+                    if (p != null) pose = p.toString();
+                } catch (Throwable ignored) {}
+                try { water = (Boolean) player.getClass().getMethod("method_5816").invoke(player); } catch (Throwable ignored) {}
+                try { submerged = (Boolean) player.getClass().getMethod("method_5869").invoke(player); } catch (Throwable ignored) {}
+                try { onGround = (Boolean) player.getClass().getMethod("method_24828").invoke(player); } catch (Throwable ignored) {}
+                try { swimming = (Boolean) player.getClass().getMethod("method_5804").invoke(player); } catch (Throwable ignored) {}
+                try {
+                    Object v = player.getClass().getMethod("method_18798").invoke(player);
+                    if (v != null) {
+                        vx = ((Number) v.getClass().getMethod("method_10216").invoke(v)).doubleValue();
+                        vy = ((Number) v.getClass().getMethod("method_10214").invoke(v)).doubleValue();
+                        vz = ((Number) v.getClass().getMethod("method_10215").invoke(v)).doubleValue();
+                    }
+                } catch (Throwable ignored) {}
+                return String.format(java.util.Locale.ROOT,
+                        "OK|%s|water=%b|submerged=%b|onGround=%b|swimming=%b|vel=[%.3f,%.3f,%.3f]",
+                        pose, water, submerged, onGround, swimming, vx, vy, vz);
             }
 
             if ("LOCATE_ITEMS".equals(op) && parts.length >= 2) {
