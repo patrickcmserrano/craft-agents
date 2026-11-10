@@ -9,7 +9,11 @@ STUDIO_PORT ?= 8095
 NREPL_PORT ?= 7890
 
 JAVA_SOURCES = $(shell find src/java -name "*.java" | sort)
-CLOJURE_JARS_LIST = /tmp/clojure_jars.txt
+# Arquivo de classpath PROPRIO do craft-agents. NAO use /tmp/clojure_jars.txt:
+# esse caminho e do craft-repl (CraftAgent.java e ClojureBootstrapperAgent.java o
+# consomem), e sobrescreve-lo trocava o src/clj do craft-repl pelo daqui,
+# quebrando o nREPL 7888 daquele repo.
+CLOJURE_JARS_LIST = /tmp/craft-agents-classpath.txt
 
 .PHONY: all compile-java test test-epic tdd-status jar attach studio clean classpath-list
 

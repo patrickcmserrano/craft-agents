@@ -31,7 +31,13 @@ public final class NreplBootstrap {
 
     private static final AtomicBoolean STARTED = new AtomicBoolean(false);
     private static final int DEFAULT_PORT = 7890;
-    private static final String JARS_LIST = "/tmp/clojure_jars.txt";
+    /**
+     * Classpath proprio do craft-agents, gerado por `make classpath-list`.
+     * NAO e o /tmp/clojure_jars.txt do craft-repl: aquele arquivo alimenta o
+     * CraftAgent.java (porta 7888) e trocar a primeira linha pelo src/clj daqui
+     * removia o codigo do craft-repl daquele REPL.
+     */
+    private static final String JARS_LIST = "/tmp/craft-agents-classpath.txt";
 
     private NreplBootstrap() {}
 

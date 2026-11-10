@@ -106,7 +106,7 @@ def read_msgs(sock, timeout, where=None):
     return "".join(out), "".join(err), val, msgs
 
 
-def eval_code(host, port, code, timeout=25):
+def eval_code(host, port, code, timeout=25, prelude=None):
     s = socket.create_connection((host, port), timeout=timeout)
     # clone sem id — com id o nREPL 1.3.0 nao responde (medido 2026-11-10).
     s.sendall(ben({"op": "clone"}))
@@ -128,6 +128,9 @@ def eval_code(host, port, code, timeout=25):
             buf = buf[n:]
             if "new-session" in msg:
                 session = _s(msg["new-session"])
+    if prelude:
+        s.sendall(ben({"op": "eval", "session": session, "code": prelude}))
+        read_msgs(s, timeout, where=session)
     s.sendall(ben({"op": "eval", "session": session, "code": code}))
     out, err, val, _ = read_msgs(s, timeout, where=session)
     s.close()
