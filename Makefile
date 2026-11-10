@@ -9,10 +9,15 @@ STUDIO_PORT ?= 8095
 NREPL_PORT ?= 7890
 
 JAVA_SOURCES = $(shell find src/java -name "*.java" | sort)
+CLOJURE_JARS_LIST = /tmp/clojure_jars.txt
 
-.PHONY: all compile-java test test-epic tdd-status jar attach studio clean
+.PHONY: all compile-java test test-epic tdd-status jar attach studio clean classpath-list
 
 all: compile-java
+
+classpath-list: compile-java
+	@$(CLOJURE) -Spath | tr ':' '\n' | awk 'BEGIN{dir="/home/pace/dev/minecraft/craft-agents"} {if ($$0 ~ /^\//) print; else print dir "/" $$0}' > $(CLOJURE_JARS_LIST)
+	@echo "[+] Lista de classpath para o nREPL in-server em $(CLOJURE_JARS_LIST) ($$(wc -l < $(CLOJURE_JARS_LIST)) entradas)"
 
 compile-java:
 	@mkdir -p $(BUILD_DIR)
@@ -38,7 +43,7 @@ jar: compile-java
 	$(JAR) cmf target/MANIFEST.MF $(AGENT_JAR) -C $(BUILD_DIR) . -C resources .
 	@echo "[+] Artefato gerado em $(AGENT_JAR)"
 
-attach: jar
+attach: jar classpath-list
 	@PID_RESOLVED=$$( [ -n "$(PID)" ] && echo "$(PID)" || pgrep -f "[s]erver.jar nogui" | head -n 1 ); \
 	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[f]abric-server-launcher" | head -n 1); fi; \
 	if [ -z "$$PID_RESOLVED" ]; then PID_RESOLVED=$$(pgrep -f "[K]notServer" | head -n 1); fi; \
@@ -46,10 +51,10 @@ attach: jar
 		echo "[-] Erro: Servidor Minecraft nao detectado em execucao!"; \
 		exit 1; \
 	fi; \
-	echo "[+] Anexando craft-agents ao PID $$PID_RESOLVED..."; \
+	echo "[+] Anexando craft-agents ao PID $$PID_RESOLVED (nREPL in-server :$(NREPL_PORT))..."; \
 	TMP_JAR="target/craft-agents-attach-$$$$.jar"; \
 	cp $(AGENT_JAR) "$$TMP_JAR"; \
-	$(JAVA) -cp $(BUILD_DIR) com.craft.agents.attach.AttachCli $$PID_RESOLVED "$$TMP_JAR" $(STUDIO_PORT)
+	$(JAVA) -Dcraft.agents.nrepl.port=$(NREPL_PORT) -cp $(BUILD_DIR) com.craft.agents.attach.AttachCli $$PID_RESOLVED "$$TMP_JAR" $(STUDIO_PORT)
 
 clean:
 	rm -rf target .cpcache

@@ -16,6 +16,16 @@ public final class CraftAgentsBootstrap {
 
     public static void agentmain(String agentArgs, Instrumentation inst) {
         SyntheticPlayerFactory.startInServerBridge(inst, 25595);
+
+        // nREPL in-server (porta 7890) no mesmo KnotClassLoader do engine, para
+        // avaliar Clojure contra o estado vivo dos agentes server-native.
+        try {
+            int nreplPort = Integer.getInteger("craft.agents.nrepl.port", 7890);
+            NreplBootstrap.start(inst, nreplPort);
+        } catch (Throwable t) {
+            System.out.println("[craft-agents] Aviso: nREPL in-server nao iniciou: " + t.getMessage());
+        }
+
         if (!BOOTSTRAPPED.compareAndSet(false, true)) {
             System.out.println("[craft-agents] Agente ja inicializado no processo alvo (In-Server Bridge verificado em :25595).");
             return;

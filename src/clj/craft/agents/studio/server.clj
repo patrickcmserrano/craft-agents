@@ -7,6 +7,7 @@
             [craft.agents.astrophysics.ephemeris :as ephem]
             [craft.agents.backend.fabric :as fabric]
             [craft.agents.cognition.semantic-router :as router]
+            [nrepl.server :as nrepl]
             [org.httpkit.server :as http]))
 
 (defn load-skill-library
@@ -160,6 +161,19 @@
     (println (str "[craft-agents] 🚀 Agent Studio ativo em http://localhost:" p))
     (http/run-server handler {:port p})))
 
+(defn start-nrepl-server!
+  "Sobe um nREPL (default 7891) nesta JVM — o classloader do engine, que já tem
+  craft.agents.* carregado. Serve para avaliar Clojure contra o engine vivo:
+  rotas, blackboard, live-ctx, decisões. Não alcança a entidade no mundo (isso é
+  o nREPL in-server da porta 7890)."
+  [port]
+  (let [p (or port 7891)]
+    (try
+      (nrepl/start-server :port p :bind "127.0.0.1")
+      (println (str "[craft-agents] nREPL do engine escutando em 127.0.0.1:" p))
+      (catch Throwable t
+        (println "[craft-agents] Erro ao iniciar nREPL do engine:" (.getMessage t))))))
+
 (defn -main [& args]
   (let [port (or (some-> (first args) parse-long) 8095)
         live-ctx (atom {:tick 0
@@ -172,5 +186,6 @@
     (router/load-persisted-routes! "agents/routes")
     (fabric/start-live-karlach-loop! live-ctx)
     (start-studio-server! live-ctx port)
+    (start-nrepl-server! (or (some-> (second args) parse-long) 7891))
     (println "[craft-agents] 🔥 Karlach Server-Native + Agent Studio em execucao continua.")
     (while true (Thread/sleep 10000))))
