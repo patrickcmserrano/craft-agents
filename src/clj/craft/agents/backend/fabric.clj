@@ -167,3 +167,6 @@
 
 (def start-live-karlach-loop! engine/start-live-karlach-loop!)
 (def evaluate-combat-preemption engine/evaluate-combat-preemption)
+(def rain-shelter-decision engine/rain-shelter-decision)
+(def weather-transition engine/weather-transition)
+(def shelter-route-steps engine/shelter-route-steps)

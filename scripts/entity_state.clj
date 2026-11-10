@@ -80,6 +80,14 @@
      (state-line host port nm timeout)
      (catch Throwable e (str "ERR " (.getMessage e))))))
 
+(defn send-cmd
+  "Envia uma linha crua a ponte (ex.: \"CMD|/weather rain\") e devolve a resposta."
+  ([line] (send-cmd line default-host default-port 2.5))
+  ([line host port timeout]
+   (try
+     (bridge-send host port line timeout)
+     (catch Throwable e (str "ERR " (.getMessage e))))))
+
 (defn- parse-args [args]
   (loop [m {:host default-host :port default-port :timeout 2.5
             :n 1 :interval 1.0 :all false :entity "Karlach"}
@@ -92,11 +100,14 @@
       (= a "--n") (recur (assoc m :n (Long/parseLong (first more))) (rest more))
       (= a "--interval") (recur (assoc m :interval (Double/parseDouble (first more))) (rest more))
       (= a "--all") (recur (assoc m :all true) more)
+      (= a "--send") (recur (assoc m :send (first more)) (rest more))
       :else (recur (assoc m :entity a) more))))
 
 (defn -main [& args]
-  (let [{:keys [host port timeout n interval all entity]} (parse-args args)
+  (let [{:keys [host port timeout n interval all entity send]} (parse-args args)
         names (if all ["Karlach" "Picard" "Coco" "Richeh"] [entity])]
+    (when send
+      (println (format "SEND %s -> %s" send (send-cmd send host port timeout))))
     (loop [i 0 prev {}]
       (when (< i n)
         (let [prev' (reduce

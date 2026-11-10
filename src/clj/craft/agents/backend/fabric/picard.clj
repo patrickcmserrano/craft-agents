@@ -119,3 +119,16 @@
     (picard-say! (format "📡 [Sensores Orbitais Enterprise-D] Horário local: %s (%s) | %s (%s)."
                          (:clock mc-w) (:phase mc-w) (:sky mc-w) (:next-transition mc-w)))
     (picard-say! (format "🌍 [Telemetria Atmosférica Terrestre] %s." real-w))))
+
+(defn picard-broadcast-rain-alert!
+  "Aviso GLOBAL de chuva (CA-060). Diferente de picard-say!, este tellraw usa @a
+   SEM seletor de distancia, para alcancar todos os jogadores independente de onde
+   estejam — um alerta de ponte nao deve depender de proximidade."
+  []
+  (let [msg "📡 [Sensores Enterprise-D] Frente de chuva detectada no quadrante. Todos aos abrigos!"
+        json-cmd (str "tellraw @a [{\"text\":\"<\",\"color\":\"dark_gray\"},"
+                      "{\"text\":\"Picard\",\"color\":\"aqua\",\"bold\":true},"
+                      "{\"text\":\"> \",\"color\":\"dark_gray\"},"
+                      "{\"text\":\"" msg "\",\"color\":\"yellow\"}]")]
+    (transport/send-bridge-cmd! (str "CMD|" json-cmd))
+    (transport/send-bridge-cmd! "CMD|playsound minecraft:block.beacon.ambient master @a ~ ~ ~ 0.8 1.4")))

@@ -14,7 +14,8 @@
              :refer [compute-pitch compute-yaw expand-route-microsteps
                      generate-walk-steps request-path3d]]
             [craft.agents.backend.fabric.picard :as picard
-             :refer [picard-say! picard-stations refresh-real-world-weather-async!]]
+             :refer [picard-broadcast-rain-alert! picard-say! picard-stations
+                     query-minecraft-weather refresh-real-world-weather-async!]]
             [craft.agents.backend.fabric.sanctuary :as sanctuary
              :refer [barks-for-current-position close-portal-at-coord!
                      compute-enclosure-funnel current-enclosure-id
@@ -87,6 +88,69 @@
          :target-pos leader-pos
          :clear-follow-path? false}))))
 
+;; ============================================================================
+;; CA-060 — Abrigo Autonomo da Karlach contra Chuva
+;; ============================================================================
+;; Comportamento: se estiver chovendo, a Karlach NAO patrulha o santuario.
+;; Ela interrompe a rota, recolhe-se ao Quarto da Karlach e espera o tempo abrir.
+;; Aqui ficam apenas as decisoes puras (testaveis); o loop de 20Hz as consome.
+
+(defn rain-shelter-decision
+  "Decide o que a Karlach faz diante do clima no tick atual (CA-060).
+   Entrada: {:raining? bool-or-nil :thundering? bool-or-nil :mode kw :sheltering? bool}
+   Saida:
+     :shelter -> chovendo/trovejando e ainda na rua: aborta a patrulha e vai pro quarto
+     :wait    -> chovendo/trovejando e ja no quarto: permanece abrigada
+     :resume  -> tempo abriu com abrigo ativo: conclui o descanso e retoma a ronda
+     :none    -> nada a fazer (ceu limpo ou clima desconhecido)
+   Fail-safe: leitura de clima ausente (ponte caida) NUNCA trava a Karlach no
+   quarto — vale como ceu limpo, exceto para liberar quem ja estava abrigada."
+  [{:keys [raining? thundering? mode sheltering?]}]
+  (let [wet (or (true? raining?) (true? thundering?))]
+    (cond
+      (and sheltering? (not wet))   {:action :resume  :speak? true}
+      (and sheltering? wet)         {:action :wait    :speak? false}
+      (and wet (= mode :sanctuary-patrol)) {:action :shelter :speak? true}
+      :else                         {:action :none    :speak? false})))
+
+(defn weather-transition
+  "Detecta a BORDA do clima entre duas leituras (CA-060).
+   Entrada: mapa anterior e mapa atual, cada um com :raining?/:thundering?.
+   Saida: :started-raining | :stopped-raining | :none
+   \"Molhado\" agrega chuva E trovoada, entao alternar entre as duas nao gera flap."
+  [prev current]
+  (let [wet? (fn [w] (or (true? (:raining? w)) (true? (:thundering? w))))
+        was-wet (wet? prev)
+        now-wet (wet? current)]
+    (cond
+      (and (not was-wet) now-wet) :started-raining
+      (and was-wet (not now-wet)) :stopped-raining
+      :else                       :none)))
+
+(defn shelter-route-steps
+  "Micro-etapas de caminhada da posicao atual ate o Quarto da Karlach (CA-060).
+   `quarters-stop` e a parada :type :quarters da rota do santuario; se ausente,
+   devolve nil (o loop degrada com seguranca, sem explodir).
+
+   ATENCAO: expand-route-microsteps de :quarters produz ida (equip + portoes +
+   caminhada) + DESCANSO (o :wait rotulado Descansando) + RETORNO a ronda
+   (a rota normal passa pelo quarto e segue). Para o abrigo so interessa a IDA:
+   cortamos logo apos o descanso, para ela PARAR no quarto em vez de caminhar de
+   volta e travar no santuario. Nao basta cortar no primeiro :wait - a ida ja tem
+   :wait de portao/tranca antes do descanso."
+  [quarters-stop from-pos]
+  (when-let [qpos (:pos quarters-stop)]
+    (let [all-steps (vec (expand-route-microsteps {:type :quarters :pos qpos} from-pos))
+          rest-idx  (first (keep-indexed
+                            (fn [i s]
+                              (when (and (= (:op s) :wait)
+                                         (some-> (:label s) (str/includes? "Descansando")))
+                                i))
+                            all-steps))]
+      (if rest-idx
+        (vec (take (inc rest-idx) all-steps))
+        all-steps))))
+
 (defn start-live-karlach-loop!
   "Inicia o loop de 20Hz da Karlach e do Capitão Picard no servidor Fabric e atualiza o engine-ctx do Agent Studio."
   [engine-ctx-atom]
@@ -101,6 +165,8 @@
                             :route-idx 0
                             :steps (vec (expand-route-microsteps (first sanctuary-route) [-175.0 65.0 180.0]))
                             :wait-left 0
+                            :sheltering? false
+                            :last-weather nil
                             :last-bark-ms 0})
         picard-state (atom {:pos [-65.0 145.0 101.0]
                             :yaw 0.0
@@ -193,7 +259,21 @@
                      (when (zero? (mod tick 200))
                        (refresh-real-world-weather-async!)
                        (when-not (bridge-alive?)
-                         (ensure-live-bridge-and-agents!)))
+                         (ensure-live-bridge-and-agents!))
+                       ;; CA-060: leitura do clima REAL do servidor. Na borda de
+                       ;; ceu limpo -> chuva, o Picard anuncia globalmente no chat
+                       ;; (tellraw @a sem filtro de distancia).
+                       (let [w   (query-minecraft-weather)
+                             prev (:last-weather @nav-state)
+                             edge (when prev (weather-transition prev w))]
+                         (when (= :started-raining edge)
+                           (picard-broadcast-rain-alert!))
+                         (swap! nav-state assoc :last-weather w)
+                         (swap! engine-ctx-atom assoc
+                                :weather-edge edge
+                                :weather-alerts-sent (if (= :started-raining edge)
+                                                       (inc (:weather-alerts-sent @engine-ctx-atom 0))
+                                                       (:weather-alerts-sent @engine-ctx-atom 0)))))
 
                      ;; Vigilancia de fome: sem isto um agente chega a hp=1/food=0
                      ;; e morre (medido: Picard em 2026-11-10). Alimenta os quatro
@@ -327,6 +407,15 @@
                                               :picard  picard-card
                                               :coco    coco-card
                                               :richeh  richeh-card})]
+                       ;; CA-060: expoe o modo e o clima da Karlach para observabilidade
+                       ;; (nav-state e let local, ilegivel do REPL; o ctx e legivel).
+                       (swap! engine-ctx-atom assoc
+                              :karlach-mode (:mode st)
+                              :karlach-nav-pos (:pos st)
+                              :weather (:last-weather st)
+                              :sheltering? (:sheltering? st false)
+                              :shelter-steps-left (count (:steps st))
+                              :shelter-step-head (first (:steps st)))
                        (cond
                          ;; 1. Dance override
                          (pos? (:dance-ticks st 0))
@@ -685,19 +774,68 @@
                                            (swap! nav-state assoc :mode :bodyguard :mining-blocks-broken 0 :active-mining nil :unreachable-ores #{}))))))))
                              (swap! nav-state assoc :mode :bodyguard :active-mining nil :unreachable-ores #{})))
 
-                         ;; 3. Sanctuary Patrol & Enclosure Caretaker BT loop
+                         ;; 2.5 CA-060 — Abrigo contra Chuva: nas BORDAS (comeco/fim da
+                         ;; chuva) interrompe a patrulha e enfileira o trajeto ate o
+                         ;; Quarto da Karlach. Enquanto chove (:wait) este ramo e
+                         ;; falso de proposito, para o :else consumir os micro-steps
+                         ;; com a mesma maquina de dead reckoning da patrulha.
                          (and (= (:mode st) :sanctuary-patrol)
+                              (contains? #{:shelter :resume}
+                                         (:action (rain-shelter-decision
+                                                   {:raining?    (:raining? (:last-weather st))
+                                                    :thundering? (:thundering? (:last-weather st))
+                                                    :mode        (:mode st)
+                                                    :sheltering? (:sheltering? st false)}))))
+                         (let [shelter (rain-shelter-decision {:raining?    (:raining? (:last-weather st))
+                                                               :thundering? (:thundering? (:last-weather st))
+                                                               :mode        (:mode st)
+                                                               :sheltering? (:sheltering? st false)})]
+                           (case (:action shelter)
+                             :shelter
+                             ;; Chovendo e na rua: aborta a patrulha e enfileira o
+                             ;; trajeto ao quarto (o ramo :else anda os micro-steps).
+                             (do
+                               (when (:speak? shelter)
+                                 (karlach-say! "Chovendo aqui fora, soldado! Vou me recolher ao quarto até o tempo abrir. 🔥🌧️"))
+                               (let [quarters (some #(when (= (:type %) :quarters) %) sanctuary-route)
+                                     steps    (vec (or (shelter-route-steps quarters [cx cy cz]) []))]
+                                 (swap! nav-state assoc :sheltering? true :steps steps))
+                               (swap! engine-ctx-atom assoc :tick tick
+                                      :leases {:legs {:owner :rain-shelter} :hands nil :gaze {:owner :path-look}}
+                                      :agents (make-agents-map "Abrigada da chuva 🌧️" [cx cy cz])))
+
+                             ;; :resume — tempo abriu: limpa o abrigo e devolve a rota
+                             ;; normal (o ramo :else re-expande no proximo ciclo).
+                             (do
+                               (when (:speak? shelter)
+                                 (karlach-say! "O tempo abriu! Voltando à ronda do santuário, soldado! ☀️"))
+                               (swap! nav-state assoc :sheltering? false :steps [])
+                               (swap! engine-ctx-atom assoc :tick tick
+                                      :leases nil
+                                      :agents (make-agents-map "Retomando a patrulha ☀️" [cx cy cz])))))
+
+                         ;; 3. Sanctuary Patrol & Enclosure Caretaker BT loop
+                         ;; (desligado durante o abrigo: nao sai para resgatar animal na chuva)
+                         (and (= (:mode st) :sanctuary-patrol)
+                              (not (:sheltering? st false))
                               (proactive-sentry-scan! engine-ctx-atom nav-state sanctuary-route))
                          nil
 
                          :else
                          (let [steps (:steps st)]
                            (if (empty? steps)
-                             (let [next-idx (mod (inc (:route-idx st 0)) (count sanctuary-route))
-                                   next-stop (nth sanctuary-route next-idx)]
-                               (swap! nav-state assoc
-                                      :route-idx next-idx
-                                      :steps (vec (expand-route-microsteps next-stop [cx cy cz]))))
+                             (if (:sheltering? st false)
+                               ;; Abrigada e sem steps: permanece no quarto ate o
+                               ;; tempo abrir (nao re-expande a rota de patrulha).
+                               (swap! engine-ctx-atom assoc
+                                      :tick tick
+                                      :leases {:legs {:owner :rain-shelter} :hands nil :gaze {:owner :path-look}}
+                                      :agents (make-agents-map "Descansando no quarto 🌧️" [cx cy cz]))
+                               (let [next-idx (mod (inc (:route-idx st 0)) (count sanctuary-route))
+                                     next-stop (nth sanctuary-route next-idx)]
+                                 (swap! nav-state assoc
+                                        :route-idx next-idx
+                                        :steps (vec (expand-route-microsteps next-stop [cx cy cz])))))
                              (let [cur-step    (first steps)
                                    op          (:op cur-step)
                                    invariants  (:invariants cur-step)
