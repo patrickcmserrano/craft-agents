@@ -8,4 +8,8 @@
         ring/ring-core {:mvn/version "1.13.0"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}}}}
+         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}}}
+  ;; Utilitarios de operacao em scripts/*.clj que usam os namespaces do engine
+  ;; (ex.: kit-pace -> transport/send-bridge-cmd!). Uso:
+  ;;   clojure -M:scripts -m kit-pace --apply
+  :scripts {:extra-paths ["scripts"]}}}
