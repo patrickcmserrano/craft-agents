@@ -117,8 +117,11 @@
    conjura: o JOGADOR quando comanda (`anchor-name` = nome dele, o `execute at
    <nome>` fica na posicao real dele), ou a bruxa na auto-defesa. Quando a
    ancora e a bruxa, usa-se o `:pos` do estado (o nome do NPC nao e resolvivel
-   pelo `execute at` do servidor). `ExplosionPower:0` para o fogo nao quebrar
-   blocos — o dano real continua a ser o do comando de dano.
+   pelo `execute at` do servidor). `ExplosionPower:1b` da DANO DE AREA REAL no
+   ponto de impacto — e o dano agora vem da propria explosao, nao de um comando
+   de dano (apontar a qualquer alvo passa a acerta-lo: a fireball voa ate la e
+   detona). O servidor corre com `mobGriefing=false` (MEDIDO e desligado por
+   isso), senao esta explosao quebraria blocos.
    SEM alvo (`target` nil), a direcao vem do vetor do olhar (`:look-direction`
    do snapshot): a varinha atira na mira mesmo sem mob nenhum a frente."
   ([st agent-name target] (projectile-cmd st agent-name nil target))
@@ -152,7 +155,7 @@
          at-expr (if send-cmd!
                    (uformat "at %s" anchor-name)
                    (uformat "positioned %.2f %.2f %.2f" wx wy wz))]
-     (uformat "CMD|execute %s run summon minecraft:fireball ^ ^1.2 ^1 {ExplosionPower:0b,Motion:[%.3f,%.3f,%.3f]}"
+     (uformat "CMD|execute %s run summon minecraft:fireball ^ ^1.2 ^1 {ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
               at-expr mx my mz))))
 
 (defn- burst-cmds
@@ -173,11 +176,14 @@
 
 (defn- hitkill-cmd
   "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
-  1.21) com `spell-hitkill-damage` — 100 mata mobs comuns de uma vez e deixa
-  bosses (wither, dragao) vivos. O alvo e preso por COORDENADAS + raio curto
-  (2 blocos) + `limit=1`, o mesmo que se mediu a funcionar pela ponte."
+  1.21) com `spell-hitkill-damage` e tipo `minecraft:explosion` — o dano da
+  FIREBALL em si (a fisica nao fere: MEDIDO que ExplosionPower 1 e 4 deixam o
+  zumbi a 20.0 hp; o comando com tipo explosion leva 20.0 -> 14.9). 100 mata
+  mobs comuns de uma vez e deixa bosses (wither, dragao) vivos. O alvo e preso
+  por COORDENADAS + raio curto (2 blocos) + `limit=1`, o mesmo que se mediu a
+  funcionar pela ponte."
   [{:keys [x y z]}]
-  (uformat "CMD|damage @e[x=%.2f,y=%.2f,z=%.2f,distance=..%.1f,limit=1,sort=nearest] %d minecraft:magic"
+  (uformat "CMD|damage @e[x=%.2f,y=%.2f,z=%.2f,distance=..%.1f,limit=1,sort=nearest] %d minecraft:explosion"
            x y z spell-hitkill-radius spell-hitkill-damage))
 
 (defn- grimoire-carried?
@@ -200,9 +206,12 @@
 ;; linha — os hostis que nao estao no cone de mira sao ignorados.
 
 (def ^:private aim-cone-deg
-  "Meio-angulo do cone de mira, em graus. O hostil tem de estar dentro deste
-   desvio da linha do olhar para contar como alvo da mira."
-  20.0)
+  "Meio-angulo do cone de mira, em graus. HISTORICO: era o limite dentro do qual
+   um hostil contava como alvo da mira — e por isso apontar para fora do cone
+   deixava a magia sem alvo. Passou a estar SEM LIMITE (nil): conta o hostil mais
+   alinhado com a linha do olhar, desde que esteja a FRENTE (cos > 0). Mantida
+   como constante documental."
+  nil)
 
 (defn- player-pes
   "Le a posicao dos pes do jogador (op PLAYERS -> nome,x,y,z). Devolve [x y z] ou nil."
@@ -268,23 +277,25 @@
 
 (defn select-aim-target
   "Escolhe, entre os `hostiles`, o que esta na mira do jogador: aquele cuja
-   direcao o jogador->hostil forma o menor angulo com a linha do olhar, desde
-   que dentro de `aim-cone-deg`. Devolve o hostil escolhido ou nil."
+   direcao o jogador->hostil forma o MENOR angulo com a linha do olhar. Ja NAO
+   ha cone maximo: apontar para qualquer hostil a frente conta (o mais alinhado
+   ganha); quem nao esta a frente (cos <= 0) e ignorado — nao se acerta pelas
+   costas. Devolve o hostil escolhido ou nil."
   [snapshot hostiles]
   (when (and snapshot (seq hostiles))
     (let [[dx dy dz] (:look-direction snapshot)
           [ox oy oz] (:ray-origin snapshot)
-          cos-limit (Math/cos (Math/toRadians aim-cone-deg))
           scored (keep (fn [{:keys [x y z] :as h}]
                          (let [vx (- (double x) (double ox))
                                vy (- (double y) (double oy))
                                vz (- (double z) (double oz))
                                vlen (max 0.001 (Math/sqrt (+ (* vx vx) (* vy vy) (* vz vz))))
                                cosang (/ (+ (* dx vx) (* dy vy) (* dz vz)) vlen)]
-                           (when (>= cosang cos-limit)
+                           ;; Só conta o que está A FRENTE do olhar (cos > 0).
+                           (when (pos? cosang)
                              [cosang h])))
                        hostiles)]
-      (second (apply max-key first (cons [(- (double cos-limit) 1.0) nil] scored))))))
+      (second (apply max-key first (cons [-1.0 nil] scored))))))
 
 (defn- cast-spell!
   "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
@@ -297,8 +308,11 @@
    `opts` pode trazer `:aim-target` — o hostil que o jogador mira; quando
    presente, E ELE o alvo (mesmo que outro esteja mais perto) — e
    `:look-snapshot` — a mira lida, que da a direcao do projetil quando NAO ha
-   alvo. O projetil VOA SEMPRE: com alvo vai ate ele, sem alvo vai na direcao
-   do olhar. So o DANO e os visuais de impacto dependem de haver alvo.
+   alvo. O projetil VOA SEMPRE: com alvo vai ate ele, sem alvo vai na direcao do
+   olhar. O DANO sai por comando `damage ... minecraft:explosion` no alvo
+   (MEDIDO: a fireball fisica NAO faz dano — so empurra; o comando, sim). O alvo
+   e o hostil mais alinhado com a mira, SEM cone maximo: apontar a qualquer mob a
+   frente acerta-o.
    Devolve true se havia alvo, false se atirou sem alvo."
   [st agent-name send-cmd! caster now particles sound burst-particles opts]
   (cond
@@ -321,7 +335,7 @@
       (send-cmd! (projectile-cmd st anchor send-cmd! target snapshot))
       (when target
         (send-cmd! (str "SWING|" agent-name))
-        ;; HIT KILL: dano 100 num golpe (mobs comuns morrem, bosses resistem).
+        ;; DANO DE EXPLOSAO por comando (a fireball fisica nao fere — MEDIDO).
         (send-cmd! (hitkill-cmd target))
         ;; Detonacao visual NAS COORDENADAS do alvo.
         (doseq [b (burst-cmds target burst-particles)] (send-cmd! b)))

@@ -92,9 +92,10 @@
           cmds @sent]
       (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") cmds)
           "Deve varrer hostis ancorados no CONJURADOR (pace), nao na bruxa")
-      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage") (str/includes? % " 100 "))
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                      (str/includes? % "fireball"))
                 cmds)
-          "Deve matar o hostil mais proximo com um golpe de dano 100 (hit kill)")
+          "Deve lancar a fireball com DANO DE AREA (a explosao e o dano)")
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")) cmds)
           "Deve emitir assinatura visual (particle)")
       (is (some #(str/starts-with? % "SWING|Coco") cmds)
@@ -109,7 +110,8 @@
           cmds @sent]
       (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") cmds)
           "Deve varrer hostis ancorados no CONJURADOR (pace)")
-      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage") (str/includes? % " 100 "))
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                      (str/includes? % "fireball"))
                 cmds))
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")) cmds))
       (is (some #(str/starts-with? % "SWING|Richeh") cmds)))))
@@ -130,7 +132,8 @@
           "O projetil nasce das coordenadas do conjurador (pace)")
       (is (re-find #"Motion:\[-?[0-9]" proj)
           "O projetil leva um vetor de velocidade calculado rumo ao alvo")
-      (is (str/includes? proj "ExplosionPower:0") "ExplosionPower:0 para nao quebrar blocos do mundo"))))
+      (is (str/includes? proj "ExplosionPower:1")
+          "ExplosionPower:1: a explosao e o visual/knockback (o dano vem do comando)"))))
 
 (deftest test-richeh-spell-detonates-burst-at-target
   (testing "Richeh detona a magia nas coordenadas do alvo (nao so na propria bruxa)"
@@ -144,18 +147,23 @@
                 cmds)
           "Deve haver um golpe visual ANCRADO NO ALVO (x=-28), nao so na Richeh"))))
 
-(deftest test-coco-spell-damage-is-hitkill
-  (testing "Coco aplica DANO 100 (hit kill de mobs comuns) em vez do golpe de mao"
+(deftest test-coco-spell-damage-is-an-explosion-command
+  (testing "Coco fere com o comando `damage` tipo explosion — a fireball fisica nao fere (MEDIDO)"
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)
           _ (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)
           cmds @sent
-          dmg (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "damage")
-                                   (str/includes? % " 100 ")) cmds))]
-      (is (some? dmg) "Deve aplicar dano 100 via CMD|damage (hit kill)")
+          proj (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                                    (str/includes? % "fireball")) cmds))
+          dmg (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds))]
+      (is (some? proj) "Deve lancar a fireball (visual)")
+      (is (str/includes? proj "ExplosionPower:1") "A fireball leva a explosao visual")
+      (is (some? dmg) "Deve aplicar o dano por comando (a fisica nao fere)")
+      (is (str/includes? dmg "minecraft:explosion")
+          "O tipo de dano e `explosion` (o dano da bola de fogo)")
       (is (not (some #(str/starts-with? % "ATTACK_HOSTILE") cmds))
-          "Nao deve usar o golpe de mao (ATTACK_HOSTILE) quando mata num golpe"))))
+          "Nao deve usar o golpe de mao (ATTACK_HOSTILE)"))))
 
 (deftest test-spell-requires-grimoire-in-hand
   (testing "Sem o grimorio na mao, a magia recusa e NAO emite dano nem projetil"
@@ -219,15 +227,28 @@
           chosen (atelier/select-aim-target snap hostiles)]
       (is (= 1 (:id chosen)) "Deve escolher o hostil colado na linha do olhar (+x)"))))
 
-(deftest test-aim-rejects-off-axis-hostiles
-  (testing "Hostis fora do cone de mira sao ignorados; sem ninguem na mira, nil"
+(deftest test-aim-accepts-any-hostile-in-front
+  (testing "Sem cone: um hostil à frente, mesmo bem de lado, é aceite"
+    ;; Ele pediu: "atire independente do mob, que acerte qualquer alvo". O cone
+    ;; de 20 graus que recusava os mobs de lado saiu — basta estar à frente
+    ;; (cos > 0). Antes este caso (12m de lado) dava nil.
     (let [aim-line [1.0 0.0 0.0]
           snap {:look-direction aim-line
                 :ray-origin [0.0 65.0 0.0]
                 :ray-max-dist 24.0}
           hostiles [{:id 7 :type "minecraft:creeper" :x 2.0 :y 65.0 :z 12.0 :dist 12.2 :hp 20.0}]]
+      (is (= 7 (:id (atelier/select-aim-target snap hostiles)))
+          "Um hostil à frente (cos > 0) conta, mesmo desviado da linha"))))
+
+(deftest test-aim-rejects-hostiles-behind-the-player
+  (testing "Hostil às costas (cos <= 0) é ignorado; sem ninguém à frente, nil"
+    (let [aim-line [1.0 0.0 0.0]
+          snap {:look-direction aim-line
+                :ray-origin [0.0 65.0 0.0]
+                :ray-max-dist 24.0}
+          hostiles [{:id 7 :type "minecraft:creeper" :x -12.0 :y 65.0 :z 0.0 :dist 12.0 :hp 20.0}]]
       (is (nil? (atelier/select-aim-target snap hostiles))
-          "Um hostil a 12m de lado nao esta na mira"))))
+          "Um hostil atrás do olhar não é alvo — não se acerta pelas costas"))))
 
 (deftest test-aim-uses-player-raycast-direction
   (testing "A direcao do olhar vem do raycast do jogador (bloco a frente na linha)"
@@ -252,9 +273,11 @@
                                                                                    :x -20.0 :y 66.0 :z 190.0
                                                                                    :dist 10.0 :hp 20.0}})
           cmds @sent
-          dmg (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds))]
-      (is (some? dmg) "Deve aplicar dano")
-      (is (str/includes? dmg "-20") "O dano cai nas coordenadas do ALVO DA MIRA (x=-20), nao do mais proximo"))))
+          proj (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                                    (str/includes? % "fireball")) cmds))]
+      (is (some? proj) "Deve lancar a fireball rumo ao alvo da mira")
+      (is (str/includes? proj "at pace") "O projetil nasce do conjurador (pace)")
+      (is (re-find #"Motion:\[" proj) "Leva o vetor de velocidade rumo ao alvo"))))
 
 (deftest test-aim-spell-scans-around-the-caster
   (testing "A magia do jogador varre hostis em volta DELE (o conjurador), nao da bruxa"
@@ -351,34 +374,35 @@
 ;; =============================================================================
 
 (deftest test-aim-falls-back-to-nearest-hostile-without-block-in-sight
-  (testing "Sem bloco na linha do olhar (campo aberto), a mira cai no hostil mais proximo"
+  (testing "Sem bloco na linha do olhar (campo aberto), a magia ainda sai"
     ;; O raycast devolve ERR|NO_BLOCK_IN_SIGHT quando o jogador olha para o
-    ;; horizonte aberto — o caso mais comum de atirar uma bola de fogo. Antes,
-    ;; isso deixava `select-aim-target` sem direcao e a magia nao saia.
+    ;; horizonte aberto — o caso mais comum de atirar uma bola de fogo. Com o op
+    ;; LOOK isso ja nao importa (a direcao nao depende de bloco), e mesmo o
+    ;; fallback ja nao bloqueia: a fireball voa na direcao da mira.
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent "minecraft:blaze_powder,1" "ERR|NO_BLOCK_IN_SIGHT")
-          hit? (atelier/cast-casting! st mock! "pace" 2000000)
+          _ (atelier/cast-casting! st mock! "pace" 2000000)
           cmds @sent]
-      (is (true? hit?) "A magia conjura mesmo sem bloco em vista (usa o mais proximo)")
-      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds)
-          "Aplica dano ao hostil mais proximo quando nao ha bloco na mira")))
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                      (str/includes? % "fireball"))
+                cmds)
+          "A fireball sai mesmo sem bloco na mira")))
 
 (deftest test-aim-still-prefers-the-aimed-hostile-over-the-nearest
-  (testing "Com bloco em vista, a mira continua a preferir o hostil apontado"
-    ;; Regressao: o fallback NAO pode atropelar a mira por direcao.
+  (testing "Com mira, o projetil aponta ao hostil APONTADO, nao ao mais proximo"
+    ;; Regressao: o alvo mirado tem de continuar a ser o que decide os visuais.
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent "minecraft:blaze_powder,1" "OK|minecraft:stone_bricks|-20|66|190|10.00")
           hit? (atelier/cast-casting! st mock! "pace" 2000000)
           cmds @sent]
       (is (true? hit?) "A magia conjura")
-      ;; A mira aponta para x=-20, onde esta o hostil apontado, nao o mais proximo (x=-28).
-      (is (some #(and (str/starts-with? % "CMD|")
-                      (str/includes? % "damage")
-                      (str/includes? % "-20"))
+      ;; O burst visual cai em x=-20, onde esta o hostil apontado, nao o mais
+      ;; proximo (x=-28).
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "-20"))
                 cmds)
-          "O dano cai nas coordenadas do hostil APONTADO, nao do mais proximo"))))
+          "O impacto visual cai nas coordenadas do hostil APONTADO"))))
 
 ;; =============================================================================
 ;; Voz do conjurador: quem conjura ouve a resposta, mesmo longe da bruxa
