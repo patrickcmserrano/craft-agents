@@ -187,13 +187,25 @@
       (is (str/includes? (str (:label (last steps))) "Descansando")
           "O trajeto tem de TERMINAR no descanso")))
 
-  (testing "CA-060o: A ida inclui os portoes do trajeto (nao corta no primeiro :wait)"
+  (testing "CA-060o: A ida termina no descanso (corta o retorno a ronda)"
+    ;; Medido com scripts/medir_shelter_steps.clj: desde o CA-061 (a patrulha
+    ;; deixou de visitar o quarto) a ida vinda da ronda e so caminhada —
+    ;; [equip walk BARK wait(Descansando)]. O unico :wait e o do descanso, e e
+    ;; ele que corta o trajeto (sem ele a Karlach voltaria a ronda e travaria).
     (let [route    (fabric/build-sanctuary-route)
           quarters (some #(when (= (:type %) :quarters) %) route)
           steps    (fabric/shelter-route-steps quarters [-179.5 65.0 171.5])
-          n-waits  (count (filter #(= (:op %) :wait) steps))]
-      (is (> n-waits 1)
-          "A ida tem varios :wait (portao, tranca, descanso) — cortar no 1o perderia a caminhada")))
+          waits    (filter #(= (:op %) :wait) steps)
+          descanso (some #(when (and (= (:op %) :wait)
+                                     (some-> (:label %) (str/includes? "Descansando")))
+                            %)
+                         steps)]
+      (is (= 1 (count waits))
+          "A ida tem exatamente um :wait — o do descanso (nao ha portao/tranca no trajeto)")
+      (is (some? descanso)
+          "Esse :wait e o Descansando — e ele que corta a ida antes do retorno")
+      (is (not-any? #(= (:op %) :BARK) (drop 1 (drop-while #(not= (:op %) :wait) steps)))
+          "Nada depois do descanso (o retorno a ronda e cortado)")))
 
   (testing "CA-060g: Sem parada de quarto configurada, o abrigo degrada com seguranca"
     (is (nil? (fabric/shelter-route-steps nil [-175.0 65.0 180.0]))
