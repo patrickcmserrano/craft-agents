@@ -76,8 +76,9 @@
           cmds @sent]
       (is (some #(str/starts-with? % "TARGET_HOSTILE|Coco|") cmds)
           "Deve varrer hostis com TARGET_HOSTILE ancorado na Coco")
-      (is (some #(= % "ATTACK_HOSTILE|Coco|42") cmds)
-          "Deve atacar o hostil mais proximo (id 42) com dano real")
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage") (str/includes? % " 100 "))
+                cmds)
+          "Deve matar o hostil mais proximo com um golpe de dano 100 (hit kill)")
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")) cmds)
           "Deve emitir assinatura visual (particle)")
       (is (some #(str/starts-with? % "SWING|Coco") cmds)
@@ -91,7 +92,8 @@
           _ (atelier/cast-richeh-spell! richeh-st mock! 1 2000000)
           cmds @sent]
       (is (some #(str/starts-with? % "TARGET_HOSTILE|Richeh|") cmds))
-      (is (some #(= % "ATTACK_HOSTILE|Richeh|42") cmds))
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage") (str/includes? % " 100 "))
+                cmds))
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")) cmds))
       (is (some #(str/starts-with? % "SWING|Richeh") cmds)))))
 
@@ -122,6 +124,19 @@
                       (str/includes? % "-28"))
                 cmds)
           "Deve haver um golpe visual ANCRADO NO ALVO (x=-28), nao so na Richeh"))))
+
+(deftest test-coco-spell-damage-is-hitkill
+  (testing "Coco aplica DANO 100 (hit kill de mobs comuns) em vez do golpe de mao"
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent)
+          _ (atelier/cast-coco-spell! coco-st mock! 1 2000000)
+          cmds @sent
+          dmg (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "damage")
+                                   (str/includes? % " 100 ")) cmds))]
+      (is (some? dmg) "Deve aplicar dano 100 via CMD|damage (hit kill)")
+      (is (not (some #(str/starts-with? % "ATTACK_HOSTILE") cmds))
+          "Nao deve usar o golpe de mao (ATTACK_HOSTILE) quando mata num golpe"))))
 
 (deftest test-spell-cooldown-blocks-immediate-recast
   (testing "Cooldown de 5s impede reconjuracao automatica imediata"

@@ -120,6 +120,18 @@
   (mapv (fn [p] (uformat "CMD|execute positioned %.2f %.2f %.2f run %s" x y z p))
         particles))
 
+(def ^:private spell-hitkill-damage 100)
+(def ^:private spell-hitkill-radius 2.0)
+
+(defn- hitkill-cmd
+  "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
+  1.21) com `spell-hitkill-damage` — 100 mata mobs comuns de uma vez e deixa
+  bosses (wither, dragao) vivos. O alvo e preso por COORDENADAS + raio curto
+  (2 blocos) + `limit=1`, o mesmo que se mediu a funcionar pela ponte."
+  [{:keys [x y z]}]
+  (uformat "CMD|damage @e[x=%.2f,y=%.2f,z=%.2f,distance=..%.1f,limit=1,sort=nearest] %d minecraft:magic"
+           x y z spell-hitkill-radius spell-hitkill-damage))
+
 (defn- cast-spell!
   "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
    assinado por `particles` (glifo na bruxa), `sound` e `burst-particles`
@@ -137,7 +149,8 @@
       (when sound (send-cmd! sound))
       (when target
         (send-cmd! (str "SWING|" agent-name))
-        (send-cmd! (uformat "ATTACK_HOSTILE|%s|%d" agent-name (:id target)))
+        ;; HIT KILL: dano 100 num golpe (mobs comuns morrem, bosses resistem).
+        (send-cmd! (hitkill-cmd target))
         ;; Projetil real a voar ate o alvo + detonacao visual NAS COORDENADAS dele.
         (send-cmd! (projectile-cmd st agent-name target))
         (doseq [b (burst-cmds target burst-particles)] (send-cmd! b)))
