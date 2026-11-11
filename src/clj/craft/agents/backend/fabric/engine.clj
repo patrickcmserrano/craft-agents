@@ -133,14 +133,11 @@
    `quarters-stop` e a parada :type :quarters da rota do santuario; se ausente,
    devolve nil (o loop degrada com seguranca, sem explodir).
 
-   ATENCAO: expand-route-microsteps de :quarters produz ida (equip + caminhada
-   + BARK) + DESCANSO (o :wait rotulado Descansando) + RETORNO a ronda. Para o
-   abrigo so interessa a IDA: cortamos logo apos o descanso, para ela PARAR no
-   quarto em vez de caminhar de volta e travar no santuario.
-
-   Desde o CA-061 (a patrulha deixou de visitar o quarto) a ida vinda da ronda e
-   so caminhada — o descanso e o UNICO :wait do trajeto, e e ele que serve de
-   corte. Ver scripts/medir_shelter_steps.clj."
+   ATENCAO: expand-route-microsteps de :quarters produz ida (equip + portoes +
+   caminhada + BARK) + DESCANSO (o :wait rotulado Descansando) + RETORNO a ronda.
+   Para o abrigo so interessa a IDA: cortamos logo apos o descanso, para ela PARAR no
+   quarto em vez de caminhar de volta e travar no santuario. Nao basta cortar no
+   primeiro :wait — a ida ja contem :wait de portao/tranca antes do descanso."
   [quarters-stop from-pos]
   (when-let [qpos (:pos quarters-stop)]
     (let [all-steps (vec (expand-route-microsteps {:type :quarters :pos qpos} from-pos))

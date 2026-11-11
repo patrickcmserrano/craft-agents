@@ -6,8 +6,7 @@
 ;; Uso: clojure -M:dev scripts/medir_shelter_steps.clj
 
 (ns medir-shelter-steps
-  (:require [craft.agents.backend.fabric :as fabric]
-            [craft.agents.backend.fabric.sanctuary :as sanctuary]))
+  (:require [craft.agents.backend.fabric :as fabric]))
 
 (defn- resumo [label steps]
   (let [ops   (map :op steps)
@@ -29,7 +28,7 @@
             (fabric/shelter-route-steps quarters [-179.5 65.0 171.5]))
     (resumo "SEM from-pos (caminho por :waypoints)"
             (fabric/shelter-route-steps quarters nil))
-    (println "NOTA: com from-pos, expand-route-microsteps gera so :walk para o")
-    (println "trajeto (generate-walk-steps) — o unico :wait e o do Descanso.")))
+    (println "NOTA: com from-pos, expand-route-microsteps gera os :wait de portao")
+    (println "e tranca alem do :wait de Descanso — o trajeto corta no Descansando.")))
 
 (apply -main *command-line-args*)
