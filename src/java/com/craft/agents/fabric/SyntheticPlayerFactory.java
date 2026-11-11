@@ -30,6 +30,19 @@ public final class SyntheticPlayerFactory {
     private static volatile Object cachedServer = null;
     private static volatile ClassLoader cachedKnotLoader = null;
 
+    // Identidade de EVENTO de chat. O chat chega por mais de uma rota (hook
+    // Fabric, tailer de disco, CHAT_INJECT) e a deduplicacao por CONTEUDO
+    // (speaker:text + janela) nao distingue "a mesma mensagem vista duas vezes"
+    // de "a mesma mensagem escrita duas vezes de proposito" — a primeira deve
+    // disparar 1x, a segunda Nx. O id nasce aqui, na fonte da verdade (o hook
+    // do servidor, que ve cada mensagem uma vez), e viaja com o texto.
+    private static final java.util.concurrent.atomic.AtomicLong CHAT_EVENT_SEQ =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
+    private static String nextChatEventId() {
+        return "evt-" + CHAT_EVENT_SEQ.incrementAndGet();
+    }
+
     @SuppressWarnings("unchecked")
     private static java.util.concurrent.ConcurrentLinkedQueue<String> getChatQueue() {
         Object q = System.getProperties().get("craft.agents.chat.queue");
@@ -74,7 +87,8 @@ public final class SyntheticPlayerFactory {
                                 text = String.valueOf(msg);
                             }
                             if (senderName != null && text != null && !senderName.isEmpty() && !text.isEmpty()) {
-                                getChatQueue().add(senderName + "|" + text);
+                                // 3o campo = identidade de evento (unica por mensagem vista aqui).
+                                getChatQueue().add(senderName + "|" + text + "|" + nextChatEventId());
                             }
                         } catch (Throwable ignored) {}
                     }
@@ -393,7 +407,9 @@ public final class SyntheticPlayerFactory {
             if ("CHAT_INJECT".equals(op) && parts.length >= 3) {
                 String sender = parts[1];
                 String text = parts[2];
-                getChatQueue().add(sender + "|" + text);
+                // Injecao tambem e um evento novo: ganha o seu proprio id, senao
+                // um inject e a mensagem real com o mesmo texto colapsariam.
+                getChatQueue().add(sender + "|" + text + "|" + nextChatEventId());
                 return "OK";
             }
 
