@@ -452,6 +452,11 @@
         (send-cmd! (str "SWING|" agent-name))
         ;; DANO DE EXPLOSAO por comando (a fireball fisica nao fere — MEDIDO).
         (send-cmd! (hitkill-cmd target))
+        ;; Fogo ao impacto no alvo (chao e pes do mob)
+        (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run setblock ~ ~ ~ minecraft:fire keep"
+                            (:x target) (:y target) (:z target)))
+        (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run setblock ~ ~1 ~ minecraft:fire keep"
+                            (:x target) (:y target) (:z target)))
         ;; Detonacao visual NAS COORDENADAS do alvo.
         (doseq [b (burst-cmds target burst-particles)] (send-cmd! b)))
       (some? target))))
@@ -590,7 +595,65 @@
       (send-cmd! (uformat "ITEM_COOLDOWN|%s|%s|%d" player-name (:item-id spell-info) (or (:cooldown-ticks spell) 20)))
       (case (:id spell)
         :fireball
-        (cast-casting! st send-cmd! player-name now)
+        (let [snapshot (player-aim-snapshot send-cmd! player-name 48.0)
+              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name 48.0))
+              scanned (parse-hostile-response resp-hostiles)
+              hostiles (if (map? scanned) [scanned] (or scanned []))
+              aim-mob (select-aim-target snapshot hostiles)
+              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+              ;; Ponto central do impacto da bola de fogo (mob, bloco solido ou linha do olhar):
+              [ix iy iz] (cond
+                           aim-mob
+                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+
+                           :else
+                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name 48.0))]
+                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                               (let [parts (str/split rc-resp #"\|")]
+                                 [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
+                                  (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
+                                  (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
+                               [(+ ox (* 24.0 lx))
+                                (+ oy (* 24.0 ly))
+                                (+ oz (* 24.0 lz))])))
+              target aim-mob]
+          (swap! st assoc :last-spell-ms now)
+          (doseq [p (:caster-particles spell)]
+            (send-cmd! (uformat p player-name)))
+          (when-let [snd (:sound spell)]
+            (send-cmd! (uformat "CMD|execute at %s run playsound %s master @a[distance=..24] ~ ~ ~ 1.5 1.0" player-name snd)))
+          ;; Lanca o projetil fisico de bola de fogo
+          (send-cmd! (projectile-spell-cmd st player-name send-cmd! target snapshot spell))
+          ;; FOGO NO IMPACTO:
+          ;; 1. Coloca fogo no bloco de impacto e no bloco logo acima (se for ar), preservando blocos solidos
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run setblock ~ ~ ~ minecraft:fire keep"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run setblock ~ ~1 ~ minecraft:fire keep"
+                              ix iy iz))
+          ;; 2. Area de fogo ao redor (fill em raio de 1 bloco sobre ar)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run fill ~-1 ~ ~-1 ~1 ~1 ~1 minecraft:fire keep"
+                              ix iy iz))
+          ;; 3. Dano de impacto em area: 50 de dano de explosao em mobs ao redor (protege jogador, itens e XP)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.0] run damage @s 50 minecraft:explosion"
+                              ix iy iz))
+          ;; 4. Incendeia mobs atingidos (setblock fire nos pes se for ar) e dano continuo de fogo
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.0] at @s run setblock ~ ~ ~ minecraft:fire keep"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.0] run damage @s 10 minecraft:in_fire"
+                              ix iy iz))
+          ;; 5. Efeitos visuais e sonoros de impacto (explosao, labaredas e estalo de fogo)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound minecraft:entity.generic.explode master @a ~ ~ ~ 2.0 1.0"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound minecraft:item.firecharge.use master @a ~ ~ ~ 2.0 0.9"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:explosion ~ ~0.5 ~ 0.5 0.5 0.5 0.0 2 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:flame ~ ~0.5 ~ 1.2 0.8 1.2 0.1 40 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:lava ~ ~0.5 ~ 0.8 0.5 0.8 0.1 15 normal"
+                              ix iy iz))
+          true)
 
         :wind-charge
         (let [snapshot (player-aim-snapshot send-cmd! player-name 24.0)

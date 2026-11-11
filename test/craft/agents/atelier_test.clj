@@ -790,5 +790,40 @@
                 cmds)
           "Emite efeito sonoro de vidro quebrando / estilhacamento de gelo"))))
 
+(deftest test-dispatch-fireball-firerod-spell
+  (testing "dispatch-held-spell! para blaze_rod (firerod) dispara fireball e causa fogo (fire) no impacto"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:blaze_rod,1" nil
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:blaze_rod"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:blaze_rod")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Firerod disparado com sucesso")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "summon")
+                      (str/includes? % "fireball"))
+                cmds)
+          "Lanca projetil fisico de bola de fogo (fireball) rumo a mira")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "setblock")
+                      (str/includes? % "minecraft:fire keep"))
+                cmds)
+          "Causa fogo ao impacto no bloco/chao via setblock fire keep")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "damage")
+                      (str/includes? % "type=!minecraft:player"))
+                cmds)
+          "Aplica dano de impacto em area protegendo o jogador")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "particle")
+                      (str/includes? % "flame"))
+                cmds)
+          "Emite particulas de labaredas/flame no ponto de impacto"))))
+
+
 
 
