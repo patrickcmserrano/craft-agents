@@ -1333,6 +1333,38 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            if ("ITEM_COOLDOWN".equals(op) && parts.length >= 4) {
+                String pName = parts[1];
+                String itemId = parts[2];
+                int ticks = Integer.parseInt(parts[3]);
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    try {
+                        Class<?> regClass = Class.forName("net.minecraft.class_7923", true, cl);
+                        Object itemReg = regClass.getField("field_41178").get(null);
+                        Class<?> idClass = Class.forName("net.minecraft.class_2960", true, cl);
+                        Object id = idClass.getMethod("method_60654", String.class).invoke(null, itemId);
+                        Object item = itemReg.getClass().getMethod("method_10223", idClass).invoke(itemReg, id);
+                        if (item != null) {
+                            runOnServerThread(server, () -> {
+                                try {
+                                    Object cooldownMgr = player.getClass().getMethod("method_7357").invoke(player);
+                                    Class<?> itemClass = Class.forName("net.minecraft.class_1792", true, cl);
+                                    cooldownMgr.getClass().getMethod("method_7906", itemClass, int.class).invoke(cooldownMgr, item, ticks);
+                                } catch (Throwable t) {
+                                    System.out.println("[ITEM_COOLDOWN_ERR] " + t);
+                                }
+                            });
+                            return "OK";
+                        }
+                    } catch (Throwable t) {
+                        return "ERR|" + t.getMessage();
+                    }
+                }
+                return "ERR|NO_PLAYER";
+            }
+
             if ("DROP_ITEMS".equals(op) && parts.length >= 2) {
                 String pName = parts[1];
                 String filter = parts.length >= 3 ? parts[2] : "";

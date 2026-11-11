@@ -224,6 +224,7 @@
    "minecraft:breeze_rod"
    {:id :wind-charge
     :name "Onda de Choque"
+    :cooldown-ticks 20
     :entity "minecraft:breeze_wind_charge"
     :entity-nbt "{Motion:[%.3f,%.3f,%.3f]}"
     :sound "entity.breeze.shoot"
@@ -238,6 +239,7 @@
    "minecraft:lightning_rod"
    {:id :lightning-smite
     :name "Relâmpago do Julgamento"
+    :cooldown-ticks 60
     :sound "entity.lightning_bolt.thunder"
     :caster-particles
     ["CMD|execute at %s run particle minecraft:electric_spark ~ ~1.2 ~ 0.4 0.4 0.4 0.1 20 normal"
@@ -249,6 +251,7 @@
    "minecraft:trial_key"
    {:id :lightning-smite
     :name "Relâmpago do Julgamento"
+    :cooldown-ticks 60
     :sound "entity.lightning_bolt.thunder"
     :caster-particles
     ["CMD|execute at %s run particle minecraft:electric_spark ~ ~1.2 ~ 0.4 0.4 0.4 0.1 20 normal"
@@ -553,6 +556,7 @@
   [st send-cmd! player-name spell-info now]
   (let [spell (or (:spell spell-info) (get spell-registry (:item-id spell-info)))]
     (when spell
+      (send-cmd! (uformat "ITEM_COOLDOWN|%s|%s|%d" player-name (:item-id spell-info) (or (:cooldown-ticks spell) 20)))
       (case (:id spell)
         :fireball
         (cast-casting! st send-cmd! player-name now)
