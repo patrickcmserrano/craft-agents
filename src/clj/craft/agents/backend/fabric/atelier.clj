@@ -52,6 +52,98 @@
     (send-bridge-cmd! "SWING|Richeh")))
 
 ;; =============================================================================
+;; Magias de Ataque do Ateliê (Glifos de Coco & Cristais de Richeh)
+;; =============================================================================
+;; Assinatura visual + dano real a hostis. A varredura e o golpe usam os
+;; opcodes de combate ja existentes na bridge (TARGET_HOSTILE/ATTACK_HOSTILE);
+;; o visual sai por CMD|particle. Cooldown de 5s evita spam de combinacao.
+
+(def ^:private spell-cooldown-ms 5000)
+(def ^:private spell-burst-ms 8000)
+(def ^:private spell-scan-radius 20.0)
+
+(defn- parse-hostile-response
+  "Extrai o alvo mais proximo da resposta do SyntheticHostileScanner.
+   Formato: OK|<count>|<id>,<tipo>,<x>,<y>,<z>,<dist>,<hp>;<id>,... (ja ordenado).
+   Devolve {:id int :type string :x :y :z :dist :hp} ou nil."
+  [resp]
+  (when (and resp (str/starts-with? resp "OK|"))
+    (let [segments (str/split resp #"\|" 3)
+          payload (nth segments 2 "")]
+      (when-not (str/blank? payload)
+        (let [first-target (first (str/split payload #";"))
+              fields (str/split first-target #",")]
+          (when (>= (count fields) 7)
+            (try
+              {:id (Integer/parseInt (first fields))
+               :type (nth fields 1)
+               :x (Double/parseDouble (nth fields 2))
+               :y (Double/parseDouble (nth fields 3))
+               :z (Double/parseDouble (nth fields 4))
+               :dist (Double/parseDouble (nth fields 5))
+               :hp (Double/parseDouble (nth fields 6))}
+              (catch Throwable _ nil))))))))
+
+(defn should-say-spell?
+  "True se a bruxa pode soltar o grito de guerra neste surto (o primeiro
+   lancamento apos a janela de silencio)."
+  [st now]
+  (> (- now (:last-spell-said-ms @st 0)) spell-burst-ms))
+
+(defn- spell-ready?
+  "True se o cooldown de conjuracao ja passou."
+  [st now]
+  (> (- now (:last-spell-ms @st 0)) spell-cooldown-ms))
+
+(defn- cast-spell!
+  "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
+   assinado por `particles` (seq de comandos CMD|particle) e `sound` (CMD|playsound).
+   Devolve true se conjurou (havia alvo), false caso contrario."
+  [st agent-name send-cmd! now particles sound]
+  (if-not (spell-ready? st now)
+    false
+    (let [resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" agent-name spell-scan-radius))
+          target (parse-hostile-response resp)]
+      (swap! st assoc :last-spell-ms now)
+      (when (should-say-spell? st now)
+        (swap! st assoc :last-spell-said-ms now :spell-said? true))
+      (doseq [p particles] (send-cmd! p))
+      (when sound (send-cmd! sound))
+      (when target
+        (send-cmd! (str "SWING|" agent-name))
+        (send-cmd! (uformat "ATTACK_HOSTILE|%s|%d" agent-name (:id target))))
+      (some? target))))
+
+(defn cast-coco-spell!
+  "Coco - Glifo de Tinta Viva: desenha um glifo que morde o hostil mais proximo.
+   `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`."
+  [coco-st send-cmd! _tick now]
+  (cast-spell!
+   coco-st "Coco" send-cmd! now
+   ["CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
+    "CMD|execute at Coco run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
+    "CMD|execute at Coco run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
+   "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 1.2 0.8"))
+
+(defn cast-richeh-spell!
+  "Richeh - Estilhaco de Cristal: inscreve uma matriz e a estilhaca no alvo.
+   `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`."
+  [richeh-st send-cmd! _tick now]
+  (cast-spell!
+   richeh-st "Richeh" send-cmd! now
+   ["CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.0 ~ 0.6 0.6 0.6 0.08 25 normal"
+    "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.8 ~ 0.4 0.4 0.4 0.02 20 normal"
+    "CMD|execute at Richeh run particle minecraft:block_marker minecraft:amethyst_block ~ ~1.0 ~ 0.3 0.3 0.3 0.05 12 normal"]
+   "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.break master @a[distance=..24] ~ ~ ~ 1.1 0.9"))
+
+(defn spell-auto-defense!
+  "Reacao automatica: se houver hostil no raio, a bruxa conjura a sua magia.
+   Devolve true se conjurou."
+  [st agent-name send-cmd! now]
+  (let [cast-fn (if (= agent-name "Coco") cast-coco-spell! cast-richeh-spell!)]
+    (cast-fn st send-cmd! 0 now)))
+
+;; =============================================================================
 ;; Fábrica de Estado
 ;; =============================================================================
 
@@ -68,6 +160,9 @@
           :wait-left 0
           :last-bark-ms 0
           :last-duo-ms 0
+          :last-spell-ms 0
+          :last-spell-said-ms 0
+          :spell-said? false
           :status "Estudando glifos no castelo"})))
 
 (defn create-richeh-state
@@ -81,6 +176,9 @@
           :phase :orbit
           :wait-left 0
           :last-bark-ms 0
+          :last-spell-ms 0
+          :last-spell-said-ms 0
+          :spell-said? false
           :status "Artesã de cristal & guarda-costas"})))
 
 ;; =============================================================================
@@ -304,6 +402,17 @@
       ;; 1. Comandos para Coco
       (str/includes? lower "coco")
       (cond
+        (or (str/includes? lower "ataca") (str/includes? lower "atacar")
+            (str/includes? lower "magia") (str/includes? lower "glifo")
+            (str/includes? lower "feitiço") (str/includes? lower "feiti"))
+        (do
+          (let [hit? (cast-coco-spell! coco-st send-bridge-cmd! 0 (System/currentTimeMillis))]
+            (if hit?
+              (say-fn :coco (rand-nth ["Glifo de Tinta Viva! Segura ele pra mim! 🖋️✨"
+                                       "A tinta morde! Não se mexe! 📖"]))
+              (say-fn :coco "Não tem nada pra desenhar por aqui... o castelo tá tranquilo! 🖋️")))
+          true)
+
         (or (str/includes? lower "segue") (str/includes? lower "vem"))
         (do
           (swap! coco-st assoc :mode :follow :follow-target speaker)
@@ -338,6 +447,18 @@
       ;; 2. Comandos para Richeh
       (str/includes? lower "richeh")
       (cond
+        (or (str/includes? lower "ataca") (str/includes? lower "atacar")
+            (str/includes? lower "magia") (str/includes? lower "cristal")
+            (str/includes? lower "estilhaça") (str/includes? lower "feitiço")
+            (str/includes? lower "feiti") (str/includes? lower "lança"))
+        (do
+          (let [hit? (cast-richeh-spell! richeh-st send-bridge-cmd! 0 (System/currentTimeMillis))]
+            (if hit?
+              (say-fn :richeh (rand-nth ["Estilhaço de Cristal. Não desperdiça meu tempo. 🔮"
+                                         "A matriz tá inscrita. Fica parado e ele quebra. 💠"]))
+              (say-fn :richeh "Hmph. Não vejo nada digno dos meus cristais por aqui.")))
+          true)
+
         (or (str/includes? lower "segue") (str/includes? lower "vem"))
         (do
           (swap! richeh-st assoc :mode :follow :follow-target speaker)

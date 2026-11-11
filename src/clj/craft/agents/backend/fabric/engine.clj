@@ -388,6 +388,17 @@
                                                                 (if (= who :coco)
                                                                   (atelier/coco-say! text)
                                                                   (atelier/richeh-say! text)))))
+                         ;; Auto-defesa das bruxas: a cada ~1s, se houver hostil
+                         ;; no raio, Coco e Richeh conjuram as suas magias
+                         ;; (cooldown de 5s dentro de cast-*-spell!).
+                         (when (zero? (mod tick 20))
+                           (let [now (System/currentTimeMillis)]
+                             (when (atelier/spell-auto-defense! coco-state "Coco" send-bridge-cmd! now)
+                               (when (atelier/should-say-spell? coco-state now)
+                                 (atelier/coco-say! "Glifo de Tinta Viva! Ele não vai chegar perto! 🖋️✨")))
+                             (when (atelier/spell-auto-defense! richeh-state "Richeh" send-bridge-cmd! now)
+                               (when (atelier/should-say-spell? richeh-state now)
+                                 (atelier/richeh-say! "Estilhaço de Cristal. Fica atrás de mim. 🔮")))))
                          (catch Throwable t
                            (println "[craft-agents-atelier-ERROR]" (.getMessage t)))))
 
