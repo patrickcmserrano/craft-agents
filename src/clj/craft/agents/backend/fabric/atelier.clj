@@ -601,8 +601,9 @@
           true)
 
         :lightning-smite
-        (let [snapshot (player-aim-snapshot send-cmd! player-name 32.0)
-              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name spell-scan-radius))
+        (let [thunder-range 80.0
+              snapshot (player-aim-snapshot send-cmd! player-name thunder-range)
+              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name thunder-range))
               scanned (parse-hostile-response resp-hostiles)
               hostiles (if (map? scanned) [scanned] (or scanned []))
               aim-mob (select-aim-target snapshot hostiles)
@@ -614,15 +615,15 @@
                                     [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
 
                                     :else
-                                    (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name 32.0))]
+                                    (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name thunder-range))]
                                       (if (and rc-resp (str/starts-with? rc-resp "OK|"))
                                         (let [parts (str/split rc-resp #"\|")]
-                                          [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 16.0 lx))))
-                                           (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 16.0 ly))))
-                                           (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 16.0 lz))))])
-                                        [(+ ox (* 16.0 lx))
-                                         (+ oy (* 16.0 ly))
-                                         (+ oz (* 16.0 lz))])))
+                                          [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 48.0 lx))))
+                                           (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 48.0 ly))))
+                                           (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 48.0 lz))))])
+                                        [(+ ox (* 48.0 lx))
+                                         (+ oy (* 48.0 ly))
+                                         (+ oz (* 48.0 lz))])))
               ;; Garantia de seguranca: nunca invocar o raio a menos de 6 metros do conjurador
               dx (- raw-x ox)
               dy (- raw-y oy)
@@ -642,12 +643,12 @@
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run summon minecraft:lightning_bolt ~ ~ ~"
                               ix iy iz))
           ;; Dano e efeitos de impacto adicionais (para garantir dano massivo de 50 contra mobs ao redor do impacto, poupando jogadores)
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..5.0] run damage @s 50 minecraft:lightning_bolt"
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..8.0] run damage @s 50 minecraft:lightning_bolt"
                               ix iy iz))
           ;; Fagulhas eletricas e trovao
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:electric_spark ~ ~1.0 ~ 1.2 1.2 1.2 0.15 40 normal"
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:electric_spark ~ ~1.0 ~ 2.0 1.5 2.0 0.15 60 normal"
                               ix iy iz))
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.lightning_bolt.thunder master @a ~ ~ ~ 2.5 1.0"
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.lightning_bolt.thunder master @a ~ ~ ~ 4.0 1.0"
                               ix iy iz))
           true)
 
