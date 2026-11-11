@@ -706,7 +706,7 @@
           "Aplica dano forte em area (AOE) protegendo o jogador"))))
 
 (deftest test-dispatch-lightning-smite-spell
-  (testing "dispatch-held-spell! para lightning_rod invoca lightning_bolt, som de trovao e dano eletrico em area"
+  (testing "dispatch-held-spell! para lightning_rod invoca lightning_bolt, som de trovao e protege o conjurador"
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent "minecraft:lightning_rod,1" nil
@@ -718,6 +718,11 @@
           cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
           cmds @sent]
       (is (true? cast?) "Lightning smite disparado com sucesso")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "effect give pace")
+                      (str/includes? % "fire_resistance"))
+                cmds)
+          "Aplica protecao contra fogo/dano residual ao conjurador")
       (is (some #(and (str/starts-with? % "CMD|")
                       (str/includes? % "summon")
                       (str/includes? % "lightning_bolt"))
