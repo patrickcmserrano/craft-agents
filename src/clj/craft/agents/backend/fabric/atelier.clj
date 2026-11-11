@@ -51,6 +51,21 @@
     (send-bridge-cmd! "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.hit master @a[distance=..24] ~ ~ ~ 0.8 1.6")
     (send-bridge-cmd! "SWING|Richeh")))
 
+(defn caster-say!
+  "Resposta DA CONJURACAO, falada da posicao do JOGADOR que conjurou.
+   As falas das bruxas (`coco-say!`/`richeh-say!`) ancoram na posicao delas e
+   so alcancam quem esta a 16 blocos — o Atelie fica a ~200 blocos da area de
+   jogo, entao quem conjura nunca ouvia a resposta (o \"mandei mas nada\").
+   `caster` = nome do jogador que conjurou: o tellraw nasce DELE e vai PARA ele."
+  [send-cmd! caster msg]
+  (let [safe-msg (str/replace (or msg "") "\"" "\\\"")
+        json-cmd (str "execute at " caster " run tellraw @a[distance=..32] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
+                      "{\"text\":\"Coco\",\"color\":\"yellow\",\"bold\":true},"
+                      "{\"text\":\"> \",\"color\":\"dark_gray\"},"
+                      "{\"text\":\"" safe-msg "\",\"color\":\"yellow\"}]")]
+    (send-cmd! (str "CMD|" json-cmd))
+    (send-cmd! (str "CMD|execute at " caster " run playsound minecraft:item.book.page_turn master @a[distance=..32] ~ ~ ~ 0.9 1.1"))))
+
 ;; =============================================================================
 ;; Magias de Ataque do Ateliê (Glifos de Coco & Cristais de Richeh)
 ;; =============================================================================
@@ -321,6 +336,17 @@
   [msg]
   (let [lower (str/lower-case (or msg ""))]
     (boolean (some #(str/includes? lower %) casting-words))))
+
+(defn atelier-command?
+  "True se a mensagem e para o ATELIE: ou um comando com o nome de uma bruxa
+   (`coco`/`richeh`), ou um CASTING puro (`fireball`/`fogo`, sem nome de bruxa).
+   O dispatcher usa isto para deixar passar ao `handle-atelier-chat!` — sem ele,
+   um casting puro era capturado e DESCARTADO antes de chegar ao handler."
+  [msg]
+  (let [lower (str/lower-case (or msg ""))]
+    (boolean (or (str/includes? lower "coco")
+                 (str/includes? lower "richeh")
+                 (casting-spell? msg)))))
 
 (defn cast-casting!
   "Casting puro do JOGADOR: ele escreve so a palavra de magia no chat (sem nome
@@ -643,15 +669,18 @@
   (let [lower (str/lower-case (or msg ""))]
     (cond
       ;; 0. CASTING puro do jogador: so a palavra de magia, sem nome de bruxa.
+      ;; A resposta sai da posicao DELE (`caster-say!`), nao da Coco — o Atelie
+      ;; esta a ~200 blocos e as falas das bruxas nao o alcancariam.
       (casting-spell? msg)
       (do
         (if-not (grimoire-carried? send-bridge-cmd! speaker)
-          (say-fn :coco "Sem o teu grimório eu não conjuro nada. Traz o livro-e-pena! 📖🎒")
+          (caster-say! send-bridge-cmd! speaker "Sem o teu grimório eu não conjuro nada. Traz o livro-e-pena! 📖🎒")
           (let [hit? (cast-casting! coco-st send-bridge-cmd! speaker (System/currentTimeMillis))]
-            (if hit?
-              (say-fn :coco (rand-nth ["Glifo de Tinta Viva! Bela mordida! 🖋️✨"
-                                       "A tinta obedece a quem desenha! 📖"]))
-              (say-fn :coco "Mira num bicho, não no vazio! O glifo precisa de um alvo pra morder! 🖋️"))))
+            (caster-say! send-bridge-cmd! speaker
+                         (if hit?
+                           (rand-nth ["Glifo de Tinta Viva! Bela mordida! 🖋️✨"
+                                      "A tinta obedece a quem desenha! 📖"])
+                           "Mira num bicho, não no vazio! O glifo precisa de um alvo pra morder! 🖋️"))))
         true)
 
       ;; 1. Comandos para Coco

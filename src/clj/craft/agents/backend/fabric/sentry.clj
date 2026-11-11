@@ -14,13 +14,22 @@
 
 (defonce ^:private global-seen-chat (atom {}))
 
+(def ^:private chat-dedup-window-ms
+  "Janela de deduplicacao. Ela existe para casar as DUAS rotas de leitura do chat
+   (log-tailer de disco a 100ms e CHAT_POLL in-memory a ~800ms) e nao re-executar a
+   MESMA mensagem. Janela curta de proposito: o jogador precisa poder repetir o
+   mesmo comando (ex.: reconjurar `fireball`) e uma janela longa o tratava como
+   duplicata e o descartava em silencio."
+  1500)
+
 (defn chat-duplicate?
-  "Verifica se a mensagem recente do speaker ja foi processada nos ultimos 2500ms.
-   Previne duplicacao cruzada entre o log-tailer de disco e o CHAT_POLL in-memory do bridge."
+  "Verifica se a mensagem recente do speaker ja foi processada ha menos de
+   `chat-dedup-window-ms`. Previne duplicacao cruzada entre o log-tailer de disco
+   e o CHAT_POLL in-memory do bridge."
   [speaker msg]
   (let [now    (System/currentTimeMillis)
         key    (str (str/trim (or speaker "")) ":" (str/trim (or msg "")))
-        cutoff (- now 2500)]
+        cutoff (- now chat-dedup-window-ms)]
     (swap! global-seen-chat (fn [m] (into {} (filter (fn [[_ ts]] (> ts cutoff)) m))))
     (if (get @global-seen-chat key)
       true
@@ -136,8 +145,8 @@
   ([speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state]
    (when-not (chat-duplicate? speaker msg)
      (let [lower (str/lower-case (str/trim msg))]
-       ;; 0. Comandos para o Ateliê (Coco & Richeh)
-       (when (and (or (str/includes? lower "coco") (str/includes? lower "richeh"))
+       ;; 0. Comandos para o Ateliê (Coco & Richeh) OU casting puro do jogador
+       (when (and (atelier/atelier-command? msg)
                   coco-state richeh-state)
          (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
          (atelier/handle-atelier-chat! speaker msg coco-state richeh-state

@@ -325,3 +325,86 @@
     (is (true? (atelier/casting-spell? "fogo")))
     (is (false? (atelier/casting-spell? "coco fica patrulha"))
         "Uma ordem comum nao e casting")))
+
+(deftest test-atelier-command-includes-pure-casting
+  (testing "O dispatcher deixa passar o casting puro, alem das mensagens com nome de bruxa"
+    ;; O sentry so chamava o handler do atelie quando a mensagem tinha
+    ;; "coco"/"richeh" — um casting puro ("fireball") era capturado e DESCARTADO.
+    (is (true? (atelier/atelier-command? "fireball"))
+        "O casting puro tem de chegar ao handler")
+    (is (true? (atelier/atelier-command? "bola de fogo")))
+    (is (true? (atelier/atelier-command? "coco ataca")) "Comando com nome de bruxa passa")
+    (is (true? (atelier/atelier-command? "richeh cristal")))
+    (is (false? (atelier/atelier-command? "karlach detectar"))
+        "Uma ordem para outro agente nao e do atelie")))
+
+;; =============================================================================
+;; Mira cega: a magia nao pode depender de haver um BLOCO na linha do olhar
+;; =============================================================================
+
+(deftest test-aim-falls-back-to-nearest-hostile-without-block-in-sight
+  (testing "Sem bloco na linha do olhar (campo aberto), a mira cai no hostil mais proximo"
+    ;; O raycast devolve ERR|NO_BLOCK_IN_SIGHT quando o jogador olha para o
+    ;; horizonte aberto — o caso mais comum de atirar uma bola de fogo. Antes,
+    ;; isso deixava `select-aim-target` sem direcao e a magia nao saia.
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1" "ERR|NO_BLOCK_IN_SIGHT")
+          hit? (atelier/cast-casting! st mock! "pace" 2000000)
+          cmds @sent]
+      (is (true? hit?) "A magia conjura mesmo sem bloco em vista (usa o mais proximo)")
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds)
+          "Aplica dano ao hostil mais proximo quando nao ha bloco na mira")))
+
+(deftest test-aim-still-prefers-the-aimed-hostile-over-the-nearest
+  (testing "Com bloco em vista, a mira continua a preferir o hostil apontado"
+    ;; Regressao: o fallback NAO pode atropelar a mira por direcao.
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|-20|66|190|10.00")
+          hit? (atelier/cast-casting! st mock! "pace" 2000000)
+          cmds @sent]
+      (is (true? hit?) "A magia conjura")
+      ;; A mira aponta para x=-20, onde esta o hostil apontado, nao o mais proximo (x=-28).
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "damage")
+                      (str/includes? % "-20"))
+                cmds)
+          "O dano cai nas coordenadas do hostil APONTADO, nao do mais proximo"))))
+
+;; =============================================================================
+;; Voz do conjurador: quem conjura ouve a resposta, mesmo longe da bruxa
+;; =============================================================================
+
+(deftest test-caster-say-speaks-from-the-caster-position
+  (testing "A fala de conjuracao sai da posicao do CONJURADOR, nao da bruxa"
+    ;; As bruxas vivem a ~200 blocos do jogador; a fala delas usa
+    ;; `execute at Coco run tellraw @a[distance=..16]` e nunca alcanca quem
+    ;; conjura. A resposta ao casting tem de sair de QUEM conjurou.
+    (let [sent (atom [])
+          mock! (fn [cmd] (swap! sent conj cmd) "OK")]
+      (atelier/caster-say! mock! "pace" "Glifo de Tinta Viva!")
+      (let [tell (first (filter #(str/includes? % "tellraw") @sent))]
+        (is (some? tell) "Deve emitir um tellraw de resposta")
+        (is (str/includes? tell "execute at pace run tellraw")
+            "O tellraw ancora no CONJURADOR (pace) — a resposta chega a ele")
+        (is (not (str/includes? tell "execute at Coco"))
+            "Nao pode ancorar na bruxa, que esta longe")
+        (is (str/includes? tell "Glifo de Tinta Viva")
+            "A mensagem vai no tellraw")))))
+
+(deftest test-casting-reply-reaches-the-caster
+  (testing "Conjurando longe da bruxa, a resposta do casting chega ao conjurador"
+    ;; O sintoma reportado: "mandei mas nada" — a magia saia, mas a fala de
+    ;; sucesso/falha partia da Coco (a 200 blocos) e nunca aparecia para ele.
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1" "ERR|NO_BLOCK_IN_SIGHT")
+          said (atom [])
+          say-fn (fn [_who text] (swap! said conj text))
+          ok? (atelier/handle-atelier-chat! "pace" "fireball" st (atelier/create-richeh-state) say-fn)]
+      (is (true? ok?) "O casting puro foi consumido pelo handler")
+      (is (seq @said) "O conjurador recebeu uma resposta (sucesso ou falha)")
+      ;; E a resposta tem de sair da posicao DELE, nao da bruxa.
+      (is (some #(and (str/includes? % "tellraw") (str/includes? % "at pace")) @sent)
+          "A resposta do casting ancora no conjurador (at pace)")))))
