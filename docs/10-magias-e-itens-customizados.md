@@ -1,65 +1,99 @@
 # 10 — Magias e Itens Customizados (Clojure + Fabric 1.21.1)
 
-Este guia documenta a arquitetura, os componentes e a metodologia completa para criar magias e itens customizados consumíveis no ecossistema Minecraft Fabric 1.21.1 integrado ao engine cognitivo Clojure (`craft-agents`).
+Este guia documenta a arquitetura, os componentes e a metodologia completa para criar magias e itens customizados consumíveis no ecossistema Minecraft Fabric 1.21.1 integrado ao engine cognitivo Clojure (`craft-agents`) e ao dashboard web (`craft-repl` :8090).
 
 ---
 
 ## 1. Visão Geral da Arquitetura
 
-O sistema combina três camadas complementares para viabilizar itens mágicos responsivos sem a necessidade de mods client-side proprietários:
+O sistema combina quatro camadas complementares para viabilizar armas e feitiços mágicos responsivos sem a necessidade de mods client-side proprietários:
 
 1. **Cliente Minecraft Vanilla (ou SKLauncher / Fabric Client):**
    * Interage via botão direito usando itens dotados de **Data Components** do 1.21.1.
    * Dispara pacotes nativos de rede (`ServerboundUseItemPacket`) mesmo ao mirar no ar aberto.
 2. **Servidor Fabric 1.21.1 + Data Pack (`fireball_item`):**
    * Detecta o início do uso via advancement (`minecraft:using_item`).
-   * Executa a função `usou.mcfunction`, aplicando um modificador de durabilidade (`set_damage`) que interrompe imediatamente a animação de uso no cliente.
-   * Controla o cooldown lógico via scoreboards (`fb_cooldown`).
-3. **Engine Cognitivo Clojure (`craft-agents`):**
-   * Monitora o item na mão principal via ponte TCP (`HELD_ITEM|<jogador>`).
-   * Detecta a transição de carga/dano e calcula o vetor de mira real do jogador através do op `LOOK|<jogador>`.
-   * Invoca a conjuração física do projétil (`minecraft:fireball`) e as partículas associadas (`atelier.clj`).
+   * Executa a função `usou.mcfunction`:
+     - Aplica guarda rigorosa de cooldown (`execute if entity @s[scores={fb_cooldown=1..}] run return 0`).
+     - Aplica modificador de durabilidade (`set_damage`) que interrompe imediatamente a animação de uso no cliente (clique instantâneo).
+     - Remove o item com `clear` condicional quando o dano atinge o limite (`damage=64`).
+3. **Ponte Java in-server (`SyntheticPlayerFactory.java` na porta 25595):**
+   * Op `HELD_ITEM|<jogador>`: inspeciona a mão ativa via `method_7391` (`getStackInHand`) do jogador.
+   * Op `LOOK|<jogador>`: lê o vetor unitário exato do olhar (yaw/pitch) do jogador.
+   * Op `ITEM_COOLDOWN|<jogador>|<item_id>|<ticks>`: aciona `player.getItemCooldownManager().set(...)`, enviando o pacote `CooldownUpdateS2CPacket` nativo para renderizar a máscara cinza de cooldown no cliente.
+4. **Engine Cognitivo Clojure (`craft-agents` / `atelier.clj`):**
+   * Loop `item-poll` de alta frequência (4 Hz): compara o damage anterior com o atual.
+   * Consulta o catálogo unificado `spell-registry` e despacha projéteis, partículas, comandos de dano cirúrgico e áudio.
+5. **Dashboard Web (:8090 em `craft-repl`):**
+   * Permite entregar qualquer kit de feitiço com 64 cargas no Arsenal e no AirDrop do parceiro.
 
 ```
-[Jogador: Clique Direito]
+[Jogador: Clique Direito no Mundo ou no Ar]
           │
           ▼
-[Cliente envia ServerboundUseItemPacket]
+[Cliente envia ServerboundUseItemPacket (via componente food)]
           │
           ▼
 [Data Pack: advancement using_item aciona usou.mcfunction]
    ├── 1. Revoga advancement para rearmar
-   ├── 2. Emite som/partículas de uso
-   ├── 3. item modify gastar.json (incrementa damage na durabilidade)
-   │        └── Força cliente a cancelar pose de uso (clique seco)
-   └── 4. Seta fb_cooldown (1s) e fb_fire=1
+   ├── 2. Guarda de cooldown: se fb_cooldown >= 1, sai sem tocar som nem gastar carga
+   ├── 3. Emite som e partículas específicos do feitiço
+   ├── 4. item modify gastar.json (incrementa damage na durabilidade)
+   │        └── Força cliente a cancelar pose de uso (clique seco no Tick 0)
+   ├── 5. Clear condicional se damage=64 (item esgotado)
+   └── 6. Seta fb_cooldown (20 ticks para fogo/vento, 60 ticks para trovão)
           │
           ▼ (Polling a 4Hz via HELD_ITEM na porta 25595)
-[Engine Clojure: atelier/fireball-used?]
-   ├── 1. Verifica wand-cooldown-ms (1000ms)
-   ├── 2. Le direcao real do olhar via op LOOK|<jogador>
-   └── 3. Dispara summon de fireball com vetor direcional normalizado
+[Engine Clojure: atelier/dispatch-held-spell!]
+   ├── 1. Le direcao real do olhar via op LOOK|<jogador>
+   ├── 2. Trava mira com cone cirúrgico de 20° (select-aim-target-cone)
+   ├── 3. Aciona ITEM_COOLDOWN nativo na ponte Java
+   └── 4. Invocação de feitiço, partículas e dano calibrado
 ```
 
 ---
 
-## 2. Como Criar Itens Customizados com Clique Direito (Minecraft 1.21.1)
+## 2. Regra de Ouro dos Itens Mágicos: Nunca Usar Itens-Bloco
 
-### O Problema da Inércia do Cliente Vanilla
-No Minecraft Vanilla, quando o jogador clica com o botão direito no ar aberto (ou mapa aberto) segurando itens comuns (`blaze_rod`, `stick`, etc.), o método `Item.use` retorna `PASS`. O cliente descarta a interação localmente e **nunca envia o pacote de rede ao servidor**. O servidor fica completamente cego ao clique.
+> **Regra Crítica (Descoberta em 2026-11-11):**
+> **NUNCA utilize itens que sejam blocos no Minecraft (`BlockItem`), como `minecraft:lightning_rod`, para varinhas ou armas mágicas.**
 
-### A Solução: Componente `food` com Tempo Longo e Interrupção no 1º Tick
-Para tornar qualquer item clicável no ar sem sons incômodos de mastigação e sem consumir o item instantaneamente:
+* **O Problema:** No Minecraft vanilla, quando um jogador clica com o botão direito segurando um bloco apontado para o chão ou parede, o jogo prioriza a mecânica de **colocar o bloco no mundo** ("fica apoiado como uma lanterna").
+* **Perda Total de Magia:** Ao ser colocado como bloco, todos os Data Components (`custom_data`, `food`, `max_damage`) são descartados pelo motor vanilla. Ao quebrar e pegar o item de volta, o jogador recebe um item comum sem magia.
+* **A Solução:** Use **exclusivamente itens puros (não-blocos)**:
+  - 🔥 **Varinha de Fogo:** `minecraft:blaze_rod`
+  - 🌪️ **Cajado dos Ventos:** `minecraft:breeze_rod`
+  - ⚡ **Cetro do Trovão:** `minecraft:trial_key` (Chave de Provação de cobre da 1.21.1)
+  - ❄️ **Raio Congelante:** `minecraft:amethyst_shard`
 
-1. Adiciona-se o componente `food` com `can_always_eat: true` e `eat_seconds: 1000000`.
-2. O cliente vê o item como comestível a qualquer momento, envia o pacote de uso no **Tick 0** e inicia o gatilho de advancement.
-3. Ao detectar o uso no servidor, o modificador `item modify` altera a durabilidade (`damage`) do item na mão.
-4. Qualquer alteração de componente no item ativo interrompe imediatamente a ação de alimentação no cliente antes que qualquer som de mastigação ou arroto seja emitido.
+Itens puros nunca podem ser colocados no chão: o clique direito sempre dispara a magia sem risco de virar bloco.
 
-### Sintaxe do Item (1.21.1)
+---
+
+## 3. Catálogo Unificado de Magias (`spell-registry`)
+
+Localizado em `craft-agents/src/clj/craft/agents/backend/fabric/atelier.clj`:
+
+| Item Base | Feitiço (`:id`) | Nome | Cooldown | Alcance | Efeito Ingame |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `minecraft:blaze_rod` | `:fireball` | Bola de Fogo | 1.0s (20 ticks) | Mira Livre | Projétil de bola de fogo física + dano `/damage ... 50 explosion` |
+| `minecraft:breeze_rod` | `:wind-charge` | Onda de Choque | 1.0s (20 ticks) | 24 metros | Projétil `breeze_wind_charge` + dano AOE de 40 (`player_attack`) em raio de 6.5m (poupa conjurador, permite Rocket Jump) |
+| `minecraft:trial_key` | `:lightning-smite` | Relâmpago do Julgamento | 3.0s (60 ticks) | 80 metros | Raio nativo vanilla (`lightning_bolt`) + dano elétrico de 50 em AOE de 3.5m (hitkill em Enderman e Creepers) + imunidade `Resistance V` à queima-roupa |
+
+---
+
+## 4. Como Criar Itens Customizados com Clique Direito (1.21.1)
+
+### Componente `food` com Interrupção no 1º Tick
+No Minecraft Vanilla, o cliente descarta cliques no ar de itens sem ação de uso nativa. Adicionando o componente `food` com `can_always_eat: true` e `eat_seconds: 1000000`:
+1. O cliente aceita o uso a qualquer momento e despacha o pacote de rede no **Tick 0**.
+2. O advancement `fireball_item:usou_varinha` detecta o uso.
+3. O modificador `item modify` altera o dano do item, interrompendo instantaneamente a pose de alimentação no cliente (sem som de mastigação).
+
+### Sintaxe Completa do Item (64 Cargas)
 ```
-minecraft:blaze_rod[
-  custom_data={varinha_fogo:1b},
+minecraft:trial_key[
+  custom_data={varinha_magica:1b},
   food={nutrition:0,saturation:0,can_always_eat:true,eat_seconds:1000000},
   max_damage=64,
   damage=0,
@@ -67,152 +101,72 @@ minecraft:blaze_rod[
 ]
 ```
 
-> **Atenção (Regra Dura do 1.21.1):**
-> Se um item possui `max_damage`, ele se torna *damageable*. Itens não podem ser simultaneamente *damageable* e *stackable*. Portanto, **sempre inclua `max_stack_size=1`**, caso contrário o servidor descartará o `/give` silenciosamente com o erro:
-> `Malformed item: 'Item cannot be both damageable and stackable'`.
+> **Atenção:** Se houver `max_damage`, **obrigatoriamente** declare `max_stack_size=1`. Caso contrário o servidor descartará o `/give` silenciosamente.
 
 ---
 
-## 3. O Ciclo de Consumo no Data Pack
+## 5. Ciclo do Data Pack (`usou.mcfunction`)
 
-### 1. Advancement de Detecção (`usou_varinha.json`)
-Localizado em `server/world/datapacks/fireball_item/data/fireball_item/advancement/usou_varinha.json`:
-```json
-{
-  "criteria": {
-    "usou": {
-      "trigger": "minecraft:using_item",
-      "conditions": {
-        "item": {
-          "items": ["minecraft:blaze_rod"],
-          "predicates": {
-            "minecraft:custom_data": "{varinha_fogo:1b}"
-          }
-        }
-      }
-    }
-  },
-  "requirements": [["usou"]],
-  "rewards": {
-    "function": "fireball_item:usou"
-  }
-}
-```
+Localizado em `server/world/datapacks/fireball_item/data/fireball_item/function/usou.mcfunction`:
 
-### 2. Modificador de Durabilidade (`gastar.json`)
-Localizado em `server/world/datapacks/fireball_item/data/fireball_item/item_modifier/gastar.json`:
-```json
-{
-  "function": "minecraft:set_damage",
-  "add": true,
-  "damage": -0.015625
-}
-```
-
-#### Fórmula para Fração de Carga:
-No Minecraft, o parâmetro `damage` em `set_damage` representa a fração de **vida restante** (`1.0` = cheio, `0.0` = quebrado). Com `add: true`, valores negativos consomem vida.
-Para um item com $N$ cargas:
-$$\text{damage} = -\frac{1.0}{N}$$
-* Para 8 cargas: $-0.125$
-* Para 16 cargas: $-0.0625$
-* Para 32 cargas: $-0.03125$
-* Para 64 cargas: $-0.015625$
-
-### 3. Função de Execução (`usou.mcfunction`)
-Localizada em `server/world/datapacks/fireball_item/data/fireball_item/function/usou.mcfunction`:
 ```mcfunction
-# 1. Revoga advancement imediatamente para permitir re-disparo
+# 1. Revoga advancement para permitir rearmar
 advancement revoke @s only fireball_item:usou_varinha
 
-# 2. Feedback sensorial (som e partículas de acionamento)
-execute at @s run playsound minecraft:item.firecharge.use master @s ~ ~ ~ 1.0 1.0
-execute at @s run particle minecraft:flame ~ ~1.2 ~ 0.25 0.25 0.25 0.02 8 normal
-execute at @s run particle minecraft:soul_fire_flame ~ ~1.2 ~ 0.2 0.2 0.2 0.02 5 normal
-
-# 3. Guarda de cooldown do data pack (1s = 20 ticks)
+# 2. Guarda de cooldown estrito: se ja estiver em cooldown, sai imediatamente (sem som nem gasto)
 execute if entity @s[scores={fb_cooldown=1..}] run return 0
 
-# 4. Gasta 1 carga (soma dano a durabilidade)
+# 3. Feedback sensorial especifico (apenas quando fora de cooldown)
+execute if items entity @s weapon.mainhand minecraft:trial_key at @s run playsound entity.lightning_bolt.thunder master @s ~ ~ ~ 0.8 1.4
+execute if items entity @s weapon.mainhand minecraft:trial_key at @s run particle minecraft:electric_spark ~ ~1.2 ~ 0.3 0.3 0.3 0.05 15 normal
+
+# 4. Consome 1 carga (set_damage -0.015625 para 64 cargas)
 item modify entity @s weapon.mainhand fireball_item:gastar
 
-# 5. Remove o item caso esgote todas as cargas (ex: 64)
-execute if entity @s[nbt={SelectedItem:{components:{"minecraft:damage":64}}}] run clear @s minecraft:blaze_rod[minecraft:custom_data={varinha_fogo:1b},minecraft:damage=64] 1
+# 5. Clear condicional se atingir o max_damage de 64
+execute if items entity @s weapon.mainhand minecraft:trial_key[minecraft:damage=64] run clear @s minecraft:trial_key[minecraft:damage=64] 1
 
-# 6. Seta cooldown de 20 ticks
+# 6. Seta cooldown condicional por feitiço
 scoreboard players set @s fb_fire 1
 scoreboard players set @s fb_cooldown 20
+execute if items entity @s weapon.mainhand minecraft:trial_key run scoreboard players set @s fb_cooldown 60
 ```
 
 ---
 
-## 4. Implementação de Magias no Clojure (`atelier.clj`)
+## 6. Mira Cirúrgica e Resolução de Impacto no Clojure
 
-As magias residem em `craft-agents/src/clj/craft/agents/backend/fabric/atelier.clj`.
+Para evitar desvios causados por mobs na visão periférica ou colisões no chão:
 
-### A Leitura da Mira com o op `LOOK`
-Para evitar que o projétil mire no chão por colisão de blocos próximos, a mira do jogador é consultada diretamente na ponte via `LOOK|<jogador>`:
-```clojure
-(defn- parse-look-response
-  "Decodifica a resposta de LOOK|<jogador>:
-   `OK|<dx>|<dy>|<dz>|<yaw>|<pitch>`"
-  [resp]
-  (when (and resp (str/starts-with? resp "OK|"))
-    (let [parts (str/split (subs resp 3) #"\|")]
-      (when (>= (count parts) 5)
-        {:dir [(Double/parseDouble (nth parts 0))
-               (Double/parseDouble (nth parts 1))
-               (Double/parseDouble (nth parts 2))]
-         :yaw (Double/parseDouble (nth parts 3))
-         :pitch (Double/parseDouble (nth parts 4))}))))
-```
-
-### Projétil Real com `ExplosionPower`
-A fireball é invocada à frente dos olhos do conjurador com um vetor normalizado multiplicado pela velocidade desejada:
-```clojure
-(defn- projectile-cmd
-  [anchor-name target opts]
-  (let [[dx dy dz] (or (:dir (:look-snapshot opts)) [0.0 0.0 1.0])
-        speed 1.5
-        vx (* dx speed)
-        vy (* dy speed)
-        vz (* dz speed)]
-    (format "CMD|execute at %s run summon minecraft:fireball ^ ^1.2 ^1 {ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
-            anchor-name vx vy vz)))
-```
-
-### Separação de Cooldowns
-Para evitar que o jogador fique travado pelo cooldown tático das bruxas autônomas (5 segundos):
-```clojure
-(def ^:private spell-cooldown-ms 5000) ;; Auto-defesa das bruxas
-(def ^:private wand-cooldown-ms 1000)  ;; Cadencia do jogador com varinha
-
-(defn- spell-ready?
-  ([st now] (spell-ready? st nil now))
-  ([st caster now]
-   (let [cd (if caster wand-cooldown-ms spell-cooldown-ms)]
-     (> (- now (:last-spell-ms @st 0)) cd))))
-```
+1. **Cone de Visada Restrito (20° / `cos >= 0.94`):**
+   A função `select-aim-target-cone` só considera um mob como alvo mirado se ele estiver a menos de 20° do centro do crosshair. Mobs fora dessa janela não desviam a mira.
+2. **Centralização do Topo do Bloco:**
+   Ao mirar no chão ou parede, o raycast calcula:
+   $$x = \text{bx} + 0.5, \quad y = \text{by} + 1.0, \quad z = \text{bz} + 0.5$$
+   O relâmpago atinge exatamente o topo do bloco visado.
+3. **Imunidade à Queima-Roupa:**
+   Ao conjurar o relâmpago, o jogador recebe instantaneamente:
+   - `Resistance V` (`resistance 2 4 true`): 100% de absorção de dano por 2 segundos.
+   - `Fire Resistance` (`fire_resistance 3 1 true`): anula qualquer fogo residual do chão.
+   Isso permite acertar inimigos a 1 metro de distância sem sofrer dano.
 
 ---
 
-## 5. Scripts e Operações Úteis
+## 7. Integração no Dashboard Web (:8090)
 
-### Entregar a Varinha a um Jogador
-O script reexecutável `scripts/varinha_fogo.clj` entrega a varinha configurada ao alvo desejado:
-```bash
-# Entregar para o jogador default (pace)
-clojure -Sdeps '{:paths ["scripts"]}' -M -m varinha-fogo
+Localizado em `craft-repl/resources/public/`:
 
-# Entregar para outro jogador
-clojure -Sdeps '{:paths ["scripts"]}' -M -m varinha-fogo --target Lizzie
-```
-
-### Testes Automatizados
-Para rodar os testes específicos de item e magia:
-```bash
-clojure -M:test -e "(require '[clojure.test :refer [run-tests]] '[craft.agents.atelier-test]) (run-tests 'craft.agents.atelier-test)"
-```
-Testes de integridade do getter de inventário:
-```bash
-clojure -M:test -e "(require '[clojure.test :refer [run-tests]] '[craft.agents.fabric.inventory-manager-property-test]) (run-tests 'craft.agents.fabric.inventory-manager-property-test)"
-```
+* **`index.html`:**
+  ```html
+  <button class="btn btn-amber grid-full" onclick="giveWeaponKit('lightning_wand')">⚡ Cetro do Trovão (64 Cargas — Clique Direito)</button>
+  <button class="btn btn-amber" onclick="giveWeaponKit('lightning_wand', 'partner')">⚡ AirDrop Cetro do Trovão</button>
+  ```
+* **`js/actions.js`:**
+  ```javascript
+  case 'lightning_wand':
+      title = 'Cetro do Trovão (64 Cargas — Relâmpago do Julgamento)';
+      cmds = [
+          `give ${nick} minecraft:trial_key[custom_data={varinha_magica:1b},food={nutrition:0,saturation:0,can_always_eat:true,eat_seconds:1000000},max_damage=64,damage=0,max_stack_size=1] 1`
+      ];
+      break;
+  ```
