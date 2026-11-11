@@ -95,11 +95,37 @@
   [st now]
   (> (- now (:last-spell-ms @st 0)) spell-cooldown-ms))
 
+(defn- projectile-cmd
+  "Comando que lanca o projetil real (fireball) da bruxa RUMO AO ALVO.
+   A direcao sai da posicao da bruxa (`:pos` do estado) para as coordenadas do
+   alvo, normalizada; `speed` fixa a velocidade. `ExplosionPower:0` para o fogo
+   nao quebrar blocos — o dano real continua a ser o do ATTACK_HOSTILE."
+  [st agent-name {:keys [x y z]}]
+  (let [[wx wy wz] (:pos @st)
+        dx (- (double x) (double wx))
+        dy (- (double y) (double wy))
+        dz (- (double z) (double wz))
+        len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
+        speed 1.1
+        mx (* speed (/ dx len))
+        my (* speed (/ dy len))
+        mz (* speed (/ dz len))]
+    (uformat "CMD|execute at %s run summon minecraft:fireball ^ ^1.2 ^1 {ExplosionPower:0b,Motion:[%.3f,%.3f,%.3f]}"
+             agent-name mx my mz)))
+
+(defn- burst-cmds
+  "Golpe visual ancorado nas COORDENADAS do alvo — a magia detona nele, nao
+   so na bruxa. `x/y/z` vem do scanner de hostis."
+  [{:keys [x y z]} particles]
+  (mapv (fn [p] (uformat "CMD|execute positioned %.2f %.2f %.2f run %s" x y z p))
+        particles))
+
 (defn- cast-spell!
   "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
-   assinado por `particles` (seq de comandos CMD|particle) e `sound` (CMD|playsound).
+   assinado por `particles` (glifo na bruxa), `sound` e `burst-particles`
+   (detonacao nas coordenadas do alvo).
    Devolve true se conjurou (havia alvo), false caso contrario."
-  [st agent-name send-cmd! now particles sound]
+  [st agent-name send-cmd! now particles sound burst-particles]
   (if-not (spell-ready? st now)
     false
     (let [resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" agent-name spell-scan-radius))
@@ -111,7 +137,10 @@
       (when sound (send-cmd! sound))
       (when target
         (send-cmd! (str "SWING|" agent-name))
-        (send-cmd! (uformat "ATTACK_HOSTILE|%s|%d" agent-name (:id target))))
+        (send-cmd! (uformat "ATTACK_HOSTILE|%s|%d" agent-name (:id target)))
+        ;; Projetil real a voar ate o alvo + detonacao visual NAS COORDENADAS dele.
+        (send-cmd! (projectile-cmd st agent-name target))
+        (doseq [b (burst-cmds target burst-particles)] (send-cmd! b)))
       (some? target))))
 
 (defn cast-coco-spell!
@@ -123,7 +152,10 @@
    ["CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
     "CMD|execute at Coco run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
     "CMD|execute at Coco run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
-   "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 1.2 0.8"))
+   "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 1.2 0.8"
+   ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+    "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
+    "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]))
 
 (defn cast-richeh-spell!
   "Richeh - Estilhaco de Cristal: inscreve uma matriz e a estilhaca no alvo.
@@ -134,7 +166,10 @@
    ["CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.0 ~ 0.6 0.6 0.6 0.08 25 normal"
     "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.8 ~ 0.4 0.4 0.4 0.02 20 normal"
     "CMD|execute at Richeh run particle minecraft:block_marker minecraft:amethyst_block ~ ~1.0 ~ 0.3 0.3 0.3 0.05 12 normal"]
-   "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.break master @a[distance=..24] ~ ~ ~ 1.1 0.9"))
+   "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.break master @a[distance=..24] ~ ~ ~ 1.1 0.9"
+   ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+    "particle minecraft:end_rod ~ ~ ~ 0.6 0.6 0.6 0.08 40 normal"
+    "particle minecraft:block_marker minecraft:amethyst_block ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"]))
 
 (defn spell-auto-defense!
   "Reacao automatica: se houver hostil no raio, a bruxa conjura a sua magia.

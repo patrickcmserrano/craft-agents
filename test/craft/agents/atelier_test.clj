@@ -95,6 +95,34 @@
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")) cmds))
       (is (some #(str/starts-with? % "SWING|Richeh") cmds)))))
 
+(deftest test-coco-spell-launches-projectile-at-target
+  (testing "Coco lanca um projetil real (fireball) rumo ao alvo, sem ExplosionPower a quebrar blocos"
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent)
+          _ (atelier/cast-coco-spell! coco-st mock! 1 2000000)
+          cmds @sent
+          proj (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                                    (str/includes? % "fireball")) cmds))]
+      (is (some? proj) "Deve summonar uma fireball como projetil")
+      ;; Coco em x=-30, alvo em x=-28: o vetor de velocidade tem de apontar para
+      ;; LESTE (x positivo) — a magia voa em direcao ao alvo, nao para o lado errado.
+      (is (re-find #"Motion:\[1\.1" proj)
+          "O vetor de velocidade deve apontar para o alvo (leste, +x)")
+      (is (str/includes? proj "ExplosionPower:0") "ExplosionPower:0 para nao quebrar blocos do mundo"))))
+
+(deftest test-richeh-spell-detonates-burst-at-target
+  (testing "Richeh detona a magia nas coordenadas do alvo (nao so na propria bruxa)"
+    (let [richeh-st (atelier/create-richeh-state [-30.0 66.0 192.0])
+          sent (atom [])
+          mock! (spell-mock! sent)
+          _ (atelier/cast-richeh-spell! richeh-st mock! 1 2000000)
+          cmds @sent]
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")
+                      (str/includes? % "-28"))
+                cmds)
+          "Deve haver um golpe visual ANCRADO NO ALVO (x=-28), nao so na Richeh"))))
+
 (deftest test-spell-cooldown-blocks-immediate-recast
   (testing "Cooldown de 5s impede reconjuracao automatica imediata"
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
