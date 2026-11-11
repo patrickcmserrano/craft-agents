@@ -96,22 +96,41 @@
   (> (- now (:last-spell-ms @st 0)) spell-cooldown-ms))
 
 (defn- projectile-cmd
-  "Comando que lanca o projetil real (fireball) da bruxa RUMO AO ALVO.
-   A direcao sai da posicao da bruxa (`:pos` do estado) para as coordenadas do
-   alvo, normalizada; `speed` fixa a velocidade. `ExplosionPower:0` para o fogo
-   nao quebrar blocos — o dano real continua a ser o do ATTACK_HOSTILE."
-  [st agent-name {:keys [x y z]}]
-  (let [[wx wy wz] (:pos @st)
-        dx (- (double x) (double wx))
-        dy (- (double y) (double wy))
-        dz (- (double z) (double wz))
-        len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
-        speed 1.1
-        mx (* speed (/ dx len))
-        my (* speed (/ dy len))
-        mz (* speed (/ dz len))]
-    (uformat "CMD|execute at %s run summon minecraft:fireball ^ ^1.2 ^1 {ExplosionPower:0b,Motion:[%.3f,%.3f,%.3f]}"
-             agent-name mx my mz)))
+  "Comando que lanca o projetil real (fireball) do CONJURADOR rumo ao alvo.
+   A direcao sai da posicao da ancora (`anchor-name`) para as coordenadas do
+   alvo, normalizada; `speed` fixa a velocidade. A ancora e a posicao de quem
+   conjura: o JOGADOR quando comanda (`anchor-name` = nome dele, o `execute at
+   <nome>` fica na posicao real dele), ou a bruxa na auto-defesa. Quando a
+   ancora e a bruxa, usa-se o `:pos` do estado (o nome do NPC nao e resolvivel
+   pelo `execute at` do servidor). `ExplosionPower:0` para o fogo nao quebrar
+   blocos — o dano real continua a ser o do comando de dano."
+  ([st agent-name target] (projectile-cmd st agent-name nil target))
+  ([st anchor-name send-cmd! {:keys [x y z]}]
+   (let [[wx wy wz] (if send-cmd!
+                      ;; Jogador: le a posicao real dele pela ponte.
+                      (let [resp (send-cmd! "PLAYERS")
+                            entry (some (fn [e] (let [f (str/split e #",")]
+                                                  (when (= anchor-name (first f)) f)))
+                                        (-> resp (str/replace #"^OK\|" "") (str/split #";")))]
+                        (if (and entry (>= (count entry) 4))
+                          [(Double/parseDouble (nth entry 1))
+                           (Double/parseDouble (nth entry 2))
+                           (Double/parseDouble (nth entry 3))]
+                          (:pos @st)))
+                      (:pos @st))
+         dx (- (double x) (double wx))
+         dy (- (double y) (double wy))
+         dz (- (double z) (double wz))
+         len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
+         speed 1.1
+         mx (* speed (/ dx len))
+         my (* speed (/ dy len))
+         mz (* speed (/ dz len))
+         at-expr (if send-cmd!
+                   (uformat "at %s" anchor-name)
+                   (uformat "positioned %.2f %.2f %.2f" wx wy wz))]
+     (uformat "CMD|execute %s run summon minecraft:fireball ^ ^1.2 ^1 {ExplosionPower:0b,Motion:[%.3f,%.3f,%.3f]}"
+              at-expr mx my mz))))
 
 (defn- burst-cmds
   "Golpe visual ancorado nas COORDENADAS do alvo — a magia detona nele, nao
@@ -145,20 +164,99 @@
     (boolean (and resp (str/starts-with? resp "OK|")
                   (str/includes? resp grimoire-item)))))
 
+;; =============================================================================
+;; Mira por Direcao (o jogador aponta, a magia acerta o que ele mira)
+;; =============================================================================
+;; O jogador NAO precisa de um op novo: a ponte ja sabe ler a direcao do olhar
+;; (RAYCAST_BLOCK devolve o primeiro bloco solido na linha do olhar). Nao existe
+;; um op de raycast de ENTIDADES, entao a mira cruza a LINHA do olhar com a
+;; varredura de hostis (TARGET_HOSTILE) e escolhe o hostil mais proximo DESSA
+;; linha — os hostis que nao estao no cone de mira sao ignorados.
+
+(def ^:private aim-cone-deg
+  "Meio-angulo do cone de mira, em graus. O hostil tem de estar dentro deste
+   desvio da linha do olhar para contar como alvo da mira."
+  20.0)
+
+(defn player-aim-snapshot
+  "Le a mira do jogador pela ponte. A ORIGEM sao os pes do jogador (op PLAYERS,
+   que devolve nome,x,y,z) e a DIRECAO e o vetor normalizado origem->bloco
+   avistado (RAYCAST_BLOCK devolve o primeiro bloco solido na linha do olhar).
+   `send-cmd!` e injetado para os testes; devolve
+   {:look-direction [dx dy dz] :ray-origin [x y z] :ray-max-dist d}
+   ou nil se o jogador nao tem bloco em vista."
+  [send-cmd! player-name max-dist]
+  (let [resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name (double max-dist)))
+        pos-resp (send-cmd! "PLAYERS")]
+    (when (and resp (str/starts-with? resp "OK|"))
+      (let [parts (str/split resp #"\|")
+            bx (try (Double/parseDouble (nth parts 2 "0")) (catch Throwable _ 0.0))
+            by (try (Double/parseDouble (nth parts 3 "0")) (catch Throwable _ 0.0))
+            bz (try (Double/parseDouble (nth parts 4 "0")) (catch Throwable _ 0.0))
+            ;; A posicao real dos pes do jogador vem do op PLAYERS.
+            player (fn []
+                     (some (fn [entry]
+                             (let [f (str/split entry #",")]
+                               (when (= player-name (first f)) f)))
+                           (-> pos-resp (str/replace #"^OK\|" "") (str/split #";"))))
+            pfields (player)
+            [ox oy oz] (if (>= (count pfields) 4)
+                         [(Double/parseDouble (nth pfields 1))
+                          (Double/parseDouble (nth pfields 2))
+                          (Double/parseDouble (nth pfields 3))]
+                         [bx (dec by) bz])
+            ;; Os olhos ficam ~1.62m acima dos pes; o bloco avistado da a direcao.
+            ey (+ oy 1.62)
+            dx (- bx ox)
+            dy (- by ey)
+            dz (- bz oz)
+            len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))]
+        {:look-direction [(/ dx len) (/ dy len) (/ dz len)]
+         :ray-origin [ox oy oz]
+         :ray-max-dist (double max-dist)}))))
+
+(defn select-aim-target
+  "Escolhe, entre os `hostiles`, o que esta na mira do jogador: aquele cuja
+   direcao o jogador->hostil forma o menor angulo com a linha do olhar, desde
+   que dentro de `aim-cone-deg`. Devolve o hostil escolhido ou nil."
+  [snapshot hostiles]
+  (when (and snapshot (seq hostiles))
+    (let [[dx dy dz] (:look-direction snapshot)
+          [ox oy oz] (:ray-origin snapshot)
+          cos-limit (Math/cos (Math/toRadians aim-cone-deg))
+          scored (keep (fn [{:keys [x y z] :as h}]
+                         (let [vx (- (double x) (double ox))
+                               vy (- (double y) (double oy))
+                               vz (- (double z) (double oz))
+                               vlen (max 0.001 (Math/sqrt (+ (* vx vx) (* vy vy) (* vz vz))))
+                               cosang (/ (+ (* dx vx) (* dy vy) (* dz vz)) vlen)]
+                           (when (>= cosang cos-limit)
+                             [cosang h])))
+                       hostiles)]
+      (second (apply max-key first (cons [(- (double cos-limit) 1.0) nil] scored))))))
+
 (defn- cast-spell!
   "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
    assinado por `particles` (glifo na bruxa), `sound` e `burst-particles`
    (detonacao nas coordenadas do alvo).
-   Quando `caster` e um nome de jogador, a magia exige o GRIMORIO no inventario
-   dele (o item e o poder); `caster` nil = auto-defesa da bruxa, sem exigencia.
+   Quando `caster` e um nome de jogador, a magia NASCE DELE: a varredura de
+   hostis e o projetil ancoram na posicao do JOGADOR (nao na bruxa), e ele
+   precisa do GRIMORIO no inventario (o item e o poder). Sem `caster` =
+   auto-defesa da bruxa: a magia nasce na propria bruxa, sem exigencia.
+   `opts` pode trazer `:aim-target` — o hostil que o jogador mira; quando
+   presente, E ELE o alvo (mesmo que outro esteja mais perto).
    Devolve true se conjurou (havia alvo), false caso contrario."
-  [st agent-name send-cmd! caster now particles sound burst-particles]
+  [st agent-name send-cmd! caster now particles sound burst-particles opts]
   (cond
     (not (spell-ready? st now)) false
     (and caster (not (grimoire-carried? send-cmd! caster))) false
     :else
-    (let [resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" agent-name spell-scan-radius))
-          target (parse-hostile-response resp)]
+    ;; A magia nasce do CONJURADOR: o jogador quando comanda, a bruxa na auto-defesa.
+    (let [anchor (or caster agent-name)
+          resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" anchor spell-scan-radius))
+          scanned (parse-hostile-response resp)
+          ;; A mira do jogador tem prioridade; sem mira, cai no mais proximo.
+          target (or (:aim-target opts) scanned)]
       (swap! st assoc :last-spell-ms now)
       (when (should-say-spell? st now)
         (swap! st assoc :last-spell-said-ms now :spell-said? true))
@@ -169,39 +267,85 @@
         ;; HIT KILL: dano 100 num golpe (mobs comuns morrem, bosses resistem).
         (send-cmd! (hitkill-cmd target))
         ;; Projetil real a voar ate o alvo + detonacao visual NAS COORDENADAS dele.
-        (send-cmd! (projectile-cmd st agent-name target))
+        (send-cmd! (projectile-cmd st anchor send-cmd! target))
         (doseq [b (burst-cmds target burst-particles)] (send-cmd! b)))
       (some? target))))
+
+(defn- parse-all-hostiles
+  "Extrai TODOS os hostis da resposta do SyntheticHostileScanner
+   (OK|<count>|<id>,<tipo>,<x>,<y>,<z>,<dist>,<hp>;...) para uma lista de mapas.
+   Usado pela mira por direcao, que precisa comparar todos contra a linha do olhar."
+  [resp]
+  (when (and resp (str/starts-with? resp "OK|"))
+    (let [payload (nth (str/split resp #"\|" 3) 2 "")]
+      (when-not (str/blank? payload)
+        (keep (fn [seg]
+                (let [fields (str/split seg #",")]
+                  (when (>= (count fields) 7)
+                    (try
+                      {:id (Integer/parseInt (first fields))
+                       :type (nth fields 1)
+                       :x (Double/parseDouble (nth fields 2))
+                       :y (Double/parseDouble (nth fields 3))
+                       :z (Double/parseDouble (nth fields 4))
+                       :dist (Double/parseDouble (nth fields 5))
+                       :hp (Double/parseDouble (nth fields 6))}
+                      (catch Throwable _ nil)))))
+              (str/split payload #";"))))))
+
+(defn cast-spell-with-aim!
+  "Conjura resolvendo a MIRA do jogador: le a mira (`player-aim-snapshot`),
+   varre os hostis EM VOLTA DO JOGADOR (`TARGET_HOSTILE|<caster>`) e escolhe,
+   entre eles, o que esta na linha do olhar (`select-aim-target`). Sem hostil na
+   mira, a magia nao sai — mirar para o vazio nao gasta conjuracao.
+   `caster` = nome do jogador (exige o grimorio); nil = auto-defesa, que ignora
+   a mira e usa o mais proximo."
+  [st agent-name send-cmd! caster now particles sound burst-particles]
+  (if (nil? caster)
+    (cast-spell! st agent-name send-cmd! nil now particles sound burst-particles nil)
+    (let [snapshot (player-aim-snapshot send-cmd! caster spell-scan-radius)
+          resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" caster spell-scan-radius))
+          aimed (select-aim-target snapshot (parse-all-hostiles resp))]
+      (cast-spell! st agent-name send-cmd! caster now particles sound burst-particles
+                   {:aim-target aimed}))))
 
 (defn cast-coco-spell!
   "Coco - Glifo de Tinta Viva: desenha um glifo que morde o hostil mais proximo.
    `caster` = nome do jogador que comanda (exige o grimorio); nil = auto-defesa.
-   `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`."
-  [coco-st send-cmd! caster _tick now]
-  (cast-spell!
-   coco-st "Coco" send-cmd! caster now
-   ["CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
-    "CMD|execute at Coco run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
-    "CMD|execute at Coco run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
-   "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 1.2 0.8"
-   ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
-    "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
-    "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]))
+   `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`.
+   Com `opts` `{:aim-target hostil}`, acerta o hostil apontado pela mira."
+  ([coco-st send-cmd! caster _tick now]
+   (cast-coco-spell! coco-st send-cmd! caster _tick now nil))
+  ([coco-st send-cmd! caster _tick now opts]
+   (cast-spell!
+    coco-st "Coco" send-cmd! caster now
+    ["CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
+     "CMD|execute at Coco run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
+     "CMD|execute at Coco run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
+    "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 1.2 0.8"
+    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+     "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
+     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]
+    opts)))
 
 (defn cast-richeh-spell!
   "Richeh - Estilhaco de Cristal: inscreve uma matriz e a estilhaca no alvo.
    `caster` = nome do jogador que comanda (exige o grimorio); nil = auto-defesa.
-   `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`."
-  [richeh-st send-cmd! caster _tick now]
-  (cast-spell!
-   richeh-st "Richeh" send-cmd! caster now
-   ["CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.0 ~ 0.6 0.6 0.6 0.08 25 normal"
-    "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.8 ~ 0.4 0.4 0.4 0.02 20 normal"
-    "CMD|execute at Richeh run particle minecraft:block_marker minecraft:amethyst_block ~ ~1.0 ~ 0.3 0.3 0.3 0.05 12 normal"]
-   "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.break master @a[distance=..24] ~ ~ ~ 1.1 0.9"
-   ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
-    "particle minecraft:end_rod ~ ~ ~ 0.6 0.6 0.6 0.08 40 normal"
-    "particle minecraft:block_marker minecraft:amethyst_block ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"]))
+   `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`.
+   Com `opts` `{:aim-target hostil}`, acerta o hostil apontado pela mira."
+  ([richeh-st send-cmd! caster _tick now]
+   (cast-richeh-spell! richeh-st send-cmd! caster _tick now nil))
+  ([richeh-st send-cmd! caster _tick now opts]
+   (cast-spell!
+    richeh-st "Richeh" send-cmd! caster now
+    ["CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.0 ~ 0.6 0.6 0.6 0.08 25 normal"
+     "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.8 ~ 0.4 0.4 0.4 0.02 20 normal"
+     "CMD|execute at Richeh run particle minecraft:block_marker minecraft:amethyst_block ~ ~1.0 ~ 0.3 0.3 0.3 0.05 12 normal"]
+    "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.break master @a[distance=..24] ~ ~ ~ 1.1 0.9"
+    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+     "particle minecraft:end_rod ~ ~ ~ 0.6 0.6 0.6 0.08 40 normal"
+     "particle minecraft:block_marker minecraft:amethyst_block ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"]
+    opts)))
 
 (defn spell-auto-defense!
   "Reacao automatica: se houver hostil no raio, a bruxa conjura a sua magia.
@@ -476,11 +620,18 @@
         (do
           (if-not (grimoire-carried? send-bridge-cmd! speaker)
             (say-fn :coco "Sem o teu grimório comigo eu não consigo desenhar! Traz o livro-e-pena! 📖🎒")
-            (let [hit? (cast-coco-spell! coco-st send-bridge-cmd! speaker 0 (System/currentTimeMillis))]
+            (let [hit? (cast-spell-with-aim! coco-st "Coco" send-bridge-cmd! speaker (System/currentTimeMillis)
+                                             ["CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
+                                              "CMD|execute at Coco run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
+                                              "CMD|execute at Coco run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
+                                             "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 1.2 0.8"
+                                             ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+                                              "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
+                                              "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"])]
               (if hit?
                 (say-fn :coco (rand-nth ["Glifo de Tinta Viva! Segura ele pra mim! 🖋️✨"
                                          "A tinta morde! Não se mexe! 📖"]))
-                (say-fn :coco "Não tem nada pra desenhar por aqui... o castelo tá tranquilo! 🖋️"))))
+                (say-fn :coco "Mira num bicho, não no vazio! O glifo precisa de um alvo pra morder! 🖋️"))))
           true)
 
         (or (str/includes? lower "segue") (str/includes? lower "vem"))
@@ -524,11 +675,18 @@
         (do
           (if-not (grimoire-carried? send-bridge-cmd! speaker)
             (say-fn :richeh "Hmph. Sem o teu grimório, não desperdiço meus cristais. 📖")
-            (let [hit? (cast-richeh-spell! richeh-st send-bridge-cmd! speaker 0 (System/currentTimeMillis))]
+            (let [hit? (cast-spell-with-aim! richeh-st "Richeh" send-bridge-cmd! speaker (System/currentTimeMillis)
+                                             ["CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.0 ~ 0.6 0.6 0.6 0.08 25 normal"
+                                              "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.8 ~ 0.4 0.4 0.4 0.02 20 normal"
+                                              "CMD|execute at Richeh run particle minecraft:block_marker minecraft:amethyst_block ~ ~1.0 ~ 0.3 0.3 0.3 0.05 12 normal"]
+                                             "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.break master @a[distance=..24] ~ ~ ~ 1.1 0.9"
+                                             ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+                                              "particle minecraft:end_rod ~ ~ ~ 0.6 0.6 0.6 0.08 40 normal"
+                                              "particle minecraft:block_marker minecraft:amethyst_block ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"])]
               (if hit?
                 (say-fn :richeh (rand-nth ["Estilhaço de Cristal. Não desperdiça meu tempo. 🔮"
                                            "A matriz tá inscrita. Fica parado e ele quebra. 💠"]))
-                (say-fn :richeh "Hmph. Não vejo nada digno dos meus cristais por aqui."))))
+                (say-fn :richeh "Hmph. Mira num alvo de verdade. Meus cristais não se gastam no vazio."))))
           true)
 
         (or (str/includes? lower "segue") (str/includes? lower "vem"))

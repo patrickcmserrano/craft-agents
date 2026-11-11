@@ -62,12 +62,16 @@
    `held` e o item devolvido por INSPECT_INVENTORY (o grimorio, ou nil sem ele)."
   ([sent-cmds] (spell-mock! sent-cmds "minecraft:writable_book,1"))
   ([sent-cmds held]
+   (spell-mock! sent-cmds held nil))
+  ([sent-cmds held raycast-resp]
    (fn [cmd]
      (swap! sent-cmds conj cmd)
      (cond
        (str/starts-with? cmd "INSPECT_INVENTORY")
        (if held (str "OK|1|" held) "OK|0|")
        (str/starts-with? cmd "TARGET_HOSTILE") (hostile-response)
+       (str/starts-with? cmd "RAYCAST_BLOCK") (or raycast-resp "ERR|NO_BLOCK_IN_SIGHT")
+       (= cmd "PLAYERS") "OK|pace,0.0,65.0,0.0"
        (str/starts-with? cmd "ATTACK_HOSTILE") (str "OK|" (last (str/split cmd #"\|")) "|0.90")
        :else "OK"))))
 
@@ -78,8 +82,8 @@
           mock! (spell-mock! sent)
           _ (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)
           cmds @sent]
-      (is (some #(str/starts-with? % "TARGET_HOSTILE|Coco|") cmds)
-          "Deve varrer hostis com TARGET_HOSTILE ancorado na Coco")
+      (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") cmds)
+          "Deve varrer hostis ancorados no CONJURADOR (pace), nao na bruxa")
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage") (str/includes? % " 100 "))
                 cmds)
           "Deve matar o hostil mais proximo com um golpe de dano 100 (hit kill)")
@@ -95,14 +99,15 @@
           mock! (spell-mock! sent)
           _ (atelier/cast-richeh-spell! richeh-st mock! "pace" 1 2000000)
           cmds @sent]
-      (is (some #(str/starts-with? % "TARGET_HOSTILE|Richeh|") cmds))
+      (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") cmds)
+          "Deve varrer hostis ancorados no CONJURADOR (pace)")
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage") (str/includes? % " 100 "))
                 cmds))
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")) cmds))
       (is (some #(str/starts-with? % "SWING|Richeh") cmds)))))
 
 (deftest test-coco-spell-launches-projectile-at-target
-  (testing "Coco lanca um projetil real (fireball) rumo ao alvo, sem ExplosionPower a quebrar blocos"
+  (testing "Coco lanca um projetil real (fireball) do CONJURADOR rumo ao alvo"
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)
@@ -111,10 +116,12 @@
           proj (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
                                     (str/includes? % "fireball")) cmds))]
       (is (some? proj) "Deve summonar uma fireball como projetil")
-      ;; Coco em x=-30, alvo em x=-28: o vetor de velocidade tem de apontar para
-      ;; LESTE (x positivo) — a magia voa em direcao ao alvo, nao para o lado errado.
-      (is (re-find #"Motion:\[1\.1" proj)
-          "O vetor de velocidade deve apontar para o alvo (leste, +x)")
+      ;; A magia NASCE DO JOGADOR: o projetil e summonado na posicao dele
+      ;; (`execute at pace`), rumo ao alvo — nao na posicao da bruxa.
+      (is (str/includes? proj "at pace")
+          "O projetil nasce das coordenadas do conjurador (pace)")
+      (is (re-find #"Motion:\[-?[0-9]" proj)
+          "O projetil leva um vetor de velocidade calculado rumo ao alvo")
       (is (str/includes? proj "ExplosionPower:0") "ExplosionPower:0 para nao quebrar blocos do mundo"))))
 
 (deftest test-richeh-spell-detonates-burst-at-target
@@ -186,3 +193,85 @@
           "Nao fala de novo dentro da janela do surto")
       (is (true? (atelier/should-say-spell? coco-st 1100000))
           "Passada a janela, um novo surto pode falar"))))
+
+;; =============================================================================
+;; Mira por Direcao: conjurar contra o hostil na linha do olhar do jogador
+;; =============================================================================
+
+(deftest test-aim-picks-hostile-nearest-the-look-line
+  (testing "A mira por direcao escolhe o hostil mais proximo da linha de visao"
+    ;; O jogador olha para LESTE (+x). O hostil A esta na linha (+x, z igual);
+    ;; o hostil B esta deslocado 4m de lado. A mira tem de escolher A.
+    (let [aim-line [1.0 0.0 0.0]                     ; direcao do olhar (leste)
+          snap {:look-direction aim-line
+                :ray-origin [0.0 65.0 0.0]
+                :ray-max-dist 24.0}
+          hostiles [{:id 1 :type "minecraft:zombie" :x 10.0 :y 65.0 :z 0.0 :dist 10.0 :hp 20.0}
+                    {:id 2 :type "minecraft:skeleton" :x 10.0 :y 65.0 :z 4.0 :dist 10.8 :hp 20.0}]
+          chosen (atelier/select-aim-target snap hostiles)]
+      (is (= 1 (:id chosen)) "Deve escolher o hostil colado na linha do olhar (+x)"))))
+
+(deftest test-aim-rejects-off-axis-hostiles
+  (testing "Hostis fora do cone de mira sao ignorados; sem ninguem na mira, nil"
+    (let [aim-line [1.0 0.0 0.0]
+          snap {:look-direction aim-line
+                :ray-origin [0.0 65.0 0.0]
+                :ray-max-dist 24.0}
+          hostiles [{:id 7 :type "minecraft:creeper" :x 2.0 :y 65.0 :z 12.0 :dist 12.2 :hp 20.0}]]
+      (is (nil? (atelier/select-aim-target snap hostiles))
+          "Um hostil a 12m de lado nao esta na mira"))))
+
+(deftest test-aim-uses-player-raycast-direction
+  (testing "A direcao do olhar vem do raycast do jogador (bloco a frente na linha)"
+    ;; O raycast devolve o PRIMEIRO bloco solido na linha do olhar. A mira usa a
+    ;; ORIGEM (olhos do jogador) + a direcao ate esse bloco como eixo.
+    (let [sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|10|65|0|10.00")
+          snap (atelier/player-aim-snapshot mock! "pace" 24.0)]
+      (is (some #(str/starts-with? % "RAYCAST_BLOCK|pace|") @sent)
+          "Deve consultar o raycast do jogador")
+      (is (vector? (:look-direction snap)) "O snapshot traz a direcao do olhar")
+      (is (> (first (:look-direction snap)) 0.9)
+          "A direcao aponta para leste (+x), rumo ao bloco avistado"))))
+
+(deftest test-spell-fired-at-aimed-hostile
+  (testing "Conjurar com mira atinge o hostil da mira, nao o mais proximo por distancia"
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          ;; Dois hostis: o ID 42 esta perto mas FORA da mira; o ID 99 esta na mira.
+          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|-20|66|190|10.00")
+          _ (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000 {:aim-target {:id 99 :type "minecraft:skeleton"
+                                                                                   :x -20.0 :y 66.0 :z 190.0
+                                                                                   :dist 10.0 :hp 20.0}})
+          cmds @sent
+          dmg (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds))]
+      (is (some? dmg) "Deve aplicar dano")
+      (is (str/includes? dmg "-20") "O dano cai nas coordenadas do ALVO DA MIRA (x=-20), nao do mais proximo"))))
+
+(deftest test-aim-spell-scans-around-the-caster
+  (testing "A magia do jogador varre hostis em volta DELE (o conjurador), nao da bruxa"
+    ;; A bruxa esta longe do jogador; o hostil esta perto DO JOGADOR. Se a
+    ;; varredura ancorasse na bruxa, nao acharia nada e a magia nao sairia.
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|6|64|128|6.00")]
+      (atelier/cast-spell-with-aim! st "Coco" mock! "pace" 2000000
+                                    ["CMD|execute at Coco run particle minecraft:enchant ~ ~1 ~ 0.5 0.5 0.5 0.05 10 normal"]
+                                    nil
+                                    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"])
+      (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") @sent)
+          "Deve varrer hostis ancorados no JOGADOR (pace), nao na bruxa (Coco)"))))
+
+(deftest test-aim-spell-originates-at-the-caster
+  (testing "A magia nasce do jogador: projetil e glifo ancoram na posicao DELE"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|6|64|128|6.00")]
+      (atelier/cast-spell-with-aim! st "Coco" mock! "pace" 2000000
+                                    ["CMD|execute at Coco run particle minecraft:enchant ~ ~1 ~ 0.5 0.5 0.5 0.05 10 normal"]
+                                    nil
+                                    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"])
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                      (str/includes? % "fireball") (str/includes? % "at pace"))
+                @sent)
+          "O projetil de fogo nasce das coordenadas do JOGADOR (at pace)"))))
