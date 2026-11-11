@@ -58,21 +58,25 @@
   "OK|2|42,minecraft:zombie,-28.00,66.00,190.00,2.00,20.0;77,minecraft:skeleton,-24.00,66.00,190.00,5.50,20.0")
 
 (defn- spell-mock!
-  "Mock da bridge: registra os comandos e responde aos opcodes de combate."
-  [sent-cmds]
-  (fn [cmd]
-    (swap! sent-cmds conj cmd)
-    (cond
-      (str/starts-with? cmd "TARGET_HOSTILE") (hostile-response)
-      (str/starts-with? cmd "ATTACK_HOSTILE") (str "OK|" (last (str/split cmd #"\|")) "|0.90")
-      :else "OK")))
+  "Mock da bridge: registra os comandos e responde aos opcodes de combate.
+   `held` e o item devolvido por INSPECT_INVENTORY (o grimorio, ou nil sem ele)."
+  ([sent-cmds] (spell-mock! sent-cmds "minecraft:writable_book,1"))
+  ([sent-cmds held]
+   (fn [cmd]
+     (swap! sent-cmds conj cmd)
+     (cond
+       (str/starts-with? cmd "INSPECT_INVENTORY")
+       (if held (str "OK|1|" held) "OK|0|")
+       (str/starts-with? cmd "TARGET_HOSTILE") (hostile-response)
+       (str/starts-with? cmd "ATTACK_HOSTILE") (str "OK|" (last (str/split cmd #"\|")) "|0.90")
+       :else "OK"))))
 
 (deftest test-coco-spell-casts-visual-and-damage
   (testing "Coco conjura glifo: varre hostis, aplica dano ao mais proximo e emite visual"
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)
-          _ (atelier/cast-coco-spell! coco-st mock! 1 2000000)
+          _ (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)
           cmds @sent]
       (is (some #(str/starts-with? % "TARGET_HOSTILE|Coco|") cmds)
           "Deve varrer hostis com TARGET_HOSTILE ancorado na Coco")
@@ -89,7 +93,7 @@
     (let [richeh-st (atelier/create-richeh-state [-30.0 66.0 192.0])
           sent (atom [])
           mock! (spell-mock! sent)
-          _ (atelier/cast-richeh-spell! richeh-st mock! 1 2000000)
+          _ (atelier/cast-richeh-spell! richeh-st mock! "pace" 1 2000000)
           cmds @sent]
       (is (some #(str/starts-with? % "TARGET_HOSTILE|Richeh|") cmds))
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage") (str/includes? % " 100 "))
@@ -102,7 +106,7 @@
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)
-          _ (atelier/cast-coco-spell! coco-st mock! 1 2000000)
+          _ (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)
           cmds @sent
           proj (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
                                     (str/includes? % "fireball")) cmds))]
@@ -118,7 +122,7 @@
     (let [richeh-st (atelier/create-richeh-state [-30.0 66.0 192.0])
           sent (atom [])
           mock! (spell-mock! sent)
-          _ (atelier/cast-richeh-spell! richeh-st mock! 1 2000000)
+          _ (atelier/cast-richeh-spell! richeh-st mock! "pace" 1 2000000)
           cmds @sent]
       (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "particle")
                       (str/includes? % "-28"))
@@ -130,7 +134,7 @@
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)
-          _ (atelier/cast-coco-spell! coco-st mock! 1 2000000)
+          _ (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)
           cmds @sent
           dmg (first (filter #(and (str/starts-with? % "CMD|") (str/includes? % "damage")
                                    (str/includes? % " 100 ")) cmds))]
@@ -138,14 +142,37 @@
       (is (not (some #(str/starts-with? % "ATTACK_HOSTILE") cmds))
           "Nao deve usar o golpe de mao (ATTACK_HOSTILE) quando mata num golpe"))))
 
+(deftest test-spell-requires-grimoire-in-hand
+  (testing "Sem o grimorio na mao, a magia recusa e NAO emite dano nem projetil"
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent nil)   ; mao vazia
+          hit? (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)
+          cmds @sent]
+      (is (false? hit?) "Conjuracao recusada sem o grimorio")
+      (is (some #(str/starts-with? % "INSPECT_INVENTORY|pace") cmds) "Deve consultar o inventario")
+      (is (not (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds))
+          "Nao deve aplicar dano sem o grimorio")
+      (is (not (some #(str/starts-with? % "TARGET_HOSTILE") cmds))
+          "Nem sequer varre hostis sem o grimorio"))))
+
+(deftest test-spell-fires-with-grimoire-in-hand
+  (testing "Com o grimorio na mao, a magia dispara normalmente"
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1")
+          hit? (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)]
+      (is (true? hit?) "Conjura com o grimorio na mao")
+      (is (some #(str/starts-with? % "INSPECT_INVENTORY|pace") @sent)))))
+
 (deftest test-spell-cooldown-blocks-immediate-recast
   (testing "Cooldown de 5s impede reconjuracao automatica imediata"
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)]
-      (is (true? (atelier/cast-coco-spell! coco-st mock! 1 1000000)) "Primeira conjuracao acontece")
+      (is (true? (atelier/cast-coco-spell! coco-st mock! "pace" 1 1000000)) "Primeira conjuracao acontece")
       (reset! sent [])
-      (is (false? (atelier/cast-coco-spell! coco-st mock! 2 1000500)) "Segunda a 0.5s e bloqueada pelo cooldown")
+      (is (false? (atelier/cast-coco-spell! coco-st mock! "pace" 2 1000500)) "Segunda a 0.5s e bloqueada pelo cooldown")
       (is (empty? @sent) "Nenhum comando emitido durante o cooldown"))))
 
 (deftest test-spell-bloodlust-is-per-burst
@@ -153,7 +180,7 @@
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)]
-      (is (true? (atelier/cast-coco-spell! coco-st mock! 1 1000000)))
+      (is (true? (atelier/cast-coco-spell! coco-st mock! "pace" 1 1000000)))
       (is (true? (:spell-said? @coco-st)) "Marca que ja falou neste surto")
       (is (false? (atelier/should-say-spell? coco-st 1001000))
           "Nao fala de novo dentro da janela do surto")

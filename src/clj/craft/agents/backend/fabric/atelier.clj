@@ -123,6 +123,10 @@
 (def ^:private spell-hitkill-damage 100)
 (def ^:private spell-hitkill-radius 2.0)
 
+;; O grimorio: para o jogador conjurar, tem de LEVAR um livro-e-pena consigo
+;; (no inventario). O item e o poder; sem ele, a bruxa recusa.
+(def ^:private grimoire-item "minecraft:writable_book")
+
 (defn- hitkill-cmd
   "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
   1.21) com `spell-hitkill-damage` — 100 mata mobs comuns de uma vez e deixa
@@ -132,14 +136,27 @@
   (uformat "CMD|damage @e[x=%.2f,y=%.2f,z=%.2f,distance=..%.1f,limit=1,sort=nearest] %d minecraft:magic"
            x y z spell-hitkill-radius spell-hitkill-damage))
 
+(defn- grimoire-carried?
+  "True se o jogador `caster` leva o grimorio NO INVENTARIO (qualquer slot).
+   `INSPECT_INVENTORY|<jogador>` devolve OK|<count>|<id>,<qtd>;<id>,<qtd>;...
+   (o motor so sabe ler o inventario, nao a mao — nao ha op de slot na ponte)."
+  [send-cmd! caster]
+  (let [resp (send-cmd! (uformat "INSPECT_INVENTORY|%s" caster))]
+    (boolean (and resp (str/starts-with? resp "OK|")
+                  (str/includes? resp grimoire-item)))))
+
 (defn- cast-spell!
   "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
    assinado por `particles` (glifo na bruxa), `sound` e `burst-particles`
    (detonacao nas coordenadas do alvo).
+   Quando `caster` e um nome de jogador, a magia exige o GRIMORIO no inventario
+   dele (o item e o poder); `caster` nil = auto-defesa da bruxa, sem exigencia.
    Devolve true se conjurou (havia alvo), false caso contrario."
-  [st agent-name send-cmd! now particles sound burst-particles]
-  (if-not (spell-ready? st now)
-    false
+  [st agent-name send-cmd! caster now particles sound burst-particles]
+  (cond
+    (not (spell-ready? st now)) false
+    (and caster (not (grimoire-carried? send-cmd! caster))) false
+    :else
     (let [resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" agent-name spell-scan-radius))
           target (parse-hostile-response resp)]
       (swap! st assoc :last-spell-ms now)
@@ -158,10 +175,11 @@
 
 (defn cast-coco-spell!
   "Coco - Glifo de Tinta Viva: desenha um glifo que morde o hostil mais proximo.
+   `caster` = nome do jogador que comanda (exige o grimorio); nil = auto-defesa.
    `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`."
-  [coco-st send-cmd! _tick now]
+  [coco-st send-cmd! caster _tick now]
   (cast-spell!
-   coco-st "Coco" send-cmd! now
+   coco-st "Coco" send-cmd! caster now
    ["CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
     "CMD|execute at Coco run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
     "CMD|execute at Coco run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
@@ -172,10 +190,11 @@
 
 (defn cast-richeh-spell!
   "Richeh - Estilhaco de Cristal: inscreve uma matriz e a estilhaca no alvo.
+   `caster` = nome do jogador que comanda (exige o grimorio); nil = auto-defesa.
    `tick` fica na assinatura por simetria com o motor, mas o timing vem de `now`."
-  [richeh-st send-cmd! _tick now]
+  [richeh-st send-cmd! caster _tick now]
   (cast-spell!
-   richeh-st "Richeh" send-cmd! now
+   richeh-st "Richeh" send-cmd! caster now
    ["CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.0 ~ 0.6 0.6 0.6 0.08 25 normal"
     "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.8 ~ 0.4 0.4 0.4 0.02 20 normal"
     "CMD|execute at Richeh run particle minecraft:block_marker minecraft:amethyst_block ~ ~1.0 ~ 0.3 0.3 0.3 0.05 12 normal"]
@@ -186,10 +205,11 @@
 
 (defn spell-auto-defense!
   "Reacao automatica: se houver hostil no raio, a bruxa conjura a sua magia.
+   Sem `caster` — e a bruxa a defender-se, nao obedece ao grimorio de ninguem.
    Devolve true se conjurou."
   [st agent-name send-cmd! now]
   (let [cast-fn (if (= agent-name "Coco") cast-coco-spell! cast-richeh-spell!)]
-    (cast-fn st send-cmd! 0 now)))
+    (cast-fn st send-cmd! nil 0 now)))
 
 ;; =============================================================================
 ;; Fábrica de Estado
@@ -454,11 +474,13 @@
             (str/includes? lower "magia") (str/includes? lower "glifo")
             (str/includes? lower "feitiço") (str/includes? lower "feiti"))
         (do
-          (let [hit? (cast-coco-spell! coco-st send-bridge-cmd! 0 (System/currentTimeMillis))]
-            (if hit?
-              (say-fn :coco (rand-nth ["Glifo de Tinta Viva! Segura ele pra mim! 🖋️✨"
-                                       "A tinta morde! Não se mexe! 📖"]))
-              (say-fn :coco "Não tem nada pra desenhar por aqui... o castelo tá tranquilo! 🖋️")))
+          (if-not (grimoire-carried? send-bridge-cmd! speaker)
+            (say-fn :coco "Sem o teu grimório comigo eu não consigo desenhar! Traz o livro-e-pena! 📖🎒")
+            (let [hit? (cast-coco-spell! coco-st send-bridge-cmd! speaker 0 (System/currentTimeMillis))]
+              (if hit?
+                (say-fn :coco (rand-nth ["Glifo de Tinta Viva! Segura ele pra mim! 🖋️✨"
+                                         "A tinta morde! Não se mexe! 📖"]))
+                (say-fn :coco "Não tem nada pra desenhar por aqui... o castelo tá tranquilo! 🖋️"))))
           true)
 
         (or (str/includes? lower "segue") (str/includes? lower "vem"))
@@ -500,11 +522,13 @@
             (str/includes? lower "estilhaça") (str/includes? lower "feitiço")
             (str/includes? lower "feiti") (str/includes? lower "lança"))
         (do
-          (let [hit? (cast-richeh-spell! richeh-st send-bridge-cmd! 0 (System/currentTimeMillis))]
-            (if hit?
-              (say-fn :richeh (rand-nth ["Estilhaço de Cristal. Não desperdiça meu tempo. 🔮"
-                                         "A matriz tá inscrita. Fica parado e ele quebra. 💠"]))
-              (say-fn :richeh "Hmph. Não vejo nada digno dos meus cristais por aqui.")))
+          (if-not (grimoire-carried? send-bridge-cmd! speaker)
+            (say-fn :richeh "Hmph. Sem o teu grimório, não desperdiço meus cristais. 📖")
+            (let [hit? (cast-richeh-spell! richeh-st send-bridge-cmd! speaker 0 (System/currentTimeMillis))]
+              (if hit?
+                (say-fn :richeh (rand-nth ["Estilhaço de Cristal. Não desperdiça meu tempo. 🔮"
+                                           "A matriz tá inscrita. Fica parado e ele quebra. 💠"]))
+                (say-fn :richeh "Hmph. Não vejo nada digno dos meus cristais por aqui."))))
           true)
 
         (or (str/includes? lower "segue") (str/includes? lower "vem"))
