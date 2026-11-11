@@ -619,7 +619,7 @@
 ;; =============================================================================
 
 (deftest test-spell-registry-catalog
-  (testing "Catalogo de feiticos contem fireball, wind-charge e lightning-smite"
+  (testing "Catalogo de feiticos contem fireball, wind-charge, lightning-smite e frost-beam"
     (is (contains? atelier/spell-registry "minecraft:blaze_rod")
         "blaze_rod mapeado no catalogo")
     (is (= :fireball (get-in atelier/spell-registry ["minecraft:blaze_rod" :id])))
@@ -628,7 +628,13 @@
     (is (= :wind-charge (get-in atelier/spell-registry ["minecraft:breeze_rod" :id])))
     (is (contains? atelier/spell-registry "minecraft:lightning_rod")
         "lightning_rod mapeado no catalogo")
-    (is (= :lightning-smite (get-in atelier/spell-registry ["minecraft:lightning_rod" :id])))))
+    (is (= :lightning-smite (get-in atelier/spell-registry ["minecraft:lightning_rod" :id])))
+    (is (contains? atelier/spell-registry "minecraft:trial_key")
+        "trial_key mapeado no catalogo")
+    (is (= :lightning-smite (get-in atelier/spell-registry ["minecraft:trial_key" :id])))
+    (is (contains? atelier/spell-registry "minecraft:amethyst_shard")
+        "amethyst_shard mapeado no catalogo")
+    (is (= :frost-beam (get-in atelier/spell-registry ["minecraft:amethyst_shard" :id])))))
 
 (deftest test-held-spell-item-detection
   (testing "held-spell-item identifica o item magico e seu dano atual"
@@ -743,5 +749,46 @@
                       (str/includes? % "type=!minecraft:player"))
                 cmds)
           "Aplica dano eletrico forte em area preservando o jogador"))))
+
+(deftest test-dispatch-frost-beam-spell
+  (testing "dispatch-held-spell! para amethyst_shard dispara raio congelante com projeteis de gelo, lentidao extrema e dano freeze"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:amethyst_shard,1" nil
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:amethyst_shard"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:amethyst_shard")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Frost beam disparado com sucesso")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "summon")
+                      (str/includes? % "snowball"))
+                cmds)
+          "Lanca projeteis azuis/snowball na direcao da mira")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "damage")
+                      (str/includes? % "freeze"))
+                cmds)
+          "Aplica dano de congelamento (freeze)")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "effect give")
+                      (str/includes? % "slowness"))
+                cmds)
+          "Aplica lentidao extrema (slowness IV) aos inimigos atingidos")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "particle")
+                      (str/includes? % "snowflake"))
+                cmds)
+          "Emite particulas de flocos de gelo/snowflake")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "playsound")
+                      (or (str/includes? % "block.glass.break")
+                          (str/includes? % "amethyst_block.break")))
+                cmds)
+          "Emite efeito sonoro de vidro quebrando / estilhacamento de gelo"))))
+
 
 

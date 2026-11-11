@@ -79,6 +79,7 @@ Localizado em `craft-agents/src/clj/craft/agents/backend/fabric/atelier.clj`:
 | `minecraft:blaze_rod` | `:fireball` | Bola de Fogo | 1.0s (20 ticks) | Mira Livre | Projétil de bola de fogo física + dano `/damage ... 50 explosion` |
 | `minecraft:breeze_rod` | `:wind-charge` | Onda de Choque | 1.0s (20 ticks) | 24 metros | Projétil `breeze_wind_charge` + dano AOE de 40 (`player_attack`) em raio de 6.5m (poupa conjurador, permite Rocket Jump) |
 | `minecraft:trial_key` | `:lightning-smite` | Relâmpago do Julgamento | 3.0s (60 ticks) | 80 metros | Raio nativo vanilla (`lightning_bolt`) + dano elétrico de 50 em AOE de 3.5m (hitkill em Enderman e Creepers) + imunidade `Resistance V` à queima-roupa |
+| `minecraft:amethyst_shard` | `:frost-beam` | Raio Congelante | 1.0s (20 ticks) | 48 metros | Saraivada de 3 projéteis de gelo (`snowball`) + 35 dano de congelamento (`freeze`) em AOE de 4.5m + Lentidão extrema (Slowness IV por 6s) + estilhaçamento sonoro de vidro/ametista |
 
 ---
 

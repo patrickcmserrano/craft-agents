@@ -258,7 +258,20 @@
      "CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.5 0.5 0.5 0.05 15 normal"]
     :burst-particles
     ["particle minecraft:electric_spark ~ ~ ~ 1.0 1.0 1.0 0.1 35 normal"
-     "particle minecraft:flash ~ ~ ~ 0.0 0.0 0.0 0.0 1 normal"]}})
+     "particle minecraft:flash ~ ~ ~ 0.0 0.0 0.0 0.0 1 normal"]}
+
+   "minecraft:amethyst_shard"
+   {:id :frost-beam
+    :name "Raio Congelante"
+    :cooldown-ticks 20
+    :sound "block.glass.break"
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:snowflake ~ ~1.2 ~ 0.3 0.3 0.3 0.05 20 normal"
+     "CMD|execute at %s run particle minecraft:item amethyst_shard ~ ~1.0 ~ 0.4 0.4 0.4 0.05 15 normal"]
+    :burst-particles
+    ["particle minecraft:snowflake ~ ~ ~ 1.2 1.2 1.2 0.1 40 normal"
+     "particle minecraft:item packed_ice ~ ~ ~ 1.0 1.0 1.0 0.1 25 normal"
+     "particle minecraft:dust 0.6 0.85 1.0 1.5 ~ ~ ~ 1.0 1.0 1.0 0.1 20 normal"]}})
 
 (defn- hitkill-cmd
   "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
@@ -669,6 +682,61 @@
               (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.lightning_bolt.thunder master @a ~ ~ ~ 3.5 1.0"
                                   ix iy iz))
               true)))
+
+        :frost-beam
+        (let [frost-range 48.0
+              snapshot (player-aim-snapshot send-cmd! player-name frost-range)
+              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name frost-range))
+              scanned (parse-hostile-response resp-hostiles)
+              hostiles (if (map? scanned) [scanned] (or scanned []))
+              aim-mob (select-aim-target-cone snapshot hostiles 0.94)
+              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+              [ix iy iz] (cond
+                           aim-mob
+                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+
+                           :else
+                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name frost-range))]
+                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                               (let [parts (str/split rc-resp #"\|")]
+                                 [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
+                                  (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
+                                  (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
+                               [(+ ox (* 24.0 lx))
+                                (+ oy (* 24.0 ly))
+                                (+ oz (* 24.0 lz))])))
+              speed 2.4
+              vx (* lx speed)
+              vy (* ly speed)
+              vz (* lz speed)]
+          (swap! st assoc :last-spell-ms now)
+          (doseq [p (:caster-particles spell)]
+            (send-cmd! (uformat p player-name)))
+          ;; Saraivada de 3 projeteis de gelo (snowball) na direcao visada
+          (doseq [offset [0.0 -0.12 0.12]]
+            (send-cmd! (uformat "CMD|execute at %s positioned ~ ~1.5 ~ run summon minecraft:snowball ~ ~ ~ {Item:{id:\"minecraft:snowball\"},Motion:[%.3f,%.3f,%.3f]}"
+                                player-name
+                                (+ vx (* offset (- lz)))
+                                vy
+                                (+ vz (* offset lx)))))
+          ;; Dano de congelamento (35 de dano de gelo/freeze) em area de 4.5 blocos ao redor do impacto
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.5] run damage @s 35 minecraft:freeze"
+                              ix iy iz))
+          ;; Lentidao extrema (Slowness IV por 6s) nos inimigos na area
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.5] run effect give @s minecraft:slowness 6 3 true"
+                              ix iy iz))
+          ;; Efeitos sonoros de estilhacamento de gelo / vidro e ametista
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound block.glass.break master @a ~ ~ ~ 2.5 1.2"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound block.amethyst_block.break master @a ~ ~ ~ 2.0 0.8"
+                              ix iy iz))
+          ;; Particulas de nevasca / snowflake e gelo compacto
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:snowflake ~ ~0.5 ~ 1.5 0.8 1.5 0.1 50 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:item packed_ice ~ ~0.5 ~ 1.2 0.8 1.2 0.08 25 normal"
+                              ix iy iz))
+          true)
 
         (do
           (println (format "[craft-agents-spell] feitico nao implementado: %s" (:id spell)))
