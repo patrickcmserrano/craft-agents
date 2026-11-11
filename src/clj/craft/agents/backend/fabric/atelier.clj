@@ -309,6 +309,35 @@
       (cast-spell! st agent-name send-cmd! caster now particles sound burst-particles
                    {:aim-target aimed}))))
 
+(def ^:private casting-words
+  "Palavras de CASTING puro — escritas no chat SEM nome de bruxa, disparam a
+   magia a partir do proprio jogador. Nao colidem com as ordens das bruxas."
+  ["fireball" "fogo" "bola de fogo" "fire"])
+
+(defn casting-spell?
+  "True se a mensagem e um CASTING puro (a palavra de magia, sem nome de bruxa).
+   Compara sobre a mensagem em minusculas: as palavras de `casting-words` como
+   substring. Vazia ou nil = false."
+  [msg]
+  (let [lower (str/lower-case (or msg ""))]
+    (boolean (some #(str/includes? lower %) casting-words))))
+
+(defn cast-casting!
+  "Casting puro do JOGADOR: ele escreve so a palavra de magia no chat (sem nome
+   de bruxa) e a magia nasca DELE, na direcao da mira dele. Usa a assinatura da
+   Coco (glifo + fireball), que o shader emite. Exige o grimorio no inventario.
+   Devolve true se conjurou (havia alvo na mira)."
+  [st send-cmd! caster now]
+  (cast-spell-with-aim!
+   st "Coco" send-cmd! caster now
+   [(uformat "CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal" caster)
+    (uformat "CMD|execute at %s run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal" caster)
+    (uformat "CMD|execute at %s run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal" caster)]
+   (uformat "CMD|execute at %s run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 1.2 0.8" caster)
+   ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+    "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
+    "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]))
+
 (defn cast-coco-spell!
   "Coco - Glifo de Tinta Viva: desenha um glifo que morde o hostil mais proximo.
    `caster` = nome do jogador que comanda (exige o grimorio); nil = auto-defesa.
@@ -607,10 +636,24 @@
 ;; =============================================================================
 
 (defn handle-atelier-chat!
-  "Processa falas direcionadas a Coco e Richeh. Retorna true se consumido."
+  "Processa falas direcionadas a Coco e Richeh. Retorna true se consumido.
+   Aceita tambem o CASTING puro do jogador (so a palavra de magia, sem nome de
+   bruxa): a magia nasce DELE, na direcao da mira dele."
   [speaker msg coco-st richeh-st say-fn]
   (let [lower (str/lower-case (or msg ""))]
     (cond
+      ;; 0. CASTING puro do jogador: so a palavra de magia, sem nome de bruxa.
+      (casting-spell? msg)
+      (do
+        (if-not (grimoire-carried? send-bridge-cmd! speaker)
+          (say-fn :coco "Sem o teu grimório eu não conjuro nada. Traz o livro-e-pena! 📖🎒")
+          (let [hit? (cast-casting! coco-st send-bridge-cmd! speaker (System/currentTimeMillis))]
+            (if hit?
+              (say-fn :coco (rand-nth ["Glifo de Tinta Viva! Bela mordida! 🖋️✨"
+                                       "A tinta obedece a quem desenha! 📖"]))
+              (say-fn :coco "Mira num bicho, não no vazio! O glifo precisa de um alvo pra morder! 🖋️"))))
+        true)
+
       ;; 1. Comandos para Coco
       (str/includes? lower "coco")
       (cond
@@ -619,7 +662,7 @@
             (str/includes? lower "feitiço") (str/includes? lower "feiti"))
         (do
           (if-not (grimoire-carried? send-bridge-cmd! speaker)
-            (say-fn :coco "Sem o teu grimório comigo eu não consigo desenhar! Traz o livro-e-pena! 📖🎒")
+            (say-fn :coco "Sem o teu grimório, não há magia. Traz o livro-e-pena! 📖🎒")
             (let [hit? (cast-spell-with-aim! coco-st "Coco" send-bridge-cmd! speaker (System/currentTimeMillis)
                                              ["CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
                                               "CMD|execute at Coco run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
@@ -629,8 +672,8 @@
                                               "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
                                               "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"])]
               (if hit?
-                (say-fn :coco (rand-nth ["Glifo de Tinta Viva! Segura ele pra mim! 🖋️✨"
-                                         "A tinta morde! Não se mexe! 📖"]))
+                (say-fn :coco (rand-nth ["Isso! O Glifo de Tinta Viva é teu agora! 🖋️✨"
+                                         "A tinta obedece a quem desenha. Bela mordida! 📖"]))
                 (say-fn :coco "Mira num bicho, não no vazio! O glifo precisa de um alvo pra morder! 🖋️"))))
           true)
 
@@ -674,7 +717,7 @@
             (str/includes? lower "feiti") (str/includes? lower "lança"))
         (do
           (if-not (grimoire-carried? send-bridge-cmd! speaker)
-            (say-fn :richeh "Hmph. Sem o teu grimório, não desperdiço meus cristais. 📖")
+            (say-fn :richeh "Hmph. Sem o teu grimório, não há cristal pra traçar. 📖")
             (let [hit? (cast-spell-with-aim! richeh-st "Richeh" send-bridge-cmd! speaker (System/currentTimeMillis)
                                              ["CMD|execute at Richeh run particle minecraft:end_rod ~ ~1.0 ~ 0.6 0.6 0.6 0.08 25 normal"
                                               "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.8 ~ 0.4 0.4 0.4 0.02 20 normal"
@@ -684,7 +727,7 @@
                                               "particle minecraft:end_rod ~ ~ ~ 0.6 0.6 0.6 0.08 40 normal"
                                               "particle minecraft:block_marker minecraft:amethyst_block ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"])]
               (if hit?
-                (say-fn :richeh (rand-nth ["Estilhaço de Cristal. Não desperdiça meu tempo. 🔮"
+                (say-fn :richeh (rand-nth ["Traça a matriz e estilhaça. O cristal é teu. 🔮"
                                            "A matriz tá inscrita. Fica parado e ele quebra. 💠"]))
                 (say-fn :richeh "Hmph. Mira num alvo de verdade. Meus cristais não se gastam no vazio."))))
           true)

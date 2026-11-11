@@ -275,3 +275,53 @@
                       (str/includes? % "fireball") (str/includes? % "at pace"))
                 @sent)
           "O projetil de fogo nasce das coordenadas do JOGADOR (at pace)"))))
+
+;; =============================================================================
+;; Casting puro: uma palavra de magia no chat, sem nome de bruxa, nasce de ti
+;; =============================================================================
+
+(deftest test-casting-word-is-recognized
+  (testing "A palavra de casting (fireball e variacoes) e reconhecida, sem nome de bruxa"
+    (is (true? (atelier/casting-spell? "fireball")))
+    (is (true? (atelier/casting-spell? "fogo")))
+    (is (true? (atelier/casting-spell? "bola de fogo")))
+    (is (true? (atelier/casting-spell? "fire")))
+    (is (true? (atelier/casting-spell? "FIREBALL")) "Case-insensitive")
+    (is (true? (atelier/casting-spell? "  fogo!  ")) "Tolera espacos e pontuacao")))
+
+(deftest test-non-casting-words-are-not-casting
+  (testing "Palavras que NAO sao casting nao disparam a magia"
+    (is (false? (atelier/casting-spell? "coco vem aqui")))
+    (is (false? (atelier/casting-spell? "bom dia")))
+    (is (false? (atelier/casting-spell? "")))
+    (is (false? (atelier/casting-spell? nil)))))
+
+(deftest test-casting-fires-from-the-caster-with-aim
+  (testing "O casting puro conjura a magia na mira do JOGADOR, nascendo dele"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|6|64|128|6.00")
+          hit? (atelier/cast-casting! st mock! "pace" 2000000)]
+      (is (true? hit?) "O casting puro dispara a magia")
+      (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") @sent)
+          "Varre hostis ancorado no JOGADOR")
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                      (str/includes? % "fireball") (str/includes? % "at pace"))
+                @sent)
+          "A fireball nasce do JOGADOR (at pace)"))))
+
+(deftest test-casting-requires-grimoire
+  (testing "Sem o grimorio, o casting puro recusa e nao emite dano"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent nil)
+          hit? (atelier/cast-casting! st mock! "pace" 2000000)]
+      (is (false? hit?) "Sem grimorio o casting recusa")
+      (is (not (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) @sent))
+          "Nao emite dano sem o grimorio"))))
+
+(deftest test-casting-with-word-decides-the-trigger
+  (testing "A palavra de casting e a chave; ordens normais nao a disparam"
+    (is (true? (atelier/casting-spell? "fogo")))
+    (is (false? (atelier/casting-spell? "coco fica patrulha"))
+        "Uma ordem comum nao e casting")))
