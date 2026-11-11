@@ -619,13 +619,16 @@
 ;; =============================================================================
 
 (deftest test-spell-registry-catalog
-  (testing "Catalogo de feiticos contem fireball e wind-charge"
+  (testing "Catalogo de feiticos contem fireball, wind-charge e lightning-smite"
     (is (contains? atelier/spell-registry "minecraft:blaze_rod")
         "blaze_rod mapeado no catalogo")
     (is (= :fireball (get-in atelier/spell-registry ["minecraft:blaze_rod" :id])))
     (is (contains? atelier/spell-registry "minecraft:breeze_rod")
         "breeze_rod mapeado no catalogo")
-    (is (= :wind-charge (get-in atelier/spell-registry ["minecraft:breeze_rod" :id])))))
+    (is (= :wind-charge (get-in atelier/spell-registry ["minecraft:breeze_rod" :id])))
+    (is (contains? atelier/spell-registry "minecraft:lightning_rod")
+        "lightning_rod mapeado no catalogo")
+    (is (= :lightning-smite (get-in atelier/spell-registry ["minecraft:lightning_rod" :id])))))
 
 (deftest test-held-spell-item-detection
   (testing "held-spell-item identifica o item magico e seu dano atual"
@@ -701,4 +704,39 @@
                       (str/includes? % "type=!minecraft:player"))
                 cmds)
           "Aplica dano forte em area (AOE) protegendo o jogador"))))
+
+(deftest test-dispatch-lightning-smite-spell
+  (testing "dispatch-held-spell! para lightning_rod invoca lightning_bolt, som de trovao e dano eletrico em area"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:lightning_rod,1" nil
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:lightning_rod"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:lightning_rod")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Lightning smite disparado com sucesso")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "summon")
+                      (str/includes? % "lightning_bolt"))
+                cmds)
+          "Invoca o raio real vanilla (lightning_bolt) nas coordenadas de impacto")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "playsound")
+                      (str/includes? % "entity.lightning_bolt.thunder"))
+                cmds)
+          "Emite efeito sonoro do trovao global")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "particle")
+                      (str/includes? % "electric_spark"))
+                cmds)
+          "Gera particulas de faiscas eletricas")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "damage")
+                      (str/includes? % "type=!minecraft:player"))
+                cmds)
+          "Aplica dano eletrico forte em area preservando o jogador"))))
+
 

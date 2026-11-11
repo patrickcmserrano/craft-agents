@@ -233,7 +233,18 @@
      "CMD|execute at %s run particle minecraft:cloud ~ ~1.0 ~ 0.4 0.4 0.4 0.02 10 normal"]
     :burst-particles
     ["particle minecraft:gust_emitter_small ~ ~ ~ 0.5 0.5 0.5 0.1 5 normal"
-     "particle minecraft:cloud ~ ~ ~ 0.5 0.5 0.5 0.05 15 normal"]}})
+     "particle minecraft:cloud ~ ~ ~ 0.5 0.5 0.5 0.05 15 normal"]}
+
+   "minecraft:lightning_rod"
+   {:id :lightning-smite
+    :name "Relâmpago do Julgamento"
+    :sound "entity.lightning_bolt.thunder"
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:electric_spark ~ ~1.2 ~ 0.4 0.4 0.4 0.1 20 normal"
+     "CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.5 0.5 0.5 0.05 15 normal"]
+    :burst-particles
+    ["particle minecraft:electric_spark ~ ~ ~ 1.0 1.0 1.0 0.1 35 normal"
+     "particle minecraft:flash ~ ~ ~ 0.0 0.0 0.0 0.0 1 normal"]}})
 
 (defn- hitkill-cmd
   "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
@@ -575,6 +586,46 @@
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:gust_emitter_large ~ ~ ~ 1.0 0.5 1.0 0.1 3 normal"
                               ix iy iz))
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:cloud ~ ~ ~ 1.5 1.0 1.5 0.1 30 normal"
+                              ix iy iz))
+          true)
+
+        :lightning-smite
+        (let [snapshot (player-aim-snapshot send-cmd! player-name 32.0)
+              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name spell-scan-radius))
+              scanned (parse-hostile-response resp-hostiles)
+              hostiles (if (map? scanned) [scanned] (or scanned []))
+              aim-mob (select-aim-target snapshot hostiles)
+              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+              ;; Ponto central do impacto do raio (mob mirado, bloco solido atingido ou na linha do olhar):
+              [ix iy iz] (cond
+                           aim-mob
+                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+
+                           :else
+                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name 32.0))]
+                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                               (let [parts (str/split rc-resp #"\|")]
+                                 [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 16.0 lx))))
+                                  (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 16.0 ly))))
+                                  (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 16.0 lz))))])
+                               [(+ ox (* 16.0 lx))
+                                (+ oy (* 16.0 ly))
+                                (+ oz (* 16.0 lz))])))
+              ]
+          (swap! st assoc :last-spell-ms now)
+          (doseq [p (:caster-particles spell)]
+            (send-cmd! (uformat p player-name)))
+          ;; Invocacao do raio real vanilla nas coordenadas de impacto
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run summon minecraft:lightning_bolt ~ ~ ~"
+                              ix iy iz))
+          ;; Dano e efeitos de impacto adicionais (para garantir hitkill/dano de 50 contra mobs ao redor do impacto, poupando jogadores)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..5.0] run damage @s 50 minecraft:lightning_bolt"
+                              ix iy iz))
+          ;; Fagulhas eletricas e trovao
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:electric_spark ~ ~1.0 ~ 1.2 1.2 1.2 0.15 40 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.lightning_bolt.thunder master @a ~ ~ ~ 2.5 1.0"
                               ix iy iz))
           true)
 
