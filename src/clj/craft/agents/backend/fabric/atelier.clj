@@ -601,56 +601,59 @@
           true)
 
         :lightning-smite
-        (let [thunder-range 80.0
-              snapshot (player-aim-snapshot send-cmd! player-name thunder-range)
-              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name thunder-range))
-              scanned (parse-hostile-response resp-hostiles)
-              hostiles (if (map? scanned) [scanned] (or scanned []))
-              aim-mob (select-aim-target snapshot hostiles)
-              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
-              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
-              ;; Ponto preliminar do impacto:
-              [raw-x raw-y raw-z] (cond
-                                    aim-mob
-                                    [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+        (let [last-lightning (get @st :last-lightning-ms 0)]
+          (if (< (- now last-lightning) 3000)
+            false
+            (let [thunder-range 80.0
+                  snapshot (player-aim-snapshot send-cmd! player-name thunder-range)
+                  resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name thunder-range))
+                  scanned (parse-hostile-response resp-hostiles)
+                  hostiles (if (map? scanned) [scanned] (or scanned []))
+                  aim-mob (select-aim-target snapshot hostiles)
+                  [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+                  [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+                  ;; Ponto preliminar do impacto:
+                  [raw-x raw-y raw-z] (cond
+                                        aim-mob
+                                        [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
 
-                                    :else
-                                    (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name thunder-range))]
-                                      (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                                        (let [parts (str/split rc-resp #"\|")]
-                                          [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 48.0 lx))))
-                                           (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 48.0 ly))))
-                                           (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 48.0 lz))))])
-                                        [(+ ox (* 48.0 lx))
-                                         (+ oy (* 48.0 ly))
-                                         (+ oz (* 48.0 lz))])))
-              ;; Garantia de seguranca: nunca invocar o raio a menos de 6 metros do conjurador
-              dx (- raw-x ox)
-              dy (- raw-y oy)
-              dz (- raw-z oz)
-              dist-sq (+ (* dx dx) (* dy dy) (* dz dz))
-              [ix iy iz] (if (< dist-sq 36.0)
-                           [(+ ox (* 7.0 lx))
-                            (+ oy (* 7.0 ly))
-                            (+ oz (* 7.0 lz))]
-                           [raw-x raw-y raw-z])]
-          (swap! st assoc :last-spell-ms now)
-          (doseq [p (:caster-particles spell)]
-            (send-cmd! (uformat p player-name)))
-          ;; Imunidade total do conjurador ao raio e fogo residual
-          (send-cmd! (uformat "CMD|effect give %s minecraft:fire_resistance 3 1 true" player-name))
-          ;; Invocacao do raio real vanilla nas coordenadas seguras de impacto
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run summon minecraft:lightning_bolt ~ ~ ~"
-                              ix iy iz))
-          ;; Dano e efeitos de impacto adicionais (para garantir dano massivo de 50 contra mobs ao redor do impacto, poupando jogadores)
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..8.0] run damage @s 50 minecraft:lightning_bolt"
-                              ix iy iz))
-          ;; Fagulhas eletricas e trovao
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:electric_spark ~ ~1.0 ~ 2.0 1.5 2.0 0.15 60 normal"
-                              ix iy iz))
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.lightning_bolt.thunder master @a ~ ~ ~ 4.0 1.0"
-                              ix iy iz))
-          true)
+                                        :else
+                                        (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name thunder-range))]
+                                          (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                                            (let [parts (str/split rc-resp #"\|")]
+                                              [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 48.0 lx))))
+                                               (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 48.0 ly))))
+                                               (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 48.0 lz))))])
+                                            [(+ ox (* 48.0 lx))
+                                             (+ oy (* 48.0 ly))
+                                             (+ oz (* 48.0 lz))])))
+                  ;; Garantia de seguranca: nunca invocar o raio a menos de 6 metros do conjurador
+                  dx (- raw-x ox)
+                  dy (- raw-y oy)
+                  dz (- raw-z oz)
+                  dist-sq (+ (* dx dx) (* dy dy) (* dz dz))
+                  [ix iy iz] (if (< dist-sq 36.0)
+                               [(+ ox (* 7.0 lx))
+                                (+ oy (* 7.0 ly))
+                                (+ oz (* 7.0 lz))]
+                               [raw-x raw-y raw-z])]
+              (swap! st assoc :last-spell-ms now :last-lightning-ms now)
+              (doseq [p (:caster-particles spell)]
+                (send-cmd! (uformat p player-name)))
+              ;; Imunidade total do conjurador ao raio e fogo residual
+              (send-cmd! (uformat "CMD|effect give %s minecraft:fire_resistance 3 1 true" player-name))
+              ;; Invocacao do raio real vanilla nas coordenadas seguras de impacto
+              (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run summon minecraft:lightning_bolt ~ ~ ~"
+                                  ix iy iz))
+              ;; Dano concentrado (AOE reduzido para 3.5 blocos ao redor do raio, poupando jogadores)
+              (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..3.5] run damage @s 50 minecraft:lightning_bolt"
+                                  ix iy iz))
+              ;; Fagulhas eletricas e trovao
+              (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:electric_spark ~ ~1.0 ~ 0.8 1.0 0.8 0.15 35 normal"
+                                  ix iy iz))
+              (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.lightning_bolt.thunder master @a ~ ~ ~ 3.5 1.0"
+                                  ix iy iz))
+              true)))
 
         (do
           (println (format "[craft-agents-spell] feitico nao implementado: %s" (:id spell)))
