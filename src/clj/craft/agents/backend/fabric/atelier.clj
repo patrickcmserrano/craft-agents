@@ -381,6 +381,24 @@
                        hostiles)]
       (second (apply max-key first (cons [-1.0 nil] scored))))))
 
+(defn select-aim-target-cone
+  "Escolhe o hostil na mira dentro de um cone restrito (min-cos, ex: 0.94 ~ 20°).
+   Evita que mobs laterais roubem a mira quando o jogador esta apontando para outro ponto."
+  [snapshot hostiles min-cos]
+  (when (and snapshot (seq hostiles))
+    (let [[dx dy dz] (:look-direction snapshot)
+          [ox oy oz] (:ray-origin snapshot)
+          scored (keep (fn [{:keys [x y z] :as h}]
+                         (let [vx (- (double x) (double ox))
+                               vy (- (double y) (double oy))
+                               vz (- (double z) (double oz))
+                               vlen (max 0.001 (Math/sqrt (+ (* vx vx) (* vy vy) (* vz vz))))
+                               cosang (/ (+ (* dx vx) (* dy vy) (* dz vz)) vlen)]
+                           (when (>= cosang min-cos)
+                             [cosang h])))
+                       hostiles)]
+      (second (apply max-key first (cons [-1.0 nil] scored))))))
+
 (defn- cast-spell!
   "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
    assinado por `particles` (glifo na bruxa), `sound` e `burst-particles`
@@ -613,40 +631,33 @@
                   resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name thunder-range))
                   scanned (parse-hostile-response resp-hostiles)
                   hostiles (if (map? scanned) [scanned] (or scanned []))
-                  aim-mob (select-aim-target snapshot hostiles)
+                  ;; Cone restrito de 20° (cos >= 0.94) para só focar em mob se estiver realmente na mira
+                  aim-mob (select-aim-target-cone snapshot hostiles 0.94)
                   [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
                   [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
-                  ;; Ponto preliminar do impacto:
-                  [raw-x raw-y raw-z] (cond
-                                        aim-mob
-                                        [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+                  ;; Ponto exato do impacto (mob mirado, ou bloco mirado centralizado no topo):
+                  [ix iy iz] (cond
+                               aim-mob
+                               [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
 
-                                        :else
-                                        (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name thunder-range))]
-                                          (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                                            (let [parts (str/split rc-resp #"\|")]
-                                              [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 48.0 lx))))
-                                               (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 48.0 ly))))
-                                               (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 48.0 lz))))])
-                                            [(+ ox (* 48.0 lx))
-                                             (+ oy (* 48.0 ly))
-                                             (+ oz (* 48.0 lz))])))
-                  ;; Garantia de seguranca: nunca invocar o raio a menos de 6 metros do conjurador
-                  dx (- raw-x ox)
-                  dy (- raw-y oy)
-                  dz (- raw-z oz)
-                  dist-sq (+ (* dx dx) (* dy dy) (* dz dz))
-                  [ix iy iz] (if (< dist-sq 36.0)
-                               [(+ ox (* 7.0 lx))
-                                (+ oy (* 7.0 ly))
-                                (+ oz (* 7.0 lz))]
-                               [raw-x raw-y raw-z])]
+                               :else
+                               (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name thunder-range))]
+                                 (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                                   (let [parts (str/split rc-resp #"\|")]
+                                     [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 48.0 lx))))
+                                      (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 48.0 ly))))
+                                      (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 48.0 lz))))])
+                                   [(+ ox (* 48.0 lx))
+                                    (+ oy (* 48.0 ly))
+                                    (+ oz (* 48.0 lz))])))
+                  ]
               (swap! st assoc :last-spell-ms now :last-lightning-ms now)
               (doseq [p (:caster-particles spell)]
                 (send-cmd! (uformat p player-name)))
-              ;; Imunidade total do conjurador ao raio e fogo residual
+              ;; Imunidade total (100% dano reduzido + fogo) ao conjurador
+              (send-cmd! (uformat "CMD|effect give %s minecraft:resistance 2 4 true" player-name))
               (send-cmd! (uformat "CMD|effect give %s minecraft:fire_resistance 3 1 true" player-name))
-              ;; Invocacao do raio real vanilla nas coordenadas seguras de impacto
+              ;; Invocacao do raio exatamente no ponto mirado (a qualquer distancia)
               (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run summon minecraft:lightning_bolt ~ ~ ~"
                                   ix iy iz))
               ;; Dano concentrado (AOE reduzido para 3.5 blocos ao redor do raio, poupando jogadores)
