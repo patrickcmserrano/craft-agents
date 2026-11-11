@@ -59,21 +59,29 @@
 
 (defn- spell-mock!
   "Mock da bridge: registra os comandos e responde aos opcodes de combate.
-   `held` e o item devolvido por INSPECT_INVENTORY (o grimorio, ou nil sem ele)."
-  ([sent-cmds] (spell-mock! sent-cmds "minecraft:writable_book,1"))
+   `held` e o item devolvido por INSPECT_INVENTORY (o item de fogo, ou nil sem ele).
+   `raycast-resp` fixa a resposta do RAYCAST_BLOCK (o fallback da mira).
+   `opts` (mapa opcional) aceita :look-resp (a resposta do op LOOK) e
+   :held-nbt (o custom_data do item na mao, lido pelo op HELD_ITEM)."
+  ([sent-cmds] (spell-mock! sent-cmds "minecraft:fire_charge,1"))
   ([sent-cmds held]
    (spell-mock! sent-cmds held nil))
   ([sent-cmds held raycast-resp]
-   (fn [cmd]
-     (swap! sent-cmds conj cmd)
-     (cond
-       (str/starts-with? cmd "INSPECT_INVENTORY")
-       (if held (str "OK|1|" held) "OK|0|")
-       (str/starts-with? cmd "TARGET_HOSTILE") (hostile-response)
-       (str/starts-with? cmd "RAYCAST_BLOCK") (or raycast-resp "ERR|NO_BLOCK_IN_SIGHT")
-       (= cmd "PLAYERS") "OK|pace,0.0,65.0,0.0"
-       (str/starts-with? cmd "ATTACK_HOSTILE") (str "OK|" (last (str/split cmd #"\|")) "|0.90")
-       :else "OK"))))
+   (spell-mock! sent-cmds held raycast-resp nil))
+  ([sent-cmds held raycast-resp opts]
+   (let [{:keys [look-resp held-nbt]} opts]
+     (fn [cmd]
+       (swap! sent-cmds conj cmd)
+       (cond
+         (str/starts-with? cmd "INSPECT_INVENTORY")
+         (if held (str "OK|1|" held) "OK|0|")
+         (str/starts-with? cmd "LOOK") (or look-resp "ERR|UNKNOWN_OP")
+         (str/starts-with? cmd "HELD_ITEM") (or held-nbt "ERR|NO_ITEM")
+         (str/starts-with? cmd "TARGET_HOSTILE") (hostile-response)
+         (str/starts-with? cmd "RAYCAST_BLOCK") (or raycast-resp "ERR|NO_BLOCK_IN_SIGHT")
+         (= cmd "PLAYERS") "OK|pace,0.0,65.0,0.0"
+         (str/starts-with? cmd "ATTACK_HOSTILE") (str "OK|" (last (str/split cmd #"\|")) "|0.90")
+         :else "OK")))))
 
 (deftest test-coco-spell-casts-visual-and-damage
   (testing "Coco conjura glifo: varre hostis, aplica dano ao mais proximo e emite visual"
@@ -167,7 +175,7 @@
   (testing "Com o grimorio na mao, a magia dispara normalmente"
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1")
+          mock! (spell-mock! sent "minecraft:fire_charge,1")
           hit? (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000)]
       (is (true? hit?) "Conjura com o grimorio na mao")
       (is (some #(str/starts-with? % "INSPECT_INVENTORY|pace") @sent)))))
@@ -226,7 +234,7 @@
     ;; O raycast devolve o PRIMEIRO bloco solido na linha do olhar. A mira usa a
     ;; ORIGEM (olhos do jogador) + a direcao ate esse bloco como eixo.
     (let [sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|10|65|0|10.00")
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "OK|minecraft:stone_bricks|10|65|0|10.00")
           snap (atelier/player-aim-snapshot mock! "pace" 24.0)]
       (is (some #(str/starts-with? % "RAYCAST_BLOCK|pace|") @sent)
           "Deve consultar o raycast do jogador")
@@ -239,7 +247,7 @@
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           ;; Dois hostis: o ID 42 esta perto mas FORA da mira; o ID 99 esta na mira.
-          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|-20|66|190|10.00")
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "OK|minecraft:stone_bricks|-20|66|190|10.00")
           _ (atelier/cast-coco-spell! coco-st mock! "pace" 1 2000000 {:aim-target {:id 99 :type "minecraft:skeleton"
                                                                                    :x -20.0 :y 66.0 :z 190.0
                                                                                    :dist 10.0 :hp 20.0}})
@@ -254,7 +262,7 @@
     ;; varredura ancorasse na bruxa, nao acharia nada e a magia nao sairia.
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|6|64|128|6.00")]
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "OK|minecraft:stone_bricks|6|64|128|6.00")]
       (atelier/cast-spell-with-aim! st "Coco" mock! "pace" 2000000
                                     ["CMD|execute at Coco run particle minecraft:enchant ~ ~1 ~ 0.5 0.5 0.5 0.05 10 normal"]
                                     nil
@@ -266,7 +274,7 @@
   (testing "A magia nasce do jogador: projetil e glifo ancoram na posicao DELE"
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|6|64|128|6.00")]
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "OK|minecraft:stone_bricks|6|64|128|6.00")]
       (atelier/cast-spell-with-aim! st "Coco" mock! "pace" 2000000
                                     ["CMD|execute at Coco run particle minecraft:enchant ~ ~1 ~ 0.5 0.5 0.5 0.05 10 normal"]
                                     nil
@@ -300,7 +308,7 @@
   (testing "O casting puro conjura a magia na mira do JOGADOR, nascendo dele"
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|6|64|128|6.00")
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "OK|minecraft:stone_bricks|6|64|128|6.00")
           hit? (atelier/cast-casting! st mock! "pace" 2000000)]
       (is (true? hit?) "O casting puro dispara a magia")
       (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") @sent)
@@ -349,7 +357,7 @@
     ;; isso deixava `select-aim-target` sem direcao e a magia nao saia.
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1" "ERR|NO_BLOCK_IN_SIGHT")
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "ERR|NO_BLOCK_IN_SIGHT")
           hit? (atelier/cast-casting! st mock! "pace" 2000000)
           cmds @sent]
       (is (true? hit?) "A magia conjura mesmo sem bloco em vista (usa o mais proximo)")
@@ -361,7 +369,7 @@
     ;; Regressao: o fallback NAO pode atropelar a mira por direcao.
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1" "OK|minecraft:stone_bricks|-20|66|190|10.00")
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "OK|minecraft:stone_bricks|-20|66|190|10.00")
           hit? (atelier/cast-casting! st mock! "pace" 2000000)
           cmds @sent]
       (is (true? hit?) "A magia conjura")
@@ -399,7 +407,7 @@
     ;; sucesso/falha partia da Coco (a 200 blocos) e nunca aparecia para ele.
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:writable_book,1" "ERR|NO_BLOCK_IN_SIGHT")
+          mock! (spell-mock! sent "minecraft:fire_charge,1" "ERR|NO_BLOCK_IN_SIGHT")
           said (atom [])
           say-fn (fn [_who text] (swap! said conj text))
           ok? (atelier/handle-atelier-chat! "pace" "fireball" st (atelier/create-richeh-state) say-fn)]
@@ -408,3 +416,55 @@
       ;; E a resposta tem de sair da posicao DELE, nao da bruxa.
       (is (some #(and (str/includes? % "tellraw") (str/includes? % "at pace")) @sent)
           "A resposta do casting ancora no conjurador (at pace)")))))
+
+;; =============================================================================
+;; Item consumivel: fire_charge substitui o grimorio, e a mira vem do op LOOK
+;; =============================================================================
+
+(deftest test-fireball-item-replaces-grimoire
+  (testing "O porteiro da magia passa a ser o fire_charge, nao o writable_book"
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent-lg (atom [])
+          mock-lg (spell-mock! sent-lg "minecraft:fire_charge,1")
+          hit-lg? (atelier/cast-coco-spell! coco-st mock-lg "pace" 1 2000000)]
+      (is (true? hit-lg?) "Com o fire_charge no inventario, a magia conjura")
+      (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") @sent-lg)
+          "E varre hostis como antes"))
+
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent-livro (atom [])
+          mock-livro (spell-mock! sent-livro "minecraft:writable_book,1")
+          hit-livro? (atelier/cast-coco-spell! coco-st mock-livro "pace" 1 2000000)]
+      (is (false? hit-livro?) "So o writable_book (o grimorio antigo) JA NAO conjura")
+      (is (not (some #(str/starts-with? % "TARGET_HOSTILE") @sent-livro))
+          "Sem o item de fogo, nem sequer varre hostis"))))
+
+(deftest test-aim-snapshot-prefers-look-op
+  (testing "A direcao do olhar vem do op LOOK, nao do bloco avistado pelo raycast"
+    ;; O raycast do jogador pode acertar o CHAO (vetor apontando para baixo);
+    ;; o op LOOK devolve a direcao REAL do olhar. Quando o LOOK existe, ele vence.
+    (let [sent (atom [])
+          mock! (spell-mock! sent "minecraft:fire_charge,1"
+                             "OK|minecraft:deepslate|9|63|0|1.00"    ; raycast: o chao
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"}) ; LOOK: leste reto
+          snap (atelier/player-aim-snapshot mock! "pace" 24.0)]
+      (is (some #(str/starts-with? % "LOOK|pace") @sent)
+          "Deve consultar o op LOOK do jogador")
+      (is (vector? (:look-direction snap)) "O snapshot traz a direcao do olhar")
+      (is (> (first (:look-direction snap)) 0.9)
+          "A direcao aponta para leste (+x), a direcao REAL do olhar")
+      (is (< (Math/abs (double (second (:look-direction snap)))) 0.1)
+          "E NAO aponta para o chao (o vetor do raycast que acertou o solo)"))))
+
+(deftest test-aim-snapshot-falls-back-to-raycast-when-look-err
+  (testing "Se o op LOOK nao existe (JVM antiga), a mira cai no raycast de sempre"
+    (let [sent (atom [])
+          mock! (spell-mock! sent "minecraft:fire_charge,1"
+                             "OK|minecraft:stone_bricks|10|65|0|10.00"
+                             {:look-resp "ERR|UNKNOWN_OP"})
+          snap (atelier/player-aim-snapshot mock! "pace" 24.0)]
+      (is (some #(str/starts-with? % "RAYCAST_BLOCK|pace|") @sent)
+          "Sem LOOK, consulta o raycast (nao parte o caminho antigo)")
+      (is (vector? (:look-direction snap)) "O snapshot continua a trazer a direcao")
+      (is (> (first (:look-direction snap)) 0.9)
+          "A direcao cai no bloco avistado (leste) — o fallback funciona"))))
