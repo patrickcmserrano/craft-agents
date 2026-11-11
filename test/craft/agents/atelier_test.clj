@@ -63,7 +63,7 @@
    `raycast-resp` fixa a resposta do RAYCAST_BLOCK (o fallback da mira).
    `opts` (mapa opcional) aceita :look-resp (a resposta do op LOOK) e
    :held-nbt (o custom_data do item na mao, lido pelo op HELD_ITEM)."
-  ([sent-cmds] (spell-mock! sent-cmds "minecraft:blaze_powder,1"))
+  ([sent-cmds] (spell-mock! sent-cmds "minecraft:blaze_rod,1"))
   ([sent-cmds held]
    (spell-mock! sent-cmds held nil))
   ([sent-cmds held raycast-resp]
@@ -613,3 +613,92 @@
                       (str/includes? % "fireball"))
                 cmds)
           "Com hostil, a fireball sai"))))
+
+;; =============================================================================
+;; Despachante Unificado de Feiticos (Passo 0 + 1o Feitico: Wind Charge)
+;; =============================================================================
+
+(deftest test-spell-registry-catalog
+  (testing "Catalogo de feiticos contem fireball e wind-charge"
+    (is (contains? atelier/spell-registry "minecraft:blaze_rod")
+        "blaze_rod mapeado no catalogo")
+    (is (= :fireball (get-in atelier/spell-registry ["minecraft:blaze_rod" :id])))
+    (is (contains? atelier/spell-registry "minecraft:breeze_rod")
+        "breeze_rod mapeado no catalogo")
+    (is (= :wind-charge (get-in atelier/spell-registry ["minecraft:breeze_rod" :id])))))
+
+(deftest test-held-spell-item-detection
+  (testing "held-spell-item identifica o item magico e seu dano atual"
+    (let [mock-breeze! (fn [cmd]
+                         (if (str/starts-with? cmd "HELD_ITEM")
+                           "OK|minecraft:breeze_rod|1|5|64"
+                           "OK"))
+          info (atelier/held-spell-item mock-breeze! "pace")]
+      (is (some? info) "Detectou o item magico")
+      (is (= "minecraft:breeze_rod" (:item-id info)))
+      (is (= 5 (:damage info)))
+      (is (= :wind-charge (get-in info [:spell :id])))))
+
+  (testing "held-spell-item devolve nil para item mundano"
+    (let [mock-stick! (fn [cmd]
+                        (if (str/starts-with? cmd "HELD_ITEM")
+                          "OK|minecraft:stick|1|0|0"
+                          "OK"))
+          info (atelier/held-spell-item mock-stick! "pace")]
+      (is (nil? info) "Item comum nao e feitico"))))
+
+(deftest test-spell-used-unified-detection
+  (testing "spell-used? detecta gasto de carga no mesmo item"
+    (is (true? (atelier/spell-used?
+                {:item-id "minecraft:breeze_rod" :damage 0}
+                {:item-id "minecraft:breeze_rod" :damage 1}))
+        "0 -> 1: carga gasta")
+    (is (true? (atelier/spell-used?
+                {:item-id "minecraft:blaze_rod" :damage 3}
+                {:item-id "minecraft:blaze_rod" :damage 4}))
+        "3 -> 4: carga gasta"))
+
+  (testing "spell-used? rejeita se o dano nao aumentou ou trocou de item"
+    (is (false? (atelier/spell-used?
+                 {:item-id "minecraft:breeze_rod" :damage 1}
+                 {:item-id "minecraft:breeze_rod" :damage 1}))
+        "Dano igual: nao disparou")
+    (is (false? (atelier/spell-used?
+                 {:item-id "minecraft:blaze_rod" :damage 3}
+                 {:item-id "minecraft:breeze_rod" :damage 4}))
+        "Itens diferentes: nao dispara")
+    (is (false? (atelier/spell-used? nil {:item-id "minecraft:breeze_rod" :damage 0}))
+        "Primeira leitura: nao dispara")
+    (is (false? (atelier/spell-used? {:item-id "minecraft:breeze_rod" :damage 1} nil))
+        "Item guardado: nao dispara")))
+
+(deftest test-dispatch-wind-charge-spell
+  (testing "dispatch-held-spell! para breeze_rod lanca breeze_wind_charge e som do breeze"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:breeze_rod,1" nil
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:breeze_rod"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:breeze_rod")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Wind charge disparado com sucesso")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "summon")
+                      (or (str/includes? % "breeze_wind_charge")
+                          (str/includes? % "wind_charge")))
+                cmds)
+          "Lanca entidade de wind charge na direcao do olhar")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "playsound")
+                      (str/includes? % "breeze"))
+                cmds)
+          "Emite efeito sonoro do breeze")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "damage")
+                      (str/includes? % "type=!minecraft:player"))
+                cmds)
+          "Aplica dano forte em area (AOE) protegendo o jogador"))))
+

@@ -115,6 +115,42 @@
    (let [cd (if caster wand-cooldown-ms spell-cooldown-ms)]
      (> (- now (:last-spell-ms @st 0)) cd))))
 
+(def fireball-item-id "minecraft:blaze_rod")
+(declare spell-registry)
+
+(defn- projectile-spell-cmd
+  "Comando que lanca o projetil configurado pelo feitico na direcao do alvo ou do olhar."
+  [st anchor-name send-cmd! target snapshot spell-def]
+  (let [{:keys [entity entity-nbt speed] :or {entity "minecraft:fireball"
+                                              entity-nbt "{ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
+                                              speed 1.1}} spell-def
+        {:keys [x y z]} target
+        [wx wy wz] (if send-cmd!
+                     (let [resp (send-cmd! "PLAYERS")
+                           entry (some (fn [e] (let [f (str/split e #",")]
+                                                 (when (= anchor-name (first f)) f)))
+                                       (-> resp (str/replace #"^OK\|" "") (str/split #";")))]
+                       (if (and entry (>= (count entry) 4))
+                         [(Double/parseDouble (nth entry 1))
+                          (Double/parseDouble (nth entry 2))
+                          (Double/parseDouble (nth entry 3))]
+                         (:pos @st)))
+                     (:pos @st))
+        [mx my mz] (if target
+                     (let [dx (- (double x) (double wx))
+                           dy (- (double y) (double wy))
+                           dz (- (double z) (double wz))
+                           len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))]
+                       [(* speed (/ dx len)) (* speed (/ dy len)) (* speed (/ dz len))])
+                     (let [[lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+                           len (max 0.001 (Math/sqrt (+ (* lx lx) (* ly ly) (* lz lz))))]
+                       [(* speed (/ lx len)) (* speed (/ ly len)) (* speed (/ lz len))]))
+        at-expr (if send-cmd!
+                  (uformat "at %s" anchor-name)
+                  (uformat "positioned %.2f %.2f %.2f" wx wy wz))
+        nbt (uformat entity-nbt mx my mz)]
+    (uformat "CMD|execute %s run summon %s ^ ^1.2 ^1 %s" at-expr entity nbt)))
+
 (defn- projectile-cmd
   "Comando que lanca o projetil real (fireball) do CONJURADOR rumo ao alvo.
    A direcao sai da posicao da ancora (`anchor-name`) para as coordenadas do
@@ -132,36 +168,9 @@
   ([st agent-name target] (projectile-cmd st agent-name nil target))
   ([st anchor-name send-cmd! target]
    (projectile-cmd st anchor-name send-cmd! target nil))
-  ([st anchor-name send-cmd! target {:keys [look-direction]}]
-   (let [{:keys [x y z]} target
-         [wx wy wz] (if send-cmd!
-                      ;; Jogador: le a posicao real dele pela ponte.
-                      (let [resp (send-cmd! "PLAYERS")
-                            entry (some (fn [e] (let [f (str/split e #",")]
-                                                  (when (= anchor-name (first f)) f)))
-                                        (-> resp (str/replace #"^OK\|" "") (str/split #";")))]
-                        (if (and entry (>= (count entry) 4))
-                          [(Double/parseDouble (nth entry 1))
-                           (Double/parseDouble (nth entry 2))
-                           (Double/parseDouble (nth entry 3))]
-                          (:pos @st)))
-                      (:pos @st))
-         speed 1.1
-         ;; Com alvo: rumo as coordenadas dele. Sem alvo: o vetor da mira.
-         [mx my mz] (if target
-                      (let [dx (- (double x) (double wx))
-                            dy (- (double y) (double wy))
-                            dz (- (double z) (double wz))
-                            len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))]
-                        [(* speed (/ dx len)) (* speed (/ dy len)) (* speed (/ dz len))])
-                      (let [[lx ly lz] (or look-direction [1.0 0.0 0.0])
-                            len (max 0.001 (Math/sqrt (+ (* lx lx) (* ly ly) (* lz lz))))]
-                        [(* speed (/ lx len)) (* speed (/ ly len)) (* speed (/ lz len))]))
-         at-expr (if send-cmd!
-                   (uformat "at %s" anchor-name)
-                   (uformat "positioned %.2f %.2f %.2f" wx wy wz))]
-     (uformat "CMD|execute %s run summon minecraft:fireball ^ ^1.2 ^1 {ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
-              at-expr mx my mz))))
+  ([st anchor-name send-cmd! target snapshot]
+   (projectile-spell-cmd st anchor-name send-cmd! target snapshot
+                         (get spell-registry fireball-item-id))))
 
 (defn- burst-cmds
   "Golpe visual ancorado nas COORDENADAS do alvo — a magia detona nele, nao
@@ -173,15 +182,58 @@
 (def ^:private spell-hitkill-damage 100)
 (def ^:private spell-hitkill-radius 2.0)
 
-;; O item e o poder; sem ele, a bruxa recusa. E a VARINHA DE FOGO — um
-;; blaze_rod com durabilidade (cargas) — que tambem e o que o op HELD_ITEM
-;; procura. Uma so constante para o gate e para o polling, para nunca divergirem.
-;; A BASE e blaze_rod (nao blaze_powder): o blaze_powder NAO tem acao de uso, por
-;; isso o cliente nunca envia o pacote "use item" e o advancement using_item
-;; jamais dispara. MEDIDO em 2026-11-11 — o clique do jogador na varinha
-;; (blaze_powder) nao deixava NENHUMA linha no journal.
-(def ^:private fireball-item-id "minecraft:blaze_rod")
+;; O item e o poder; sem ele, a bruxa recusa. Catalogo unificado de feiticos:
+;; cada item magico mapeia para a assinatura do seu feitico (entidade, som, particulas).
 (def ^:private grimoire-item fireball-item-id)
+
+(def spell-registry
+  {"minecraft:blaze_rod"
+   {:id :fireball
+    :name "Bola de Fogo"
+    :entity "minecraft:fireball"
+    :entity-nbt "{ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
+    :sound "minecraft:item.firecharge.use"
+    :speed 1.1
+    :damage-type "minecraft:explosion"
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
+     "CMD|execute at %s run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
+     "CMD|execute at %s run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
+    :burst-particles
+    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+     "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
+     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]}
+
+   "minecraft:blaze_powder"
+   {:id :fireball
+    :name "Bola de Fogo (Legado)"
+    :entity "minecraft:fireball"
+    :entity-nbt "{ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
+    :sound "minecraft:item.firecharge.use"
+    :speed 1.1
+    :damage-type "minecraft:explosion"
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
+     "CMD|execute at %s run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
+     "CMD|execute at %s run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
+    :burst-particles
+    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
+     "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
+     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]}
+
+   "minecraft:breeze_rod"
+   {:id :wind-charge
+    :name "Onda de Choque"
+    :entity "minecraft:breeze_wind_charge"
+    :entity-nbt "{Motion:[%.3f,%.3f,%.3f]}"
+    :sound "entity.breeze.shoot"
+    :speed 1.5
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:gust_emitter_large ~ ~1.2 ~ 0.2 0.2 0.2 0.05 1 normal"
+     "CMD|execute at %s run particle minecraft:cloud ~ ~1.0 ~ 0.4 0.4 0.4 0.02 10 normal"]
+    :burst-particles
+    ["particle minecraft:gust_emitter_small ~ ~ ~ 0.5 0.5 0.5 0.1 5 normal"
+     "particle minecraft:cloud ~ ~ ~ 0.5 0.5 0.5 0.05 15 normal"]}})
 
 (defn- hitkill-cmd
   "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
@@ -196,14 +248,12 @@
            x y z spell-hitkill-radius spell-hitkill-damage))
 
 (defn- grimoire-carried?
-  "True se o jogador `caster` leva o ITEM DE FOGO NO INVENTARIO (qualquer slot).
-   O item consumivel `fire_charge` substitui o antigo grimorio (writable_book).
-   `INSPECT_INVENTORY|<jogador>` devolve OK|<count>|<id>,<qtd>;<id>,<qtd>;...
-   (o motor so sabe ler o inventario, nao a mao — nao ha op de slot na ponte)."
+  "True se o jogador `caster` leva QUALQUER ITEM DO CATALOGO NO INVENTARIO.
+   `INSPECT_INVENTORY|<jogador>` devolve OK|<count>|<id>,<qtd>;<id>,<qtd>;..."
   [send-cmd! caster]
   (let [resp (send-cmd! (uformat "INSPECT_INVENTORY|%s" caster))]
     (boolean (and resp (str/starts-with? resp "OK|")
-                  (str/includes? resp grimoire-item)))))
+                  (some #(str/includes? resp %) (keys spell-registry))))))
 
 ;; =============================================================================
 ;; Mira por Direcao (o jogador aponta, a magia acerta o que ele mira)
@@ -429,20 +479,44 @@
     "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]))
 
-(defn held-item-damage
-  "Le o item na mao do jogador (op HELD_ITEM) e devolve o DANO (carga gasta)
-   se for a varinha de fogo; nil se nao tem o item na mao.
-   `HELD_ITEM|<jogador>` -> OK|<id>|<count>|<damage>|<max_damage>.
-   O dano E o contador de cargas: o data pack soma 1 por uso (durabilidade)."
+(defn held-spell-item
+  "Le o item na mao principal do jogador via op HELD_ITEM.
+   Devolve um mapa {:item-id ... :damage ... :max-damage ... :spell ...}
+   se o item estiver no catalogo de feiticos; nil caso contrario."
   [send-cmd! player-name]
   (let [resp (send-cmd! (uformat "HELD_ITEM|%s" player-name))]
     (when (and resp (str/starts-with? resp "OK|"))
       (let [parts (str/split resp #"\|")
             id (nth parts 1 nil)
             dmg (when (>= (count parts) 4)
-                  (try (Long/parseLong (nth parts 3)) (catch Throwable _ nil)))]
-        (when (and (= id fireball-item-id) (some? dmg))
-          dmg)))))
+                  (try (Long/parseLong (nth parts 3)) (catch Throwable _ nil)))
+            max-dmg (when (>= (count parts) 5)
+                      (try (Long/parseLong (nth parts 4)) (catch Throwable _ nil)))
+            spell (get spell-registry id)]
+        (when (and spell (some? dmg))
+          {:item-id id
+           :damage dmg
+           :max-damage (or max-dmg 64)
+           :spell spell})))))
+
+(defn held-item-damage
+  "Le o item na mao do jogador (op HELD_ITEM) e devolve o DANO (carga gasta)
+   se for a varinha de fogo; nil se nao tem o item na mao.
+   Mantido por retrocompatibilidade: delega para held-spell-item."
+  [send-cmd! player-name]
+  (when-let [info (held-spell-item send-cmd! player-name)]
+    (when (= (:item-id info) fireball-item-id)
+      (:damage info))))
+
+(defn spell-used?
+  "True se a carga do feitico foi gasta entre duas leituras consecutivas.
+   Exige que seja o mesmo item-id e que o dano agora seja MAIOR que o anterior."
+  [prev-info now-info]
+  (boolean
+   (and (map? prev-info)
+        (map? now-info)
+        (= (:item-id prev-info) (:item-id now-info))
+        (> (long (:damage now-info)) (long (:damage prev-info))))))
 
 (defn fireball-used?
   "Decide se houve um USO da varinha desde a ultima leitura.
@@ -451,6 +525,62 @@
    Devolve true (usou) ou false (nada/a primeira leitura)."
   [prev now-dmg]
   (boolean (and (some? prev) (some? now-dmg) (> (long now-dmg) (long prev)))))
+
+(defn dispatch-held-spell!
+  "Despacha a conjuracao de um feitico a partir do item na mao principal."
+  [st send-cmd! player-name spell-info now]
+  (let [spell (or (:spell spell-info) (get spell-registry (:item-id spell-info)))]
+    (when spell
+      (case (:id spell)
+        :fireball
+        (cast-casting! st send-cmd! player-name now)
+
+        :wind-charge
+        (let [snapshot (player-aim-snapshot send-cmd! player-name 24.0)
+              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name spell-scan-radius))
+              scanned (parse-hostile-response resp-hostiles)
+              hostiles (if (map? scanned) [scanned] (or scanned []))
+              aim-mob (select-aim-target snapshot hostiles)
+              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+              ;; Ponto central do impacto do vento (mob, bloco solido ou linha do olhar):
+              [ix iy iz] (cond
+                           aim-mob
+                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+
+                           :else
+                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name 24.0))]
+                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                               (let [parts (str/split rc-resp #"\|")]
+                                 [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 12.0 lx))))
+                                  (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 12.0 ly))))
+                                  (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 12.0 lz))))])
+                               [(+ ox (* 12.0 lx))
+                                (+ oy (* 12.0 ly))
+                                (+ oz (* 12.0 lz))])))
+              target aim-mob]
+          (swap! st assoc :last-spell-ms now)
+          (doseq [p (:caster-particles spell)]
+            (send-cmd! (uformat p player-name)))
+          (when-let [snd (:sound spell)]
+            (send-cmd! (uformat "CMD|execute at %s run playsound %s master @a[distance=..24] ~ ~ ~ 1.5 1.0" player-name snd)))
+          ;; Lanca o projetil fisico de vento
+          (send-cmd! (projectile-spell-cmd st player-name send-cmd! target snapshot spell))
+          ;; Dano e efeitos em area (AOE): 40 de dano em raio de 6.5 blocos em todos os hostis/mobs (poupa jogador, itens e XP)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..6.5] run damage @s 40 minecraft:player_attack"
+                              ix iy iz))
+          ;; Efeitos de detonacao e choque sonoro no ponto de impacto
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.breeze.wind_burst master @a ~ ~ ~ 2.0 0.9"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:gust_emitter_large ~ ~ ~ 1.0 0.5 1.0 0.1 3 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:cloud ~ ~ ~ 1.5 1.0 1.5 0.1 30 normal"
+                              ix iy iz))
+          true)
+
+        (do
+          (println (format "[craft-agents-spell] feitico nao implementado: %s" (:id spell)))
+          false)))))
 
 (defn cast-coco-spell!
   "Coco - Glifo de Tinta Viva: desenha um glifo que morde o hostil mais proximo.

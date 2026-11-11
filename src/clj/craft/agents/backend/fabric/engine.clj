@@ -257,15 +257,13 @@
       (.setDaemon true)
       (.start))
 
-    ;; Loop do ITEM de fireball: polling do item na mao (op HELD_ITEM) a 4Hz.
-    ;; A varinha de fogo e um blaze_rod com durabilidade = cargas; o data pack
-    ;; soma 1 ao damage por uso (clicar). Quando o damage de um jogador SOBE, ele
-    ;; usou a varinha: disparamos a magia na mira dele (LOOK) — toda a logica da
-    ;; magia fica aqui, no Clojure. Se o op HELD_ITEM nao existir na JVM (sem
-    ;; restart do servidor), o held-item-damage devolve nil e o loop fica inerte.
+    ;; Loop do DESPACHANTE UNIFICADO DE FEITICOS: polling do item na mao (op HELD_ITEM) a 4Hz.
+    ;; Cada item magico (blaze_rod, breeze_rod, etc.) tem durabilidade = cargas; o data pack
+    ;; soma 1 ao damage por uso (clicar). Quando o damage do mesmo item SOBE, o jogador
+    ;; usou a varinha/cajado: despachamos a magia associada na mira dele (LOOK).
     (doto (Thread.
            (fn []
-             (let [prev-dmg (atom {})]
+             (let [prev-item (atom {})]
                (loop []
                  (when @running?
                    (try
@@ -276,18 +274,18 @@
                                         (map #(first (str/split % #",")))
                                         (set)))]
                        (doseq [nm names]
-                         (when-let [dmg (atelier/held-item-damage send-bridge-cmd! nm)]
-                           (let [prev (get @prev-dmg nm)]
-                             (when (atelier/fireball-used? prev dmg)
-                               (println (format "[craft-agents-item] varinha usada por %s (carga %s->%s): conjurando"
-                                                nm prev dmg))
+                         (when-let [info (atelier/held-spell-item send-bridge-cmd! nm)]
+                           (let [prev (get @prev-item nm)]
+                             (when (atelier/spell-used? prev info)
+                               (println (format "[craft-agents-spell] %s usado por %s (carga %s->%s): disparando %s"
+                                                (:item-id info) nm (:damage prev) (:damage info) (get-in info [:spell :id])))
                                (try
-                                 (atelier/cast-casting! coco-state send-bridge-cmd! nm (System/currentTimeMillis))
+                                 (atelier/dispatch-held-spell! coco-state send-bridge-cmd! nm info (System/currentTimeMillis))
                                  (catch Throwable t
-                                   (println "[craft-agents-item-ERROR] conjurar:" (.getMessage t)))))
-                             (swap! prev-dmg assoc nm dmg)))))
+                                   (println "[craft-agents-spell-ERROR] disparar:" (.getMessage t)))))
+                             (swap! prev-item assoc nm info)))))
                      (catch Throwable t
-                       (println "[craft-agents-item-ERROR]" (.getMessage t))))
+                       (println "[craft-agents-spell-ERROR]" (.getMessage t))))
                    (Thread/sleep 250)
                    (recur)))))
            "craft-agents-item-poll")
