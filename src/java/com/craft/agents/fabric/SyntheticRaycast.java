@@ -11,6 +11,46 @@ import java.lang.reflect.Method;
 public final class SyntheticRaycast {
     private SyntheticRaycast() {}
 
+    /**
+     * Direcao UNITARIA do olhar da entidade, sem depender de haver bloco a frente.
+     * Primario: `method_5720` (getRotationVec) devolve o vetor do olhar.
+     * Fallback: yaw (`method_36454`) / pitch (`method_36455`).
+     * Reusada pelo op LOOK — a fonte fiavel da mira (o raycast acerta o chao).
+     * Devolve double[3] normalizado; {0,0,1} se nada puder ser lido.
+     */
+    public static double[] lookDirection(Object playerEntity) {
+        double dirX = 0, dirY = 0, dirZ = 1;
+        boolean gotVec = false;
+        try {
+            Object rotVec = playerEntity.getClass().getMethod("method_5720", float.class).invoke(playerEntity, 1.0f);
+            if (rotVec != null) {
+                dirX = rotVec.getClass().getField("field_1352").getDouble(rotVec);
+                dirY = rotVec.getClass().getField("field_1351").getDouble(rotVec);
+                dirZ = rotVec.getClass().getField("field_1350").getDouble(rotVec);
+                gotVec = true;
+            }
+        } catch (Throwable ignored) {}
+
+        if (!gotVec) {
+            float yaw = 0f;
+            float pitch = 0f;
+            try {
+                yaw = ((Number) playerEntity.getClass().getMethod("method_36454").invoke(playerEntity)).floatValue();
+                pitch = ((Number) playerEntity.getClass().getMethod("method_36455").invoke(playerEntity)).floatValue();
+            } catch (Throwable ignored) {}
+
+            double yawRad = Math.toRadians(yaw);
+            double pitchRad = Math.toRadians(pitch);
+            dirX = -Math.sin(yawRad) * Math.cos(pitchRad);
+            dirY = -Math.sin(pitchRad);
+            dirZ = Math.cos(yawRad) * Math.cos(pitchRad);
+        }
+
+        double len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+        if (len < 1e-9) return new double[]{0.0, 0.0, 1.0};
+        return new double[]{dirX / len, dirY / len, dirZ / len};
+    }
+
     public static SyntheticRaycastResult raycastBlock(Object playerEntity, double maxDist, ClassLoader cl) {
         if (playerEntity == null) {
             return new SyntheticRaycastResult(false, "", 0, 0, 0, 0.0);
@@ -24,32 +64,8 @@ public final class SyntheticRaycast {
                 eyeY = (Double) playerEntity.getClass().getMethod("method_23320").invoke(playerEntity);
             } catch (Throwable ignored) {}
 
-            double dirX = 0, dirY = 0, dirZ = 1;
-            boolean gotVec = false;
-            try {
-                Object rotVec = playerEntity.getClass().getMethod("method_5720", float.class).invoke(playerEntity, 1.0f);
-                if (rotVec != null) {
-                    dirX = rotVec.getClass().getField("field_1352").getDouble(rotVec);
-                    dirY = rotVec.getClass().getField("field_1351").getDouble(rotVec);
-                    dirZ = rotVec.getClass().getField("field_1350").getDouble(rotVec);
-                    gotVec = true;
-                }
-            } catch (Throwable ignored) {}
-
-            if (!gotVec) {
-                float yaw = 0f;
-                float pitch = 0f;
-                try {
-                    yaw = ((Number) playerEntity.getClass().getMethod("method_36454").invoke(playerEntity)).floatValue();
-                    pitch = ((Number) playerEntity.getClass().getMethod("method_36455").invoke(playerEntity)).floatValue();
-                } catch (Throwable ignored) {}
-
-                double yawRad = Math.toRadians(yaw);
-                double pitchRad = Math.toRadians(pitch);
-                dirX = -Math.sin(yawRad) * Math.cos(pitchRad);
-                dirY = -Math.sin(pitchRad);
-                dirZ = Math.cos(yawRad) * Math.cos(pitchRad);
-            }
+            double[] dir = lookDirection(playerEntity);
+            double dirX = dir[0], dirY = dir[1], dirZ = dir[2];
 
             Object world = playerEntity.getClass().getMethod("method_51469").invoke(playerEntity);
             Class<?> bpClass = Class.forName("net.minecraft.class_2338", true, cl);

@@ -194,6 +194,69 @@ public final class SyntheticInventoryManager {
     }
 
     /**
+     * Le o item na MAO PRINCIPAL do jogador (slot selecionado da hotbar).
+     * Devolve: OK|<id>|<count>|<damage>|<max_damage>
+     * `damage`/`max_damage` sao lidos por metodos VERIFICADOS no jar intermediary
+     * (server-intermediary.jar, 1.21.1): `method_7919` = getDamage (clampa contra
+     * o maximo), `method_7936` = getMaxDamage. Medido por javap, nao por palpite.
+     * Usado pelo op HELD_ITEM: o engine ve a durabilidade subir (carga gasta) e
+     * dispara a magia.
+     */
+    public static String heldItem(Object playerEntity, ClassLoader cl) {
+        if (playerEntity == null) return "ERR|NO_PLAYER";
+        try {
+            Object inventory;
+            try {
+                inventory = playerEntity.getClass().getMethod("method_31548").invoke(playerEntity);
+            } catch (Throwable t) {
+                return "ERR|NO_INVENTORY";
+            }
+
+            Method getStackMethod = null;
+            for (Method m : inventory.getClass().getMethods()) {
+                if (("method_5438".equals(m.getName()) || "getStack".equals(m.getName()))
+                        && m.getParameterCount() == 1) {
+                    getStackMethod = m;
+                    break;
+                }
+            }
+            if (getStackMethod == null) return "ERR|NO_GET_STACK";
+
+            // Slot selecionado da hotbar: method_31549 (getSelectedSlot).
+            int selected = 0;
+            try {
+                selected = ((Number) playerEntity.getClass().getMethod("method_31549").invoke(playerEntity)).intValue();
+            } catch (Throwable ignored) {}
+
+            Object stack = getStackMethod.invoke(inventory, 36 + selected);
+            if (stack == null) return "OK|minecraft:air|0|0|0";
+            boolean isEmpty = (Boolean) stack.getClass().getMethod("method_7960").invoke(stack);
+            if (isEmpty) return "OK|minecraft:air|0|0|0";
+
+            int count = ((Number) stack.getClass().getMethod("method_7947").invoke(stack)).intValue();
+            Object itemObj = stack.getClass().getMethod("method_7909").invoke(stack);
+            Class<?> regClass = Class.forName("net.minecraft.class_7923", true, cl);
+            Object itemReg = regClass.getField("field_41178").get(null);
+            Method getIdMethod = itemReg.getClass().getMethod("method_10221", Object.class);
+            Object idObj = getIdMethod.invoke(itemReg, itemObj);
+            String itemId = idObj != null ? idObj.toString() : "minecraft:air";
+
+            int damage = 0, maxDamage = 0;
+            try {
+                maxDamage = ((Number) stack.getClass().getMethod("method_7936").invoke(stack)).intValue();
+            } catch (Throwable ignored) {}
+            try {
+                damage = ((Number) stack.getClass().getMethod("method_7919").invoke(stack)).intValue();
+            } catch (Throwable ignored) {}
+
+            return String.format(Locale.ROOT, "OK|%s|%d|%d|%d",
+                    itemId, count, damage, maxDamage);
+        } catch (Throwable t) {
+            return "ERR|" + t.getMessage();
+        }
+    }
+
+    /**
      * Inspeciona o inventário do jogador e retorna os itens armazenados.
      */
     public static String inspectInventory(Object playerEntity, ClassLoader cl) {

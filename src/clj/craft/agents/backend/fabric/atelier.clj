@@ -118,10 +118,15 @@
    <nome>` fica na posicao real dele), ou a bruxa na auto-defesa. Quando a
    ancora e a bruxa, usa-se o `:pos` do estado (o nome do NPC nao e resolvivel
    pelo `execute at` do servidor). `ExplosionPower:0` para o fogo nao quebrar
-   blocos — o dano real continua a ser o do comando de dano."
+   blocos — o dano real continua a ser o do comando de dano.
+   SEM alvo (`target` nil), a direcao vem do vetor do olhar (`:look-direction`
+   do snapshot): a varinha atira na mira mesmo sem mob nenhum a frente."
   ([st agent-name target] (projectile-cmd st agent-name nil target))
-  ([st anchor-name send-cmd! {:keys [x y z]}]
-   (let [[wx wy wz] (if send-cmd!
+  ([st anchor-name send-cmd! target]
+   (projectile-cmd st anchor-name send-cmd! target nil))
+  ([st anchor-name send-cmd! target {:keys [look-direction]}]
+   (let [{:keys [x y z]} target
+         [wx wy wz] (if send-cmd!
                       ;; Jogador: le a posicao real dele pela ponte.
                       (let [resp (send-cmd! "PLAYERS")
                             entry (some (fn [e] (let [f (str/split e #",")]
@@ -133,14 +138,17 @@
                            (Double/parseDouble (nth entry 3))]
                           (:pos @st)))
                       (:pos @st))
-         dx (- (double x) (double wx))
-         dy (- (double y) (double wy))
-         dz (- (double z) (double wz))
-         len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))
          speed 1.1
-         mx (* speed (/ dx len))
-         my (* speed (/ dy len))
-         mz (* speed (/ dz len))
+         ;; Com alvo: rumo as coordenadas dele. Sem alvo: o vetor da mira.
+         [mx my mz] (if target
+                      (let [dx (- (double x) (double wx))
+                            dy (- (double y) (double wy))
+                            dz (- (double z) (double wz))
+                            len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))]
+                        [(* speed (/ dx len)) (* speed (/ dy len)) (* speed (/ dz len))])
+                      (let [[lx ly lz] (or look-direction [1.0 0.0 0.0])
+                            len (max 0.001 (Math/sqrt (+ (* lx lx) (* ly ly) (* lz lz))))]
+                        [(* speed (/ lx len)) (* speed (/ ly len)) (* speed (/ lz len))]))
          at-expr (if send-cmd!
                    (uformat "at %s" anchor-name)
                    (uformat "positioned %.2f %.2f %.2f" wx wy wz))]
@@ -157,9 +165,11 @@
 (def ^:private spell-hitkill-damage 100)
 (def ^:private spell-hitkill-radius 2.0)
 
-;; O grimorio: para o jogador conjurar, tem de LEVAR um livro-e-pena consigo
-;; (no inventario). O item e o poder; sem ele, a bruxa recusa.
-(def ^:private grimoire-item "minecraft:writable_book")
+;; O item e o poder; sem ele, a bruxa recusa. E a VARINHA DE FOGO — um
+;; blaze_powder com durabilidade (cargas) — que tambem e o que o op HELD_ITEM
+;; procura. Uma so constante para o gate e para o polling, para nunca divergirem.
+(def ^:private fireball-item-id "minecraft:blaze_powder")
+(def ^:private grimoire-item fireball-item-id)
 
 (defn- hitkill-cmd
   "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
@@ -171,7 +181,8 @@
            x y z spell-hitkill-radius spell-hitkill-damage))
 
 (defn- grimoire-carried?
-  "True se o jogador `caster` leva o grimorio NO INVENTARIO (qualquer slot).
+  "True se o jogador `caster` leva o ITEM DE FOGO NO INVENTARIO (qualquer slot).
+   O item consumivel `fire_charge` substitui o antigo grimorio (writable_book).
    `INSPECT_INVENTORY|<jogador>` devolve OK|<count>|<id>,<qtd>;<id>,<qtd>;...
    (o motor so sabe ler o inventario, nao a mao — nao ha op de slot na ponte)."
   [send-cmd! caster]
@@ -193,42 +204,67 @@
    desvio da linha do olhar para contar como alvo da mira."
   20.0)
 
+(defn- player-pes
+  "Le a posicao dos pes do jogador (op PLAYERS -> nome,x,y,z). Devolve [x y z] ou nil."
+  [send-cmd! player-name]
+  (let [pos-resp (send-cmd! "PLAYERS")]
+    (some (fn [entry]
+            (let [f (str/split entry #",")]
+              (when (= player-name (first f))
+                [(Double/parseDouble (nth f 1))
+                 (Double/parseDouble (nth f 2))
+                 (Double/parseDouble (nth f 3))])))
+          (-> pos-resp (str/replace #"^OK\|" "") (str/split #";")))))
+
+(defn- look-direction-op
+  "Le a DIRECAO REAL do olhar pelo op LOOK (vetor unitario + yaw/pitch).
+   `LOOK|<jogador>` -> OK|dx|dy|dz|yaw|pitch. Devolve [dx dy dz] normalizado
+   ou nil se o op nao existe (JVM antiga) ou o jogador nao esta online."
+  [send-cmd! player-name]
+  (let [resp (send-cmd! (uformat "LOOK|%s" player-name))]
+    (when (and resp (str/starts-with? resp "OK|"))
+      (let [parts (str/split resp #"\|")]
+        (when (>= (count parts) 5)
+          (let [dx (try (Double/parseDouble (nth parts 1)) (catch Throwable _ 0.0))
+                dy (try (Double/parseDouble (nth parts 2)) (catch Throwable _ 0.0))
+                dz (try (Double/parseDouble (nth parts 3)) (catch Throwable _ 0.0))
+                len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))]
+            [(/ dx len) (/ dy len) (/ dz len)]))))))
+
 (defn player-aim-snapshot
   "Le a mira do jogador pela ponte. A ORIGEM sao os pes do jogador (op PLAYERS,
-   que devolve nome,x,y,z) e a DIRECAO e o vetor normalizado origem->bloco
-   avistado (RAYCAST_BLOCK devolve o primeiro bloco solido na linha do olhar).
+   que devolve nome,x,y,z) e a DIRECAO e a direcao REAL do olhar pelo op LOOK
+   (vetor do olhar, nao depende de haver bloco a frente).
+   FALLBACK: se o op LOOK nao existir (JVM antiga, sem reinicio), a direcao cai
+   no antigo vetor origem->bloco avistado (RAYCAST_BLOCK) — que e fragil (acerta
+   o chao), mas mantem o caminho vivo.
    `send-cmd!` e injetado para os testes; devolve
    {:look-direction [dx dy dz] :ray-origin [x y z] :ray-max-dist d}
-   ou nil se o jogador nao tem bloco em vista."
+   ou nil se o jogador nao existe."
   [send-cmd! player-name max-dist]
-  (let [resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name (double max-dist)))
-        pos-resp (send-cmd! "PLAYERS")]
-    (when (and resp (str/starts-with? resp "OK|"))
-      (let [parts (str/split resp #"\|")
-            bx (try (Double/parseDouble (nth parts 2 "0")) (catch Throwable _ 0.0))
-            by (try (Double/parseDouble (nth parts 3 "0")) (catch Throwable _ 0.0))
-            bz (try (Double/parseDouble (nth parts 4 "0")) (catch Throwable _ 0.0))
-            ;; A posicao real dos pes do jogador vem do op PLAYERS.
-            player (fn []
-                     (some (fn [entry]
-                             (let [f (str/split entry #",")]
-                               (when (= player-name (first f)) f)))
-                           (-> pos-resp (str/replace #"^OK\|" "") (str/split #";"))))
-            pfields (player)
-            [ox oy oz] (if (>= (count pfields) 4)
-                         [(Double/parseDouble (nth pfields 1))
-                          (Double/parseDouble (nth pfields 2))
-                          (Double/parseDouble (nth pfields 3))]
-                         [bx (dec by) bz])
-            ;; Os olhos ficam ~1.62m acima dos pes; o bloco avistado da a direcao.
-            ey (+ oy 1.62)
-            dx (- bx ox)
-            dy (- by ey)
-            dz (- bz oz)
-            len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))]
-        {:look-direction [(/ dx len) (/ dy len) (/ dz len)]
-         :ray-origin [ox oy oz]
-         :ray-max-dist (double max-dist)}))))
+  (let [look (look-direction-op send-cmd! player-name)
+        pes  (player-pes send-cmd! player-name)]
+    (when pes
+      (if look
+        {:look-direction look
+         :ray-origin pes
+         :ray-max-dist (double max-dist)}
+        ;; Fallback: derivar a direcao do bloco avistado (caminho antigo).
+        (let [resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name (double max-dist)))]
+          (when (and resp (str/starts-with? resp "OK|"))
+            (let [parts (str/split resp #"\|")
+                  bx (try (Double/parseDouble (nth parts 2 "0")) (catch Throwable _ 0.0))
+                  by (try (Double/parseDouble (nth parts 3 "0")) (catch Throwable _ 0.0))
+                  bz (try (Double/parseDouble (nth parts 4 "0")) (catch Throwable _ 0.0))
+                  [ox oy oz] pes
+                  ey (+ oy 1.62)
+                  dx (- bx ox)
+                  dy (- by ey)
+                  dz (- bz oz)
+                  len (max 0.001 (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))))]
+              {:look-direction [(/ dx len) (/ dy len) (/ dz len)]
+               :ray-origin [ox oy oz]
+               :ray-max-dist (double max-dist)})))))))
 
 (defn select-aim-target
   "Escolhe, entre os `hostiles`, o que esta na mira do jogador: aquele cuja
@@ -259,8 +295,11 @@
    precisa do GRIMORIO no inventario (o item e o poder). Sem `caster` =
    auto-defesa da bruxa: a magia nasce na propria bruxa, sem exigencia.
    `opts` pode trazer `:aim-target` — o hostil que o jogador mira; quando
-   presente, E ELE o alvo (mesmo que outro esteja mais perto).
-   Devolve true se conjurou (havia alvo), false caso contrario."
+   presente, E ELE o alvo (mesmo que outro esteja mais perto) — e
+   `:look-snapshot` — a mira lida, que da a direcao do projetil quando NAO ha
+   alvo. O projetil VOA SEMPRE: com alvo vai ate ele, sem alvo vai na direcao
+   do olhar. So o DANO e os visuais de impacto dependem de haver alvo.
+   Devolve true se havia alvo, false se atirou sem alvo."
   [st agent-name send-cmd! caster now particles sound burst-particles opts]
   (cond
     (not (spell-ready? st now)) false
@@ -271,18 +310,20 @@
           resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" anchor spell-scan-radius))
           scanned (parse-hostile-response resp)
           ;; A mira do jogador tem prioridade; sem mira, cai no mais proximo.
-          target (or (:aim-target opts) scanned)]
+          target (or (:aim-target opts) scanned)
+          snapshot (:look-snapshot opts)]
       (swap! st assoc :last-spell-ms now)
       (when (should-say-spell? st now)
         (swap! st assoc :last-spell-said-ms now :spell-said? true))
       (doseq [p particles] (send-cmd! p))
       (when sound (send-cmd! sound))
+      ;; O PROJETIL VOA SEMPRE — com alvo vai ate ele, sem alvo vai na mira.
+      (send-cmd! (projectile-cmd st anchor send-cmd! target snapshot))
       (when target
         (send-cmd! (str "SWING|" agent-name))
         ;; HIT KILL: dano 100 num golpe (mobs comuns morrem, bosses resistem).
         (send-cmd! (hitkill-cmd target))
-        ;; Projetil real a voar ate o alvo + detonacao visual NAS COORDENADAS dele.
-        (send-cmd! (projectile-cmd st anchor send-cmd! target))
+        ;; Detonacao visual NAS COORDENADAS do alvo.
         (doseq [b (burst-cmds target burst-particles)] (send-cmd! b)))
       (some? target))))
 
@@ -311,8 +352,9 @@
 (defn cast-spell-with-aim!
   "Conjura resolvendo a MIRA do jogador: le a mira (`player-aim-snapshot`),
    varre os hostis EM VOLTA DO JOGADOR (`TARGET_HOSTILE|<caster>`) e escolhe,
-   entre eles, o que esta na linha do olhar (`select-aim-target`). Sem hostil na
-   mira, a magia nao sai — mirar para o vazio nao gasta conjuracao.
+   entre eles, o que esta na linha do olhar (`select-aim-target`).
+   A mira DIRIGE o tiro, nao o autoriza: o projetil voa sempre — com hostil na
+   mira vai ate ele (dano + detonacao), sem hostil voa na direcao do olhar.
    `caster` = nome do jogador (exige o grimorio); nil = auto-defesa, que ignora
    a mira e usa o mais proximo."
   [st agent-name send-cmd! caster now particles sound burst-particles]
@@ -322,7 +364,7 @@
           resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" caster spell-scan-radius))
           aimed (select-aim-target snapshot (parse-all-hostiles resp))]
       (cast-spell! st agent-name send-cmd! caster now particles sound burst-particles
-                   {:aim-target aimed}))))
+                   {:aim-target aimed :look-snapshot snapshot}))))
 
 (def ^:private casting-words
   "Palavras de CASTING puro — escritas no chat SEM nome de bruxa, disparam a
@@ -363,6 +405,29 @@
    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
     "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]))
+
+(defn held-item-damage
+  "Le o item na mao do jogador (op HELD_ITEM) e devolve o DANO (carga gasta)
+   se for a varinha de fogo; nil se nao tem o item na mao.
+   `HELD_ITEM|<jogador>` -> OK|<id>|<count>|<damage>|<max_damage>.
+   O dano E o contador de cargas: o data pack soma 1 por uso (durabilidade)."
+  [send-cmd! player-name]
+  (let [resp (send-cmd! (uformat "HELD_ITEM|%s" player-name))]
+    (when (and resp (str/starts-with? resp "OK|"))
+      (let [parts (str/split resp #"\|")
+            id (nth parts 1 nil)
+            dmg (when (>= (count parts) 4)
+                  (try (Long/parseLong (nth parts 3)) (catch Throwable _ nil)))]
+        (when (and (= id fireball-item-id) (some? dmg))
+          dmg)))))
+
+(defn fireball-used?
+  "Decide se houve um USO da varinha desde a ultima leitura.
+   Compara o dano (carga) de `prev` com `now-dmg`; uso = o dano AUMENTOU.
+   Se `prev` e nil (primeira leitura), nao dispara — so memoriza a base.
+   Devolve true (usou) ou false (nada/a primeira leitura)."
+  [prev now-dmg]
+  (boolean (and (some? prev) (some? now-dmg) (> (long now-dmg) (long prev)))))
 
 (defn cast-coco-spell!
   "Coco - Glifo de Tinta Viva: desenha um glifo que morde o hostil mais proximo.

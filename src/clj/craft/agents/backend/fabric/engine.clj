@@ -257,6 +257,43 @@
       (.setDaemon true)
       (.start))
 
+    ;; Loop do ITEM de fireball: polling do item na mao (op HELD_ITEM) a 4Hz.
+    ;; A varinha de fogo e um blaze_powder com durabilidade = cargas; o data pack
+    ;; soma 1 ao damage por uso (clicar). Quando o damage de um jogador SOBE, ele
+    ;; usou a varinha: disparamos a magia na mira dele (LOOK) — toda a logica da
+    ;; magia fica aqui, no Clojure. Se o op HELD_ITEM nao existir na JVM (sem
+    ;; restart do servidor), o held-item-damage devolve nil e o loop fica inerte.
+    (doto (Thread.
+           (fn []
+             (let [prev-dmg (atom {})]
+               (loop []
+                 (when @running?
+                   (try
+                     (let [players-resp (send-bridge-cmd! "PLAYERS")
+                           names (when (and players-resp (str/starts-with? players-resp "OK|"))
+                                   (->> (str/split (subs players-resp 3) #";")
+                                        (remove str/blank?)
+                                        (map #(first (str/split % #",")))
+                                        (set)))]
+                       (doseq [nm names]
+                         (when-let [dmg (atelier/held-item-damage send-bridge-cmd! nm)]
+                           (let [prev (get @prev-dmg nm)]
+                             (when (atelier/fireball-used? prev dmg)
+                               (println (format "[craft-agents-item] varinha usada por %s (carga %s->%s): conjurando"
+                                                nm prev dmg))
+                               (try
+                                 (atelier/cast-casting! coco-state send-bridge-cmd! nm (System/currentTimeMillis))
+                                 (catch Throwable t
+                                   (println "[craft-agents-item-ERROR] conjurar:" (.getMessage t)))))
+                             (swap! prev-dmg assoc nm dmg)))))
+                     (catch Throwable t
+                       (println "[craft-agents-item-ERROR]" (.getMessage t))))
+                   (Thread/sleep 250)
+                   (recur)))))
+           "craft-agents-item-poll")
+      (.setDaemon true)
+      (.start))
+
     ;; Main 20Hz Server-Native motor & BT loop for Karlach & Picard
     (doto (Thread.
            (fn []

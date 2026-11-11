@@ -1287,6 +1287,18 @@ public final class SyntheticPlayerFactory {
                 return "ERR|NO_PLAYER";
             }
 
+            // LOOK: direcao REAL do olhar (vetor unitario + yaw/pitch). Nao depende
+            // de haver bloco a frente — e a fonte fiavel da mira do jogador.
+            if ("LOOK".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticLook.look(player).toProtocolString();
+                }
+                return "ERR|NO_PLAYER";
+            }
+
             if ("COLLECT_DROPS".equals(op) && parts.length >= 2) {
                 String pName = parts[1];
                 double radius = parts.length >= 3 ? Double.parseDouble(parts[2]) : 4.0;
@@ -1304,6 +1316,19 @@ public final class SyntheticPlayerFactory {
                 Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
                 if (player != null) {
                     return SyntheticInventoryManager.inspectInventory(player, cl);
+                }
+                return "ERR|NO_PLAYER";
+            }
+
+            // HELD_ITEM: le o item na mao principal (id, count, damage, max_damage,
+            // tem custom_data). O engine faz polling para ver a durabilidade subir
+            // (carga gasta) e dispara a magia.
+            if ("HELD_ITEM".equals(op) && parts.length >= 2) {
+                String pName = parts[1];
+                Object pm = server.getClass().getMethod("method_3760").invoke(server);
+                Object player = pm.getClass().getMethod("method_14566", String.class).invoke(pm, pName);
+                if (player != null) {
+                    return SyntheticInventoryManager.heldItem(player, cl);
                 }
                 return "ERR|NO_PLAYER";
             }
