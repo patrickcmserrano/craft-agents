@@ -15,6 +15,7 @@
             [craft.agents.epic-rsi-curriculum-test]
             [craft.agents.rsi.bench-test]
             [craft.agents.atelier-test]
+            [craft.agents.sentry-test]
             [craft.agents.astrophysics-test]
             [craft.agents.karlach-rain-shelter-test]))
 
@@ -33,6 +34,7 @@
    {:epic 11 :title "Epico II (RSI) — Curriculum Agent & Recursive Self-Improvement (CA-RSI.1..RSI.4)" :ns 'craft.agents.epic-rsi-curriculum-test}
    {:epic 12 :title "Epico III (Bench) — Craft-Bench & Gate de Promocao Falsificavel (CA-RSI-P2)" :ns 'craft.agents.rsi.bench-test}
    {:epic 13 :title "Epico IV (Atelier) — Witch Hat Atelier: Coco e Richeh (CA-WHA)" :ns 'craft.agents.atelier-test}
+   {:epic 16 :title "Epico VII (Sentry) — Deduplicacao de Chat por Identidade de Evento" :ns 'craft.agents.sentry-test}
    {:epic 14 :title "Epico V (Astrophysics) — Efemerides, HR Starfield & Consciencia Celeste (CA-050..CA-052)" :ns 'craft.agents.astrophysics-test}
    {:epic 15 :title "Epico VI (Clima) — Abrigo Autonomo da Karlach contra Chuva (CA-060)" :ns 'craft.agents.karlach-rain-shelter-test}])
 

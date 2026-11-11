@@ -15,21 +15,37 @@
 (defonce ^:private global-seen-chat (atom {}))
 
 (def ^:private chat-dedup-window-ms
-  "Janela de deduplicacao. Ela existe para casar as DUAS rotas de leitura do chat
-   (log-tailer de disco a 100ms e CHAT_POLL in-memory a ~800ms) e nao re-executar a
-   MESMA mensagem. Janela curta de proposito: o jogador precisa poder repetir o
-   mesmo comando (ex.: reconjurar `fireball`) e uma janela longa o tratava como
-   duplicata e o descartava em silencio."
+  "Janela de deduplicacao do FALLBACK por conteudo (só quando a rota nao traz
+   identidade de evento). Ver `chat-duplicate?`: com event-id nao ha janela — a
+   identidade do evento e que decide. Esta janela só serve as rotas cegas (ex.:
+   tailer de disco) para casar a MESMA mensagem entre elas. Curta de proposito:
+   o jogador precisa poder repetir o mesmo comando."
   1500)
 
+(defn- content-key [speaker msg]
+  (str (str/trim (or speaker "")) ":" (str/trim (or msg ""))))
+
 (defn chat-duplicate?
-  "Verifica se a mensagem recente do speaker ja foi processada ha menos de
-   `chat-dedup-window-ms`. Previne duplicacao cruzada entre o log-tailer de disco
-   e o CHAT_POLL in-memory do bridge."
-  [speaker msg]
-  (let [now    (System/currentTimeMillis)
-        key    (str (str/trim (or speaker "")) ":" (str/trim (or msg "")))
-        cutoff (- now chat-dedup-window-ms)]
+  "Deduplica uma mensagem de chat.
+
+   Recebe um MAPA de evento — `{:speaker s :text t :event-id id}` — e nao mais a
+   tupla (speaker, msg). A diferenca e a razao de existir desta funcao:
+
+   - COM `:event-id`: a identidade do EVENTO decide. O MESMO event-id (a mesma
+     mensagem vista por duas rotas) e duplicata; event-ids distintos com o MESMO
+     texto sao eventos distintos e disparam sempre (o jogador reescreveu
+     `fireball` de proposito). Sem janela temporal — nao ha o que colapsar.
+   - SEM `:event-id`: rota cega (fallback). Cai no dedup por CONTEUDO dentro de
+     `chat-dedup-window-ms`, como antes."
+  [event]
+  (let [speaker  (:speaker event)
+        msg      (:text event)
+        event-id (:event-id event)
+        now      (System/currentTimeMillis)
+        cutoff   (- now chat-dedup-window-ms)
+        key      (if (some? event-id)
+                   (str "id:" event-id)
+                   (str "c:" (content-key speaker msg)))]
     (swap! global-seen-chat (fn [m] (into {} (filter (fn [[_ ts]] (> ts cutoff)) m))))
     (if (get @global-seen-chat key)
       true
@@ -139,11 +155,17 @@
 
 (defn handle-player-command!
   "Processa comandos de chat (recebidos via bridge CHAT_POLL, log tailer ou Studio UI)
-   e orquestra as reações dos agentes Karlach, Picard, Coco e Richeh."
+   e orquestra as reações dos agentes Karlach, Picard, Coco e Richeh.
+
+   `event-id` (opcional) é a identidade do evento de chat, quando a rota a
+   conhece (o hook Fabric do servidor). Sem ela, a mensagem cai no dedup por
+   conteúdo — ver `chat-duplicate?`."
   ([speaker msg engine-ctx-atom nav-state picard-state sanctuary-route]
-   (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route nil nil))
+   (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route nil nil nil))
   ([speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state]
-   (when-not (chat-duplicate? speaker msg)
+   (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state nil))
+  ([speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state event-id]
+   (when-not (chat-duplicate? {:speaker speaker :text msg :event-id event-id})
      (let [lower (str/lower-case (str/trim msg))]
        ;; 0. Comandos para o Ateliê (Coco & Richeh) OU casting puro do jogador
        (when (and (atelier/atelier-command? msg)

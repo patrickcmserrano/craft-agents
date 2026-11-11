@@ -246,7 +246,10 @@
                                       (not (contains? @seen-msgs dedup-key)))
                              (swap! seen-msgs assoc dedup-key now)
                              (println (str "[craft-agents-chat] 📨 Chat capturado do jogo: <" clean-spk "> " clean-msg))
-                             (handle-player-command! clean-spk clean-msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state)))))
+                             ;; Rota CEGA: o log de disco nao traz a identidade do
+                             ;; evento (so remetente e texto). Passa nil e cai no
+                             ;; dedup por conteudo — e a rota de FALLBACK do hook.
+                             (handle-player-command! clean-spk clean-msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state nil)))))
                      (recur new-s-pos new-c-pos))))))
            "craft-agents-chat-listener")
       (.setDaemon true)
@@ -267,9 +270,12 @@
                            (let [items (str/split (subs resp 4) #";;")]
                              (doseq [item items]
                                (when-not (str/blank? item)
-                                 (let [[speaker msg] (str/split item #"\|" 2)]
+                                 ;; item = speaker|text|event-id (o id nasce no hook
+                                 ;; do servidor; esta rota o carrega). `limit 3`
+                                 ;; preserva pipes dentro do texto.
+                                 (let [[speaker msg event-id] (str/split item #"\|" 3)]
                                    (when (and speaker msg (not (#{"Karlach" "Picard" "Antigravity"} speaker)))
-                                     (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state)))))))))
+                                     (handle-player-command! speaker msg engine-ctx-atom nav-state picard-state sanctuary-route coco-state richeh-state event-id)))))))))
                      ;; Periodically verify bridge connection & weather cache
                      (when (zero? (mod tick 200))
                        (refresh-real-world-weather-async!)
