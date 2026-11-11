@@ -74,6 +74,7 @@
 ;; o visual sai por CMD|particle. Cooldown de 5s evita spam de combinacao.
 
 (def ^:private spell-cooldown-ms 5000)
+(def ^:private wand-cooldown-ms 1000)
 (def ^:private spell-burst-ms 8000)
 (def ^:private spell-scan-radius 20.0)
 
@@ -106,9 +107,13 @@
   (> (- now (:last-spell-said-ms @st 0)) spell-burst-ms))
 
 (defn- spell-ready?
-  "True se o cooldown de conjuracao ja passou."
-  [st now]
-  (> (- now (:last-spell-ms @st 0)) spell-cooldown-ms))
+  "True se o cooldown de conjuracao ja passou.
+   Com `caster` presente (conjuracao do jogador/varinha), usa wand-cooldown-ms (1000ms).
+   Sem `caster` (auto-defesa autonoma das bruxas), usa spell-cooldown-ms (5000ms)."
+  ([st now] (spell-ready? st nil now))
+  ([st caster now]
+   (let [cd (if caster wand-cooldown-ms spell-cooldown-ms)]
+     (> (- now (:last-spell-ms @st 0)) cd))))
 
 (defn- projectile-cmd
   "Comando que lanca o projetil real (fireball) do CONJURADOR rumo ao alvo.
@@ -169,9 +174,13 @@
 (def ^:private spell-hitkill-radius 2.0)
 
 ;; O item e o poder; sem ele, a bruxa recusa. E a VARINHA DE FOGO — um
-;; blaze_powder com durabilidade (cargas) — que tambem e o que o op HELD_ITEM
+;; blaze_rod com durabilidade (cargas) — que tambem e o que o op HELD_ITEM
 ;; procura. Uma so constante para o gate e para o polling, para nunca divergirem.
-(def ^:private fireball-item-id "minecraft:blaze_powder")
+;; A BASE e blaze_rod (nao blaze_powder): o blaze_powder NAO tem acao de uso, por
+;; isso o cliente nunca envia o pacote "use item" e o advancement using_item
+;; jamais dispara. MEDIDO em 2026-11-11 — o clique do jogador na varinha
+;; (blaze_powder) nao deixava NENHUMA linha no journal.
+(def ^:private fireball-item-id "minecraft:blaze_rod")
 (def ^:private grimoire-item fireball-item-id)
 
 (defn- hitkill-cmd
@@ -316,7 +325,7 @@
    Devolve true se havia alvo, false se atirou sem alvo."
   [st agent-name send-cmd! caster now particles sound burst-particles opts]
   (cond
-    (not (spell-ready? st now)) false
+    (not (spell-ready? st caster now)) false
     (and caster (not (grimoire-carried? send-cmd! caster))) false
     :else
     ;; A magia nasce do CONJURADOR: o jogador quando comanda, a bruxa na auto-defesa.
@@ -484,10 +493,18 @@
 (defn spell-auto-defense!
   "Reacao automatica: se houver hostil no raio, a bruxa conjura a sua magia.
    Sem `caster` — e a bruxa a defender-se, nao obedece ao grimorio de ninguem.
-   Devolve true se conjurou."
+   Devolve true se conjurou.
+
+   SEM hostil nao ha magia: sem `caster` o projetil nao tem alvo nem mira, e o
+   `cast-spell!` atiraria uma fireball para o vazio. A varredura aqui e o gate
+   que impede esse disparo orfao (o jogador, que tem `caster` e mira, continua a
+   poder atirar sem alvo)."
   [st agent-name send-cmd! now]
-  (let [cast-fn (if (= agent-name "Coco") cast-coco-spell! cast-richeh-spell!)]
-    (cast-fn st send-cmd! nil 0 now)))
+  (let [resp (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" agent-name spell-scan-radius))]
+    (if (parse-hostile-response resp)
+      (let [cast-fn (if (= agent-name "Coco") cast-coco-spell! cast-richeh-spell!)]
+        (cast-fn st send-cmd! nil 0 now))
+      false)))
 
 ;; =============================================================================
 ;; Fábrica de Estado

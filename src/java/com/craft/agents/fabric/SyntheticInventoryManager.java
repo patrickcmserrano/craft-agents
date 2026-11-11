@@ -212,23 +212,22 @@ public final class SyntheticInventoryManager {
                 return "ERR|NO_INVENTORY";
             }
 
-            Method getStackMethod = null;
-            for (Method m : inventory.getClass().getMethods()) {
-                if (("method_5438".equals(m.getName()) || "getStack".equals(m.getName()))
-                        && m.getParameterCount() == 1) {
-                    getStackMethod = m;
-                    break;
-                }
-            }
-            if (getStackMethod == null) return "ERR|NO_GET_STACK";
-
-            // Slot selecionado da hotbar: method_31549 (getSelectedSlot).
-            int selected = 0;
+            // O stack da MAO vem do getter OFICIAL da PlayerInventory:
+            // `method_7391()` = getStackInHand -> `field_7547.get(field_7545)`,
+            // com guarda `method_7380(sel)` (selectedSlot < 9). Resolvido por
+            // bytecode no server-intermediary.jar em 2026-11-11. Antes disto o
+            // op pedia `getStack(int)` e passava o `selected` a mao: o
+            // `PlayerInventory` TEM dois `getStack(int)` (method_5438 e
+            // method_5441) que indexam a lista de containers `field_7543`, e o
+            // op ainda tentava um `method_31549` do PlayerEntity que devolve
+            // `class_1656` (PlayerAbilities), nao int — o cast morria no catch e
+            // o HELD_ITEM respondia air com a varinha na mao.
+            Object stack;
             try {
-                selected = ((Number) playerEntity.getClass().getMethod("method_31549").invoke(playerEntity)).intValue();
-            } catch (Throwable ignored) {}
-
-            Object stack = getStackMethod.invoke(inventory, 36 + selected);
+                stack = inventory.getClass().getMethod("method_7391").invoke(inventory);
+            } catch (Throwable t) {
+                return "ERR|NO_HAND_GETTER:" + t.getClass().getSimpleName();
+            }
             if (stack == null) return "OK|minecraft:air|0|0|0";
             boolean isEmpty = (Boolean) stack.getClass().getMethod("method_7960").invoke(stack);
             if (isEmpty) return "OK|minecraft:air|0|0|0";

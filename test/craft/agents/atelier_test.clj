@@ -479,7 +479,7 @@
     ;; proximo por distancia (o que fazia o campo de tiro acertar pelas costas).
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
-          mock! (spell-mock! sent "minecraft:blaze_powder,1" nil
+          mock! (spell-mock! sent "minecraft:blaze_rod,1" nil
                              {:look-resp "OK|0.0|-1.0|0.0|0.0|90.0"})
           _ (with-redefs [atelier/parse-all-hostiles (fn [_] [])
                           atelier/parse-hostile-response (fn [_] nil)]
@@ -489,14 +489,14 @@
           "Sem hostil no alcance, nada de dano inventado"))))
 
 ;; =============================================================================
-;; Item consumivel: a varinha (blaze_powder) substitui o grimorio; mira via op LOOK
+;; Item consumivel: a varinha (blaze_rod) substitui o grimorio; mira via op LOOK
 ;; =============================================================================
 
 (deftest test-fireball-item-replaces-grimoire
-  (testing "O porteiro da magia passa a ser a varinha (blaze_powder), nao o writable_book"
+  (testing "O porteiro da magia passa a ser a varinha (blaze_rod), nao o writable_book"
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent-lg (atom [])
-          mock-lg (spell-mock! sent-lg "minecraft:blaze_powder,1")
+          mock-lg (spell-mock! sent-lg "minecraft:blaze_rod,1")
           hit-lg? (atelier/cast-coco-spell! coco-st mock-lg "pace" 1 2000000)]
       (is (true? hit-lg?) "Com a varinha de fogo no inventario, a magia conjura")
       (is (some #(str/starts-with? % "TARGET_HOSTILE|pace|") @sent-lg)
@@ -515,7 +515,7 @@
     ;; O raycast do jogador pode acertar o CHAO (vetor apontando para baixo);
     ;; o op LOOK devolve a direcao REAL do olhar. Quando o LOOK existe, ele vence.
     (let [sent (atom [])
-          mock! (spell-mock! sent "minecraft:blaze_powder,1"
+          mock! (spell-mock! sent "minecraft:blaze_rod,1"
                              "OK|minecraft:deepslate|9|63|0|1.00"    ; raycast: o chao
                              {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"}) ; LOOK: leste reto
           snap (atelier/player-aim-snapshot mock! "pace" 24.0)]
@@ -548,7 +548,7 @@
   (testing "held-item-damage le o damage (carga) quando a mao tem a varinha"
     (let [calls (atom [])
           mock! (fn [cmd] (swap! calls conj cmd)
-                  "OK|minecraft:blaze_powder|1|3|8")]
+                  "OK|minecraft:blaze_rod|1|3|8")]
       (is (= 3 (atelier/held-item-damage mock! "pace"))
           "Devolve o damage (3 cargas gastas) como contador")
       (is (some #(str/starts-with? % "HELD_ITEM|pace") @calls)
@@ -579,3 +579,37 @@
 
   (testing "fireball-used? NAO dispara sem item (now nil)"
     (is (false? (atelier/fireball-used? 3 nil)) "Sem leitura -> false")))
+
+;; =============================================================================
+;; Auto-defesa das bruxas: so conjura COM hostil (sem alvo, nada sai)
+;; =============================================================================
+
+(deftest test-auto-defense-does-not-cast-without-hostile
+  (testing "Sem hostil no raio, a auto-defesa NAO conjura nada (nem projetil)"
+    ;; Defeito medido: `spell-auto-defense!` corria a cada 1s e o cast-spell!
+    ;; enviava o projectile-cmd FORA do (when target) -> as bruxas cuspiam uma
+    ;; fireball a cada 5s para o vazio, mesmo sem nenhum mob (TARGET_HOSTILE -> OK|0|).
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent)]
+      (with-redefs [atelier/parse-hostile-response (fn [_] nil)
+                    atelier/parse-all-hostiles (fn [_] [])]
+        (let [cast? (atelier/spell-auto-defense! coco-st "Coco" mock! 2000000)
+              cmds @sent]
+          (is (false? cast?) "Sem hostil, a auto-defesa nao conjura")
+          (is (not (some #(and (str/starts-with? % "CMD|")
+                               (str/includes? % "summon") (str/includes? % "fireball"))
+                         cmds))
+              "Sem hostil, nenhuma fireball sai (nem na direcao da mira)")))))
+
+  (testing "COM hostil, a auto-defesa conjura e acerta-o"
+    (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent)
+          cast? (atelier/spell-auto-defense! coco-st "Coco" mock! 2000000)
+          cmds @sent]
+      (is (true? cast?) "Com hostil, a bruxa conjura a sua magia")
+      (is (some #(and (str/starts-with? % "CMD|") (str/includes? % "summon")
+                      (str/includes? % "fireball"))
+                cmds)
+          "Com hostil, a fireball sai"))))

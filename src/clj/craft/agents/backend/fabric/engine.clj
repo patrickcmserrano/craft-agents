@@ -258,7 +258,7 @@
       (.start))
 
     ;; Loop do ITEM de fireball: polling do item na mao (op HELD_ITEM) a 4Hz.
-    ;; A varinha de fogo e um blaze_powder com durabilidade = cargas; o data pack
+    ;; A varinha de fogo e um blaze_rod com durabilidade = cargas; o data pack
     ;; soma 1 ao damage por uso (clicar). Quando o damage de um jogador SOBE, ele
     ;; usou a varinha: disparamos a magia na mira dele (LOOK) — toda a logica da
     ;; magia fica aqui, no Clojure. Se o op HELD_ITEM nao existir na JVM (sem

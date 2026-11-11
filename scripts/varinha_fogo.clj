@@ -1,9 +1,15 @@
 #!/usr/bin/env clojure
 ;;; varinha_fogo.clj — entrega a VARINHA DE FOGO ao jogador por /give, pela
-;;; ponte in-server (25595). O item e um blaze_powder marcado com custom_data
+;;; ponte in-server (25595). O item e um blaze_rod marcado com custom_data
 ;;; {varinha_fogo:1b} e durabilidade 8 (a barra = as cargas); cada uso soma 1 ao
-;;; damage e no 8o uso o item quebra. O data pack fireball_item gasta a carga no
-;;; clique e o engine (polling do op HELD_ITEM) dispara a magia na mira.
+;;; damage e no 8o uso a varinha e removida por clear condicional. O data pack
+;;; fireball_item gasta a carga no clique e o engine (polling do op HELD_ITEM)
+;;; dispara a magia na mira.
+;;;
+;;; A base e blaze_rod, NAO blaze_powder: MEDIDO em 2026-11-11 que o clique do
+;;; jogador num blaze_powder nao produzia NENHUMA linha no journal — o
+;;; blaze_powder nao tem acao de uso, o cliente nao envia o pacote "use item" e
+;;; o advancement using_item nunca dispara. O blaze_rod tem animacao de uso.
 ;;;
 ;;; Uso:
 ;;;   clojure -Sdeps '{:paths ["scripts"]}' -M -m varinha-fogo          # da a varinha ao pace
@@ -20,15 +26,16 @@
   "O componente do item: varinha de fogo com durabilidade 8 (= as cargas).
    ARMADILHAS do /give no 1.21.1, ambas MEDIDAS no log do servidor:
    - `max_damage` exige `max_stack_size=1`, senao o servidor recusa com
-     'Item cannot be both damageable and stackable' (o blaze_powder e stackable);
+     'Item cannot be both damageable and stackable' (o blaze_rod e stackable);
    - `custom_name`/`lore` recusam a forma de string crua ('Not a string') e a de
      objeto JSON ('MalformedJsonException') por causa das camadas de escaping
      (shell -> ponte -> comando). Ficam de fora por agora — o essencial (barra de
      cargas + marca) nao depende deles. O nome visivel vem da data pack/lore."
   []
-  (str "minecraft:blaze_powder["
+  (str "minecraft:blaze_rod["
        "custom_data={varinha_fogo:1b},"
-       "max_damage=8,"
+       "food={nutrition:0,saturation:0,can_always_eat:true,eat_seconds:1000000},"
+       "max_damage=64,"
        "damage=0,"
        "max_stack_size=1"
        "]"))
