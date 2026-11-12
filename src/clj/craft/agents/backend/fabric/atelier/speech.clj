@@ -20,25 +20,27 @@
 ;; Falas Formatadas Tellraw no Servidor
 ;; =============================================================================
 
+(defn- tellraw-cmd
+  "Comando `execute at <anchor> run tellraw @a[distance=..<radius>]` com o
+   formato `<Nome> msg` do NPC (nome em negrito, fala na mesma cor). Aspas da
+   fala sao escapadas."
+  [anchor radius npc color msg]
+  (let [safe-msg (str/replace (or msg "") "\"" "\\\"")]
+    (str "CMD|execute at " anchor " run tellraw @a[distance=.." radius "] "
+         "[{\"text\":\"<\",\"color\":\"dark_gray\"},"
+         "{\"text\":\"" npc "\",\"color\":\"" color "\",\"bold\":true},"
+         "{\"text\":\"> \",\"color\":\"dark_gray\"},"
+         "{\"text\":\"" safe-msg "\",\"color\":\"" color "\"}]")))
+
 (defn coco-say! [msg]
-  (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "execute at Coco run tellraw @a[distance=..16] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"Coco\",\"color\":\"yellow\",\"bold\":true},"
-                      "{\"text\":\"> \",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"" safe-msg "\",\"color\":\"yellow\"}]")]
-    (send-bridge-cmd! (str "CMD|" json-cmd))
-    (send-bridge-cmd! "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 0.9 1.1")
-    (send-bridge-cmd! "SWING|Coco")))
+  (send-bridge-cmd! (tellraw-cmd "Coco" 16 "Coco" "yellow" msg))
+  (send-bridge-cmd! "CMD|execute at Coco run playsound minecraft:item.book.page_turn master @a[distance=..24] ~ ~ ~ 0.9 1.1")
+  (send-bridge-cmd! "SWING|Coco"))
 
 (defn richeh-say! [msg]
-  (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "execute at Richeh run tellraw @a[distance=..16] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"Richeh\",\"color\":\"aqua\",\"bold\":true},"
-                      "{\"text\":\"> \",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"" safe-msg "\",\"color\":\"aqua\"}]")]
-    (send-bridge-cmd! (str "CMD|" json-cmd))
-    (send-bridge-cmd! "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.hit master @a[distance=..24] ~ ~ ~ 0.8 1.6")
-    (send-bridge-cmd! "SWING|Richeh")))
+  (send-bridge-cmd! (tellraw-cmd "Richeh" 16 "Richeh" "aqua" msg))
+  (send-bridge-cmd! "CMD|execute at Richeh run playsound minecraft:block.amethyst_block.hit master @a[distance=..24] ~ ~ ~ 0.8 1.6")
+  (send-bridge-cmd! "SWING|Richeh"))
 
 (defn caster-say!
   "Resposta DA CONJURACAO, falada da posicao do JOGADOR que conjurou.
@@ -47,10 +49,5 @@
    jogo, entao quem conjura nunca ouvia a resposta (o \"mandei mas nada\").
    `caster` = nome do jogador que conjurou: o tellraw nasce DELE e vai PARA ele."
   [send-cmd! caster msg]
-  (let [safe-msg (str/replace (or msg "") "\"" "\\\"")
-        json-cmd (str "execute at " caster " run tellraw @a[distance=..32] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"Coco\",\"color\":\"yellow\",\"bold\":true},"
-                      "{\"text\":\"> \",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"" safe-msg "\",\"color\":\"yellow\"}]")]
-    (send-cmd! (str "CMD|" json-cmd))
-    (send-cmd! (str "CMD|execute at " caster " run playsound minecraft:item.book.page_turn master @a[distance=..32] ~ ~ ~ 0.9 1.1"))))
+  (send-cmd! (tellraw-cmd caster 32 "Coco" "yellow" msg))
+  (send-cmd! (str "CMD|execute at " caster " run playsound minecraft:item.book.page_turn master @a[distance=..32] ~ ~ ~ 0.9 1.1")))
