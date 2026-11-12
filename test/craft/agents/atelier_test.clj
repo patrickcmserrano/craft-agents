@@ -69,7 +69,7 @@
   ([sent-cmds held raycast-resp]
    (spell-mock! sent-cmds held raycast-resp nil))
   ([sent-cmds held raycast-resp opts]
-   (let [{:keys [look-resp held-nbt]} opts]
+   (let [{:keys [look-resp held-nbt blocks]} opts]
      (fn [cmd]
        (swap! sent-cmds conj cmd)
        (cond
@@ -79,6 +79,10 @@
          (str/starts-with? cmd "HELD_ITEM") (or held-nbt "ERR|NO_ITEM")
          (str/starts-with? cmd "TARGET_HOSTILE") (hostile-response)
          (str/starts-with? cmd "RAYCAST_BLOCK") (or raycast-resp "ERR|NO_BLOCK_IN_SIGHT")
+         (str/starts-with? cmd "BLOCK|")
+         (let [parts (str/split cmd #"\|")
+               key (str/join " " (rest parts))]
+           (str "OK|" (get blocks key "minecraft:air") "|state"))
          (= cmd "PLAYERS") "OK|pace,0.0,65.0,0.0"
          (str/starts-with? cmd "ATTACK_HOSTILE") (str "OK|" (last (str/split cmd #"\|")) "|0.90")
          :else "OK")))))
@@ -634,7 +638,10 @@
     (is (= :lightning-smite (get-in atelier/spell-registry ["minecraft:trial_key" :id])))
     (is (contains? atelier/spell-registry "minecraft:amethyst_shard")
         "amethyst_shard mapeado no catalogo")
-    (is (= :frost-beam (get-in atelier/spell-registry ["minecraft:amethyst_shard" :id])))))
+    (is (= :frost-beam (get-in atelier/spell-registry ["minecraft:amethyst_shard" :id])))
+    (is (contains? atelier/spell-registry "minecraft:echo_shard")
+        "echo_shard mapeado no catalogo")
+    (is (= :shadow-step (get-in atelier/spell-registry ["minecraft:echo_shard" :id])))))
 
 (deftest test-held-spell-item-detection
   (testing "held-spell-item identifica o item magico e seu dano atual"
@@ -823,6 +830,209 @@
                       (str/includes? % "flame"))
                 cmds)
           "Emite particulas de labaredas/flame no ponto de impacto"))))
+
+(deftest test-dispatch-shadow-step-spell
+  (testing "dispatch-held-spell! para echo_shard executa teleporte tatica instantaneo com resistance, invisibility, particulas de portal e som de enderman"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:echo_shard,1" nil
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:echo_shard"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:echo_shard")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Passo das sombras disparado com sucesso")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "tp pace")
+                      (str/includes? % "~ ~"))
+                cmds)
+          "Executa teleporte do jogador mantendo a rotacao atual")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "effect give pace minecraft:resistance"))
+                cmds)
+          "Concede efeito de resistencia pos-teleporte")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "effect give pace minecraft:speed"))
+                cmds)
+          "Concede efeito de velocidade pos-teleporte para reposicionamento rapido")
+      (is (not-any? #(str/includes? % "effect give pace minecraft:invisibility") cmds)
+          "Nao concede invisibilidade para preservar a visibilidade da skin")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "playsound entity.enderman.teleport"))
+                cmds)
+          "Toca som de teleporte do enderman")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "particle minecraft:portal"))
+                cmds)
+          "Emite nuvem de particulas portal")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "particle minecraft:reverse_portal"))
+                cmds)
+          "Emite nuvem de particulas reverse_portal")))
+
+  (testing "dispatch-held-spell! para echo_shard para antes de obstaculo solido detectado pelo raycast"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          ;; Obstaculo solido a 8 blocos a frente
+          mock! (spell-mock! sent "minecraft:echo_shard,1" "OK|minecraft:stone|8.0|65.0|0.0|8.0"
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:echo_shard"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:echo_shard")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Passo das sombras disparado com sucesso")
+      ;; Teleporte deve parar antes do bloco 8.0 (ex: 6.80 ou 7.00)
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "tp pace 6.80 65.00 0.00 ~ ~"))
+                cmds)
+          "Teleporta para um bloco antes do obstaculo solido")))
+
+  (testing "dispatch-held-spell! evita entrar debaixo da terra quando o jogador olha para baixo"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          ;; Olhar para baixo (dy = -0.3): a 32 blocos daria ty = 65 - 9.2 = 55.8 (debaixo da terra)
+          ;; Bloco em y=55..64 sao solidos em x=30; y=65 e ar livre
+          blocks {"30 55 0" "minecraft:stone"
+                  "30 56 0" "minecraft:stone"
+                  "30 57 0" "minecraft:stone"
+                  "30 58 0" "minecraft:stone"
+                  "30 59 0" "minecraft:stone"
+                  "30 60 0" "minecraft:stone"
+                  "30 61 0" "minecraft:stone"
+                  "30 62 0" "minecraft:stone"
+                  "30 63 0" "minecraft:dirt"
+                  "30 64 0" "minecraft:grass_block"
+                  "30 65 0" "minecraft:air"
+                  "30 66 0" "minecraft:air"}
+          mock! (spell-mock! sent "minecraft:echo_shard,1" nil
+                             {:look-resp "OK|1.0|-0.3|0.0|90.0|15.0"
+                              :blocks blocks})
+          spell-info {:item-id "minecraft:echo_shard"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:echo_shard")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Passo das sombras disparado")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "tp pace")
+                      (str/includes? % "65.00")
+                      (str/includes? % "~ ~"))
+                cmds)
+          "Teleporte corrige a altura para o topo do solo seguro (y=65.00), nao entrando na terra")))
+
+  (testing "dispatch-held-spell! para echo_shard permite 2 cliques seguidos sem cooldown completo"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent1 (atom [])
+          mock1! (spell-mock! sent1 "minecraft:echo_shard,1" nil
+                              {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:echo_shard"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:echo_shard")}
+          ;; 1º clique (t = 1000 ms)
+          cast1? (atelier/dispatch-held-spell! st mock1! "pace" spell-info 1000)
+          cmds1 @sent1
+          ;; 2º clique quase imediato (t = 1300 ms, 300ms depois)
+          sent2 (atom [])
+          mock2! (spell-mock! sent2 "minecraft:echo_shard,2" nil
+                              {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          cast2? (atelier/dispatch-held-spell! st mock2! "pace" spell-info 1300)
+          cmds2 @sent2]
+      (is (true? cast1?) "1º clique disparado com sucesso")
+      (is (true? cast2?) "2º clique disparado com sucesso")
+      ;; No 1º clique: cooldown visual minimo (3 ticks) para liberar o 2º clique
+      (is (some #(= % "ITEM_COOLDOWN|pace|minecraft:echo_shard|3") cmds1)
+          "1º clique nao entra em cooldown longo (3 ticks apenas)")
+      ;; No 2º clique: cooldown completo de recarga (20 ou 25 ticks)
+      (is (some #(and (str/starts-with? % "ITEM_COOLDOWN|pace|minecraft:echo_shard|")
+                      (not= % "ITEM_COOLDOWN|pace|minecraft:echo_shard|3"))
+                cmds2)
+          "2º clique entra no cooldown completo de recarga"))))
+
+(deftest test-dispatch-tidal-surge-spell
+  (testing "spell-registry registra o Orbe das Mares (heart_of_the_sea)"
+    (let [spell (get atelier/spell-registry "minecraft:heart_of_the_sea")]
+      (is (some? spell) "heart_of_the_sea registrado no catalogo")
+      (is (= :tidal-surge (:id spell)))
+      (is (= "Orbe das Marés" (:name spell)))))
+
+  (testing "held-spell-item detecta o Orbe das Mares"
+    (let [mock! (fn [cmd]
+                  (if (str/starts-with? cmd "HELD_ITEM")
+                    "OK|minecraft:heart_of_the_sea|1|0|64"
+                    "OK"))
+          info (atelier/held-spell-item mock! "pace")]
+      (is (some? info))
+      (is (= :tidal-surge (get-in info [:spell :id])))))
+
+  (testing "dispatch-held-spell! para heart_of_the_sea lanca torrente aquatica, apaga fogo, molha entidades e causa dano"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:heart_of_the_sea,1" nil
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
+          spell-info {:item-id "minecraft:heart_of_the_sea"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:heart_of_the_sea")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Torrente aquatica disparada com sucesso")
+      ;; 1. Projeteis aquaticos
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "summon minecraft:potion")
+                      (str/includes? % "minecraft:water"))
+                cmds)
+          "Lanca projeteis/pocao de agua na direcao da mira")
+      ;; 2. Apaga fogo no cenario (raio de 3 blocos)
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "fill")
+                      (str/includes? % "minecraft:air replace minecraft:fire"))
+                cmds)
+          "Apaga blocos de fogo ao redor do impacto")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "fill")
+                      (str/includes? % "minecraft:air replace minecraft:soul_fire"))
+                cmds)
+          "Apaga blocos de fogo das almas")
+      ;; 3. Molha entidades / apaga chamas
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "data modify entity @s Fire set value 0s"))
+                cmds)
+          "Zera chamas (Fire) das entidades atingidas")
+      ;; 4. Dano de afogamento (drown) e dano extra a blazes
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "damage @s 35 minecraft:drown"))
+                cmds)
+          "Aplica dano de afogamento em area nos hostis")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "type=minecraft:blaze")
+                      (str/includes? % "damage @s 50 minecraft:drown"))
+                cmds)
+          "Aplica dano critico extra em blazes")
+      ;; 5. Sons e particulas aquaticas
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "playsound entity.generic.splash"))
+                cmds)
+          "Toca som de splash aquatica")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "particle minecraft:splash"))
+                cmds)
+          "Emite particulas de splash")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "particle minecraft:bubble_pop"))
+                cmds)
+          "Emite particulas de bolhas estourando")
+      ;; 6. Cooldown de 20 ticks
+      (is (some #(= % "ITEM_COOLDOWN|pace|minecraft:heart_of_the_sea|20") cmds)
+          "Aplica cooldown de 20 ticks (1s)"))))
+
+
+
 
 
 

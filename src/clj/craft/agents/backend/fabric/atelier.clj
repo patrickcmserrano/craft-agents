@@ -271,7 +271,33 @@
     :burst-particles
     ["particle minecraft:snowflake ~ ~ ~ 1.2 1.2 1.2 0.1 40 normal"
      "particle minecraft:item packed_ice ~ ~ ~ 1.0 1.0 1.0 0.1 25 normal"
-     "particle minecraft:dust 0.6 0.85 1.0 1.5 ~ ~ ~ 1.0 1.0 1.0 0.1 20 normal"]}})
+     "particle minecraft:dust 0.6 0.85 1.0 1.5 ~ ~ ~ 1.0 1.0 1.0 0.1 20 normal"]}
+
+   "minecraft:echo_shard"
+   {:id :shadow-step
+    :name "Passo das Sombras"
+    :cooldown-ticks 20
+    :sound "entity.enderman.teleport"
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:portal ~ ~1.0 ~ 0.5 0.5 0.5 0.1 25 normal"
+     "CMD|execute at %s run particle minecraft:reverse_portal ~ ~1.0 ~ 0.5 0.5 0.5 0.1 25 normal"]
+    :burst-particles
+    ["particle minecraft:portal ~ ~1.0 ~ 0.8 1.0 0.8 0.5 60 normal"
+     "particle minecraft:reverse_portal ~ ~1.0 ~ 0.6 0.8 0.6 0.2 40 normal"]}
+
+   "minecraft:heart_of_the_sea"
+   {:id :tidal-surge
+    :name "Orbe das Marés"
+    :cooldown-ticks 20
+    :sound "entity.generic.splash"
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:splash ~ ~1.2 ~ 0.3 0.3 0.3 0.08 20 normal"
+     "CMD|execute at %s run particle minecraft:bubble_pop ~ ~1.0 ~ 0.4 0.4 0.4 0.05 15 normal"
+     "CMD|execute at %s run particle minecraft:falling_dripstone_water ~ ~1.2 ~ 0.2 0.2 0.2 0.05 10 normal"]
+    :burst-particles
+    ["particle minecraft:splash ~ ~ ~ 1.5 1.5 1.5 0.2 80 normal"
+     "particle minecraft:bubble_pop ~ ~ ~ 1.2 1.2 1.2 0.1 50 normal"
+     "particle minecraft:dripping_dripstone_water ~ ~ ~ 1.0 1.0 1.0 0.1 30 normal"]}})
 
 (defn- hitkill-cmd
   "Comando de dano que mata o alvo num golpe. Usa `damage` (comando vanilla
@@ -411,6 +437,35 @@
                              [cosang h])))
                        hostiles)]
       (second (apply max-key first (cons [-1.0 nil] scored))))))
+
+(defn find-safe-ground-y
+  "Garante que o destino [tx ty tz] nao deixe o jogador enterrado em blocos
+   solidos. Se o ponto estiver dentro de terra/pedra/bloco solido, sobe y ate
+   encontrar espaco livre de 2 blocos (ar nos pes e ar na cabeca).
+   Se ja estiver no ar (dash aereo), mantem ty.
+   Se nao encontrar ar seguro ate 24 blocos, recua para fallback-oy (altura dos pes)."
+  [send-cmd! tx ty tz fallback-oy]
+  (let [bx (int (Math/floor tx))
+        bz (int (Math/floor tz))
+        init-by (int (Math/floor ty))]
+    (loop [y init-by
+           climbed 0]
+      (if (>= climbed 24)
+        (double fallback-oy)
+        (let [resp (send-cmd! (uformat "BLOCK|%d|%d|%d" bx y bz))
+              block-id (when (and resp (str/starts-with? resp "OK|"))
+                         (second (str/split resp #"\|")))
+              solid? (and block-id (not (str/includes? block-id ":air")))]
+          (if solid?
+            (recur (inc y) (inc climbed))
+            ;; Bloco y e passavel (ar). Verifica se ha espaco para a cabeca em y+1:
+            (let [resp-head (send-cmd! (uformat "BLOCK|%d|%d|%d" bx (inc y) bz))
+                  head-id (when (and resp-head (str/starts-with? resp-head "OK|"))
+                            (second (str/split resp-head #"\|")))
+                  head-solid? (and head-id (not (str/includes? head-id ":air")))]
+              (if head-solid?
+                (recur (+ y 2) (+ climbed 2))
+                (double y)))))))))
 
 (defn- cast-spell!
   "Nucleo comum: varre hostis, aplica dano ao mais proximo e emite o visual
@@ -592,7 +647,20 @@
   [st send-cmd! player-name spell-info now]
   (let [spell (or (:spell spell-info) (get spell-registry (:item-id spell-info)))]
     (when spell
-      (send-cmd! (uformat "ITEM_COOLDOWN|%s|%s|%d" player-name (:item-id spell-info) (or (:cooldown-ticks spell) 20)))
+      (if (= (:id spell) :shadow-step)
+        ;; Passo das Sombras (Duplo Dash): permite 2 cliques seguidos sem cooldown completo
+        (let [dash-st (get-in @st [:dash-state player-name])
+              second-dash? (and dash-st
+                                (= (:count dash-st) 1)
+                                (< (- now (or (:last-ms dash-st) 0)) 3000))
+              cooldown-ticks (if second-dash?
+                               (or (:cooldown-ticks spell) 25)
+                               3)]
+          (swap! st assoc-in [:dash-state player-name]
+                 {:count (if second-dash? 0 1)
+                  :last-ms now})
+          (send-cmd! (uformat "ITEM_COOLDOWN|%s|%s|%d" player-name (:item-id spell-info) cooldown-ticks)))
+        (send-cmd! (uformat "ITEM_COOLDOWN|%s|%s|%d" player-name (:item-id spell-info) (or (:cooldown-ticks spell) 20))))
       (case (:id spell)
         :fireball
         (let [snapshot (player-aim-snapshot send-cmd! player-name 48.0)
@@ -798,6 +866,115 @@
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:snowflake ~ ~0.5 ~ 1.5 0.8 1.5 0.1 50 normal"
                               ix iy iz))
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:item packed_ice ~ ~0.5 ~ 1.2 0.8 1.2 0.08 25 normal"
+                              ix iy iz))
+          true)
+
+        :shadow-step
+        (let [max-dash 32.0
+              snapshot (player-aim-snapshot send-cmd! player-name max-dash)
+              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+              rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name max-dash))
+              dist (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                     (let [parts (str/split rc-resp #"\|")
+                           d (try (Double/parseDouble (nth parts 5)) (catch Throwable _ max-dash))]
+                       (max 0.0 (- d 1.2)))
+                     max-dash)
+              raw-tx (+ ox (* dist lx))
+              raw-ty (+ oy (* dist ly))
+              raw-tz (+ oz (* dist lz))
+              safe-ty (find-safe-ground-y send-cmd! raw-tx raw-ty raw-tz oy)
+              tx raw-tx
+              ty safe-ty
+              tz raw-tz]
+          (swap! st assoc :last-spell-ms now)
+          ;; 1. Origem: som e nuvem densa de portal e reverse_portal
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.enderman.teleport master @a ~ ~ ~ 1.5 1.2"
+                              ox oy oz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:portal ~ ~1.0 ~ 0.8 1.0 0.8 0.5 60 normal"
+                              ox oy oz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:reverse_portal ~ ~1.0 ~ 0.6 0.8 0.6 0.2 40 normal"
+                              ox oy oz))
+          ;; 2. Teleporte instantaneo mantendo a rotacao atual (~ ~)
+          (send-cmd! (uformat "CMD|tp %s %.2f %.2f %.2f ~ ~"
+                              player-name tx ty tz))
+          ;; 3. Efeitos pos-teleporte: 2s de resistance e velocidade para reposicionamento (sem sumir a skin)
+          (send-cmd! (uformat "CMD|effect give %s minecraft:resistance 2 4 true" player-name))
+          (send-cmd! (uformat "CMD|effect give %s minecraft:speed 2 1 true" player-name))
+          ;; 4. Destino: som e nuvem densa de portal e reverse_portal
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.enderman.teleport master @a ~ ~ ~ 1.5 1.0"
+                              tx ty tz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:portal ~ ~1.0 ~ 0.8 1.0 0.8 0.5 60 normal"
+                              tx ty tz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:reverse_portal ~ ~1.0 ~ 0.6 0.8 0.6 0.2 40 normal"
+                              tx ty tz))
+          true)
+
+        :tidal-surge
+        (let [max-reach 48.0
+              snapshot (player-aim-snapshot send-cmd! player-name max-reach)
+              resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name max-reach))
+              scanned (parse-hostile-response resp-hostiles)
+              hostiles (if (map? scanned) [scanned] (or scanned []))
+              aim-mob (select-aim-target-cone snapshot hostiles 0.94)
+              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+              [ix iy iz] (cond
+                           aim-mob
+                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+
+                           :else
+                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name max-reach))]
+                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                               (let [parts (str/split rc-resp #"\|")]
+                                 [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
+                                  (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
+                                  (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
+                               [(+ ox (* 24.0 lx))
+                                (+ oy (* 24.0 ly))
+                                (+ oz (* 24.0 lz))])))
+              spd 1.8
+              [vx vy vz] [(* spd lx) (* spd ly) (* spd lz)]]
+          (swap! st assoc :last-spell-ms now)
+          (send-cmd! (uformat "ITEM_COOLDOWN|%s|%s|%d" player-name (:item-id spell-info) (:cooldown-ticks spell)))
+          (send-cmd! (uformat "CMD|execute at %s run playsound %s master @a ~ ~ ~ 1.2 1.0"
+                              player-name (:sound spell)))
+          (doseq [p (:caster-particles spell)]
+            (send-cmd! (uformat p player-name)))
+          ;; 1. Saraivada de 3 projeteis aquaticos (splash potion de agua)
+          (doseq [offset [0.0 -0.10 0.10]]
+            (send-cmd! (uformat "CMD|execute at %s positioned ~ ~1.5 ~ run summon minecraft:potion ~ ~ ~ {Item:{id:\"minecraft:splash_potion\",components:{\"minecraft:potion_contents\":{potion:\"minecraft:water\"}}},Motion:[%.3f,%.3f,%.3f]}"
+                                player-name
+                                (+ vx (* offset (- lz)))
+                                vy
+                                (+ vz (* offset lx)))))
+          ;; 2. Apaga fogo no cenario (raio de 3 blocos ao redor do impacto)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run fill ~-3 ~-1 ~-3 ~3 ~2 ~3 minecraft:air replace minecraft:fire"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run fill ~-3 ~-1 ~-3 ~3 ~2 ~3 minecraft:air replace minecraft:soul_fire"
+                              ix iy iz))
+          ;; 3. Molha entidades / apaga chamas (raio de 5 blocos)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[distance=..5.0] run data modify entity @s Fire set value 0s"
+                              ix iy iz))
+          ;; 4. Dano de afogamento (35 de dano drown) em area de 4.5 blocos ao redor do impacto
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.5] run damage @s 35 minecraft:drown"
+                              ix iy iz))
+          ;; Dano critico extra de 50 contra Blazes (elementais de fogo tomam choque termico)
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=minecraft:blaze,distance=..6.0] run damage @s 50 minecraft:drown"
+                              ix iy iz))
+          ;; 5. Efeitos sonoros aquaticos
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.generic.splash master @a ~ ~ ~ 2.5 1.0"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound ambient.underwater.enter master @a ~ ~ ~ 2.0 1.2"
+                              ix iy iz))
+          ;; 6. Particulas de torrente aquatica e chuva
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:splash ~ ~0.5 ~ 1.8 1.0 1.8 0.2 100 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:bubble_pop ~ ~0.5 ~ 1.5 1.0 1.5 0.15 60 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:rain ~ ~1.0 ~ 1.5 1.0 1.5 0.1 50 normal"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:falling_dripstone_water ~ ~1.5 ~ 1.2 0.8 1.2 0.1 40 normal"
                               ix iy iz))
           true)
 

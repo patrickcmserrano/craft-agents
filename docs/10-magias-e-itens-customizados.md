@@ -65,6 +65,8 @@ O sistema combina quatro camadas complementares para viabilizar armas e feitiço
   - 🌪️ **Cajado dos Ventos:** `minecraft:breeze_rod`
   - ⚡ **Cetro do Trovão:** `minecraft:trial_key` (Chave de Provação de cobre da 1.21.1)
   - ❄️ **Raio Congelante:** `minecraft:amethyst_shard`
+  - 🌑 **Passo das Sombras:** `minecraft:echo_shard`
+  - 🌊 **Orbe das Marés:** `minecraft:heart_of_the_sea` (Coração do Mar / Torrente Aquática)
 
 Itens puros nunca podem ser colocados no chão: o clique direito sempre dispara a magia sem risco de virar bloco.
 
@@ -80,6 +82,8 @@ Localizado em `craft-agents/src/clj/craft/agents/backend/fabric/atelier.clj`:
 | `minecraft:breeze_rod` | `:wind-charge` | Onda de Choque | 1.0s (20 ticks) | 24 metros | Projétil `breeze_wind_charge` + dano AOE de 40 (`player_attack`) em raio de 6.5m (poupa conjurador, permite Rocket Jump) |
 | `minecraft:trial_key` | `:lightning-smite` | Relâmpago do Julgamento | 3.0s (60 ticks) | 80 metros | Raio nativo vanilla (`lightning_bolt`) + dano elétrico de 50 em AOE de 3.5m (hitkill em Enderman e Creepers) + imunidade `Resistance V` à queima-roupa |
 | `minecraft:amethyst_shard` | `:frost-beam` | Raio Congelante | 1.0s (20 ticks) | 48 metros | Saraivada de 3 projéteis de gelo (`snowball`) + 35 dano de congelamento (`freeze`) em AOE de 4.5m + Lentidão extrema (Slowness IV por 6s) + estilhaçamento sonoro de vidro/ametista |
+| `minecraft:echo_shard` | `:shadow-step` | Passo das Sombras (Teleporte Tático) | 1.0s (20 ticks) | 32 metros | Teleporte instantâneo na direção do `LOOK` (parando 1 bloco antes de obstáculo sólido via raycast) sem dano de impacto + `Resistance V` (2s) e `Invisibility` (2s) + nuvem densa de portal/reverse_portal e som de enderman |
+| `minecraft:heart_of_the_sea` | `:tidal-surge` | Orbe das Marés (Torrente Aquática) | 1.0s (20 ticks) | 48 metros | Saraivada de 3 projéteis aquáticos (`splash_potion` com água) + extingue fogo no cenário (raio de 3m) + apaga chamas de entidades molhadas (`Fire:0s` em 5m) + dano de afogamento (`drown` 35) em AOE de 4.5m e dano crítico em Blazes (50) + partículas de splash, bolhas e chuva |
 
 ---
 
