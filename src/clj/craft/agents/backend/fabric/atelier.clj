@@ -184,8 +184,6 @@
 
 ;; O item e o poder; sem ele, a bruxa recusa. Catalogo unificado de feiticos:
 ;; cada item magico mapeia para a assinatura do seu feitico (entidade, som, particulas).
-(def ^:private grimoire-item fireball-item-id)
-
 (def spell-registry
   {"minecraft:blaze_rod"
    {:id :fireball
@@ -327,14 +325,6 @@
 ;; um op de raycast de ENTIDADES, entao a mira cruza a LINHA do olhar com a
 ;; varredura de hostis (TARGET_HOSTILE) e escolhe o hostil mais proximo DESSA
 ;; linha — os hostis que nao estao no cone de mira sao ignorados.
-
-(def ^:private aim-cone-deg
-  "Meio-angulo do cone de mira, em graus. HISTORICO: era o limite dentro do qual
-   um hostil contava como alvo da mira — e por isso apontar para fora do cone
-   deixava a magia sem alvo. Passou a estar SEM LIMITE (nil): conta o hostil mais
-   alinhado com a linha do olhar, desde que esteja a FRENTE (cos > 0). Mantida
-   como constante documental."
-  nil)
 
 (defn- player-pes
   "Le a posicao dos pes do jogador (op PLAYERS -> nome,x,y,z). Devolve [x y z] ou nil."
@@ -642,6 +632,31 @@
   [prev now-dmg]
   (boolean (and (some? prev) (some? now-dmg) (> (long now-dmg) (long prev)))))
 
+(def ^:private non-victim-selector
+  "Seletor de entidades que o AOE das magias fere: tudo menos jogador, item e XP."
+  "type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb")
+
+(defn- impact-point
+  "Ponto de impacto de uma magia mirada: o hostil mirado (`aim-mob`), senao o
+   bloco avistado (RAYCAST_BLOCK) e, sem bloco, o ponto a `fallback-dist` na linha
+   do olhar. `center?` centra o bloco avistado (+0.5/+1.0/+0.5, topo do bloco)."
+  [st send-cmd! player-name snapshot aim-mob reach fallback-dist center?]
+  (if aim-mob
+    [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
+    (let [[ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
+          [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
+          [cx cy cz] (if center? [0.5 1.0 0.5] [0.0 0.0 0.0])
+          rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name reach))
+          along (fn [o l] (+ o (* fallback-dist l)))
+          coord (fn [parts i off fb]
+                  (try (+ (Double/parseDouble (nth parts i)) off) (catch Throwable _ fb)))]
+      (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+        (let [parts (str/split rc-resp #"\|")]
+          [(coord parts 2 cx (along ox lx))
+           (coord parts 3 cy (along oy ly))
+           (coord parts 4 cz (along oz lz))])
+        [(along ox lx) (along oy ly) (along oz lz)]))))
+
 (defn dispatch-held-spell!
   "Despacha a conjuracao de um feitico a partir do item na mao principal."
   [st send-cmd! player-name spell-info now]
@@ -668,23 +683,8 @@
               scanned (parse-hostile-response resp-hostiles)
               hostiles (if (map? scanned) [scanned] (or scanned []))
               aim-mob (select-aim-target snapshot hostiles)
-              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
-              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
               ;; Ponto central do impacto da bola de fogo (mob, bloco solido ou linha do olhar):
-              [ix iy iz] (cond
-                           aim-mob
-                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
-
-                           :else
-                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name 48.0))]
-                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                               (let [parts (str/split rc-resp #"\|")]
-                                 [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
-                                  (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
-                                  (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
-                               [(+ ox (* 24.0 lx))
-                                (+ oy (* 24.0 ly))
-                                (+ oz (* 24.0 lz))])))
+              [ix iy iz] (impact-point st send-cmd! player-name snapshot aim-mob 48.0 24.0 true)
               target aim-mob]
           (swap! st assoc :last-spell-ms now)
           (doseq [p (:caster-particles spell)]
@@ -703,13 +703,13 @@
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run fill ~-1 ~ ~-1 ~1 ~1 ~1 minecraft:fire keep"
                               ix iy iz))
           ;; 3. Dano de impacto em area: 50 de dano de explosao em mobs ao redor (protege jogador, itens e XP)
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.0] run damage @s 50 minecraft:explosion"
-                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..4.0] run damage @s 50 minecraft:explosion"
+                              ix iy iz non-victim-selector))
           ;; 4. Incendeia mobs atingidos (setblock fire nos pes se for ar) e dano continuo de fogo
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.0] at @s run setblock ~ ~ ~ minecraft:fire keep"
-                              ix iy iz))
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.0] run damage @s 10 minecraft:in_fire"
-                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..4.0] at @s run setblock ~ ~ ~ minecraft:fire keep"
+                              ix iy iz non-victim-selector))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..4.0] run damage @s 10 minecraft:in_fire"
+                              ix iy iz non-victim-selector))
           ;; 5. Efeitos visuais e sonoros de impacto (explosao, labaredas e estalo de fogo)
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound minecraft:entity.generic.explode master @a ~ ~ ~ 2.0 1.0"
                               ix iy iz))
@@ -729,23 +729,8 @@
               scanned (parse-hostile-response resp-hostiles)
               hostiles (if (map? scanned) [scanned] (or scanned []))
               aim-mob (select-aim-target snapshot hostiles)
-              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
-              [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
               ;; Ponto central do impacto do vento (mob, bloco solido ou linha do olhar):
-              [ix iy iz] (cond
-                           aim-mob
-                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
-
-                           :else
-                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name 24.0))]
-                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                               (let [parts (str/split rc-resp #"\|")]
-                                 [(try (Double/parseDouble (nth parts 2)) (catch Throwable _ (+ ox (* 12.0 lx))))
-                                  (try (Double/parseDouble (nth parts 3)) (catch Throwable _ (+ oy (* 12.0 ly))))
-                                  (try (Double/parseDouble (nth parts 4)) (catch Throwable _ (+ oz (* 12.0 lz))))])
-                               [(+ ox (* 12.0 lx))
-                                (+ oy (* 12.0 ly))
-                                (+ oz (* 12.0 lz))])))
+              [ix iy iz] (impact-point st send-cmd! player-name snapshot aim-mob 24.0 12.0 false)
               target aim-mob]
           (swap! st assoc :last-spell-ms now)
           (doseq [p (:caster-particles spell)]
@@ -755,8 +740,8 @@
           ;; Lanca o projetil fisico de vento
           (send-cmd! (projectile-spell-cmd st player-name send-cmd! target snapshot spell))
           ;; Dano e efeitos em area (AOE): 40 de dano em raio de 6.5 blocos em todos os hostis/mobs (poupa jogador, itens e XP)
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..6.5] run damage @s 40 minecraft:player_attack"
-                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..6.5] run damage @s 40 minecraft:player_attack"
+                              ix iy iz non-victim-selector))
           ;; Efeitos de detonacao e choque sonoro no ponto de impacto
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.breeze.wind_burst master @a ~ ~ ~ 2.0 0.9"
                               ix iy iz))
@@ -777,23 +762,8 @@
                   hostiles (if (map? scanned) [scanned] (or scanned []))
                   ;; Cone restrito de 20° (cos >= 0.94) para só focar em mob se estiver realmente na mira
                   aim-mob (select-aim-target-cone snapshot hostiles 0.94)
-                  [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
-                  [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
                   ;; Ponto exato do impacto (mob mirado, ou bloco mirado centralizado no topo):
-                  [ix iy iz] (cond
-                               aim-mob
-                               [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
-
-                               :else
-                               (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name thunder-range))]
-                                 (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                                   (let [parts (str/split rc-resp #"\|")]
-                                     [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 48.0 lx))))
-                                      (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 48.0 ly))))
-                                      (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 48.0 lz))))])
-                                   [(+ ox (* 48.0 lx))
-                                    (+ oy (* 48.0 ly))
-                                    (+ oz (* 48.0 lz))])))
+                  [ix iy iz] (impact-point st send-cmd! player-name snapshot aim-mob thunder-range 48.0 true)
                   ]
               (swap! st assoc :last-spell-ms now :last-lightning-ms now)
               (doseq [p (:caster-particles spell)]
@@ -805,8 +775,8 @@
               (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run summon minecraft:lightning_bolt ~ ~ ~"
                                   ix iy iz))
               ;; Dano concentrado (AOE reduzido para 3.5 blocos ao redor do raio, poupando jogadores)
-              (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..3.5] run damage @s 50 minecraft:lightning_bolt"
-                                  ix iy iz))
+              (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..3.5] run damage @s 50 minecraft:lightning_bolt"
+                                  ix iy iz non-victim-selector))
               ;; Fagulhas eletricas e trovao
               (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:electric_spark ~ ~1.0 ~ 0.8 1.0 0.8 0.15 35 normal"
                                   ix iy iz))
@@ -821,22 +791,8 @@
               scanned (parse-hostile-response resp-hostiles)
               hostiles (if (map? scanned) [scanned] (or scanned []))
               aim-mob (select-aim-target-cone snapshot hostiles 0.94)
-              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
               [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
-              [ix iy iz] (cond
-                           aim-mob
-                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
-
-                           :else
-                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name frost-range))]
-                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                               (let [parts (str/split rc-resp #"\|")]
-                                 [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
-                                  (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
-                                  (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
-                               [(+ ox (* 24.0 lx))
-                                (+ oy (* 24.0 ly))
-                                (+ oz (* 24.0 lz))])))
+              [ix iy iz] (impact-point st send-cmd! player-name snapshot aim-mob frost-range 24.0 true)
               speed 2.4
               vx (* lx speed)
               vy (* ly speed)
@@ -852,11 +808,11 @@
                                 vy
                                 (+ vz (* offset lx)))))
           ;; Dano de congelamento (35 de dano de gelo/freeze) em area de 4.5 blocos ao redor do impacto
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.5] run damage @s 35 minecraft:freeze"
-                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..4.5] run damage @s 35 minecraft:freeze"
+                              ix iy iz non-victim-selector))
           ;; Lentidao extrema (Slowness IV por 6s) nos inimigos na area
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.5] run effect give @s minecraft:slowness 6 3 true"
-                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..4.5] run effect give @s minecraft:slowness 6 3 true"
+                              ix iy iz non-victim-selector))
           ;; Efeitos sonoros de estilhacamento de gelo / vidro e ametista
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound block.glass.break master @a ~ ~ ~ 2.5 1.2"
                               ix iy iz))
@@ -917,22 +873,8 @@
               scanned (parse-hostile-response resp-hostiles)
               hostiles (if (map? scanned) [scanned] (or scanned []))
               aim-mob (select-aim-target-cone snapshot hostiles 0.94)
-              [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
               [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
-              [ix iy iz] (cond
-                           aim-mob
-                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
-
-                           :else
-                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name max-reach))]
-                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                               (let [parts (str/split rc-resp #"\|")]
-                                 [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
-                                  (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
-                                  (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
-                               [(+ ox (* 24.0 lx))
-                                (+ oy (* 24.0 ly))
-                                (+ oz (* 24.0 lz))])))
+              [ix iy iz] (impact-point st send-cmd! player-name snapshot aim-mob max-reach 24.0 true)
               spd 1.8
               [vx vy vz] [(* spd lx) (* spd ly) (* spd lz)]]
           (swap! st assoc :last-spell-ms now)
@@ -957,8 +899,8 @@
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[distance=..5.0] run data modify entity @s Fire set value 0s"
                               ix iy iz))
           ;; 4. Dano de afogamento (35 de dano drown) em area de 4.5 blocos ao redor do impacto
-          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.5] run damage @s 35 minecraft:drown"
-                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[%s,distance=..4.5] run damage @s 35 minecraft:drown"
+                              ix iy iz non-victim-selector))
           ;; Dano critico extra de 50 contra Blazes (elementais de fogo tomam choque termico)
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=minecraft:blaze,distance=..6.0] run damage @s 50 minecraft:drown"
                               ix iy iz))
