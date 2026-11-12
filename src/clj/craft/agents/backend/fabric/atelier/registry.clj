@@ -5,9 +5,9 @@
 
 ;; O item e o poder; sem ele, a bruxa recusa. Catalogo unificado de feiticos:
 ;; cada item magico mapeia para a assinatura do seu feitico (entidade, som, particulas).
-(def spell-registry
-  {"minecraft:blaze_rod"
-   {:id :fireball
+(def ^:private fireball-spell
+  "Assinatura da bola de fogo (varinha de fogo e a variante legada)."
+  {:id :fireball
     :name "Bola de Fogo"
     :entity "minecraft:fireball"
     :entity-nbt "{ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
@@ -21,24 +21,27 @@
     :burst-particles
     ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
      "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
-     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]}
+     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]})
+
+(def ^:private lightning-smite-spell
+  "Assinatura do Relampago do Julgamento (lightning_rod e trial_key)."
+  {:id :lightning-smite
+    :name "Relâmpago do Julgamento"
+    :cooldown-ticks 60
+    :sound "entity.lightning_bolt.thunder"
+    :caster-particles
+    ["CMD|execute at %s run particle minecraft:electric_spark ~ ~1.2 ~ 0.4 0.4 0.4 0.1 20 normal"
+     "CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.5 0.5 0.5 0.05 15 normal"]
+    :burst-particles
+    ["particle minecraft:electric_spark ~ ~ ~ 1.0 1.0 1.0 0.1 35 normal"
+     "particle minecraft:flash ~ ~ ~ 0.0 0.0 0.0 0.0 1 normal"]})
+
+(def spell-registry
+  {"minecraft:blaze_rod"
+   fireball-spell
 
    "minecraft:blaze_powder"
-   {:id :fireball
-    :name "Bola de Fogo (Legado)"
-    :entity "minecraft:fireball"
-    :entity-nbt "{ExplosionPower:1b,Motion:[%.3f,%.3f,%.3f]}"
-    :sound "minecraft:item.firecharge.use"
-    :speed 1.1
-    :damage-type "minecraft:explosion"
-    :caster-particles
-    ["CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.6 0.6 0.6 0.05 25 normal"
-     "CMD|execute at %s run particle minecraft:witch ~ ~1.2 ~ 0.4 0.4 0.4 0.02 15 normal"
-     "CMD|execute at %s run particle minecraft:crit ~ ~1.0 ~ 0.3 0.3 0.3 0.1 10 normal"]
-    :burst-particles
-    ["particle minecraft:explosion ~ ~ ~ 0.4 0.4 0.4 0.0 1 normal"
-     "particle minecraft:soul_fire_flame ~ ~ ~ 0.5 0.5 0.5 0.05 30 normal"
-     "particle minecraft:enchant ~ ~ ~ 0.8 0.8 0.8 0.1 40 normal"]}
+   (assoc fireball-spell :name "Bola de Fogo (Legado)")
 
    "minecraft:breeze_rod"
    {:id :wind-charge
@@ -56,28 +59,10 @@
      "particle minecraft:cloud ~ ~ ~ 0.5 0.5 0.5 0.05 15 normal"]}
 
    "minecraft:lightning_rod"
-   {:id :lightning-smite
-    :name "Relâmpago do Julgamento"
-    :cooldown-ticks 60
-    :sound "entity.lightning_bolt.thunder"
-    :caster-particles
-    ["CMD|execute at %s run particle minecraft:electric_spark ~ ~1.2 ~ 0.4 0.4 0.4 0.1 20 normal"
-     "CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.5 0.5 0.5 0.05 15 normal"]
-    :burst-particles
-    ["particle minecraft:electric_spark ~ ~ ~ 1.0 1.0 1.0 0.1 35 normal"
-     "particle minecraft:flash ~ ~ ~ 0.0 0.0 0.0 0.0 1 normal"]}
+   lightning-smite-spell
 
    "minecraft:trial_key"
-   {:id :lightning-smite
-    :name "Relâmpago do Julgamento"
-    :cooldown-ticks 60
-    :sound "entity.lightning_bolt.thunder"
-    :caster-particles
-    ["CMD|execute at %s run particle minecraft:electric_spark ~ ~1.2 ~ 0.4 0.4 0.4 0.1 20 normal"
-     "CMD|execute at %s run particle minecraft:enchant ~ ~1.0 ~ 0.5 0.5 0.5 0.05 15 normal"]
-    :burst-particles
-    ["particle minecraft:electric_spark ~ ~ ~ 1.0 1.0 1.0 0.1 35 normal"
-     "particle minecraft:flash ~ ~ ~ 0.0 0.0 0.0 0.0 1 normal"]}
+   lightning-smite-spell
 
    "minecraft:amethyst_shard"
    {:id :frost-beam
