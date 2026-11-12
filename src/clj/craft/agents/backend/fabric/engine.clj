@@ -242,7 +242,11 @@
                                clean-msg (str/trim msg)
                                dedup-key (str clean-spk ":" clean-msg)]
                            (when (and (not (#{"Karlach" "Picard" "Antigravity"} clean-spk))
-                                      (not (contains? @seen-msgs dedup-key)))
+                                      (not (contains? @seen-msgs dedup-key))
+                                      ;; CHAT_POLL is authoritative while the
+                                      ;; bridge is healthy; use disk only as a
+                                      ;; fallback when the hook is unavailable.
+                                      (not (bridge-alive?)))
                              (swap! seen-msgs assoc dedup-key now)
                              (println (str "[craft-agents-chat] 📨 Chat capturado do jogo: <" clean-spk "> " clean-msg))
                              ;; Rota CEGA: o log de disco nao traz a identidade do

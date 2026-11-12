@@ -65,6 +65,16 @@
     (is (true? (sentry/chat-duplicate? {:speaker "pace" :text "fireball"}))
         "Segunda chegada sem id, dentro da janela, e duplicata")))
 
+(deftest test-evento-identificado-e-fallback-sao-duplicata
+  (testing "O tailer de log deduplica um evento ja visto pelo CHAT_POLL"
+    (fresh-dedup!)
+    (is (false? (sentry/chat-duplicate? {:speaker "pace"
+                                         :text "karlach, traz o tatu"
+                                         :event-id 9001})))
+    (is (true? (sentry/chat-duplicate? {:speaker "pace"
+                                        :text "karlach, traz o tatu"}))
+        "A rota sem ID deve reconhecer o evento identificado")))
+
 (deftest test-different-speakers-do-not-collide-sem-id
   (testing "A chave de conteudo inclui o speaker"
     (fresh-dedup!)

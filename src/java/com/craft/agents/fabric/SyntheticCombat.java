@@ -123,7 +123,7 @@ public final class SyntheticCombat {
                             || lower.contains("zombie") || lower.contains("skeleton")
                             || lower.contains("spider") || lower.contains("creeper")
                             || lower.contains("witch") || lower.contains("pillager")
-                            || lower.contains("ravager");
+                            || lower.contains("ravager") || lower.contains("enderman");
                     if (!isHostile) continue;
 
                     int entityId = 0;

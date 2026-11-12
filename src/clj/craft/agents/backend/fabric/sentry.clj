@@ -50,7 +50,13 @@
     (if (get @global-seen-chat key)
       true
       (do
-        (swap! global-seen-chat assoc key now)
+        ;; Keep a short content marker even for identified events. The log
+        ;; fallback does not carry the event id and must recognize that event.
+        (swap! global-seen-chat
+               (fn [m]
+                 (cond-> (assoc m key now)
+                   (some? event-id)
+                   (assoc (str "c:" (content-key speaker msg)) now))))
         false))))
 
 (defonce ^:private proactive-sentry-cooldowns (atom {}))
