@@ -3,7 +3,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [craft.agents.backend.fabric.transport :as transport]
             [clojure.string :as str]
-            [craft.agents.backend.fabric.atelier :as atelier]))
+            [craft.agents.backend.fabric.atelier :as atelier]
+            [craft.agents.backend.fabric.atelier.aim :as aim]))
 
 (deftest test-coco-and-richeh-initial-state
   (testing "Inicializacao de estado e waypoints de Coco e Richeh"
@@ -461,8 +462,8 @@
           sent (atom [])
           mock! (spell-mock! sent "minecraft:blaze_powder,1" nil
                              {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
-          _ (with-redefs [atelier/parse-all-hostiles (fn [_] [])
-                          atelier/parse-hostile-response (fn [_] nil)]
+          _ (with-redefs [aim/parse-all-hostiles (fn [_] [])
+                          aim/parse-hostile-response (fn [_] nil)]
               (atelier/cast-casting! coco-st mock! "pace" 2000000))
           cmds @sent
           proj (first (filter #(and (str/starts-with? % "CMD|")
@@ -486,8 +487,8 @@
           sent (atom [])
           mock! (spell-mock! sent "minecraft:blaze_rod,1" nil
                              {:look-resp "OK|0.0|-1.0|0.0|0.0|90.0"})
-          _ (with-redefs [atelier/parse-all-hostiles (fn [_] [])
-                          atelier/parse-hostile-response (fn [_] nil)]
+          _ (with-redefs [aim/parse-all-hostiles (fn [_] [])
+                          aim/parse-hostile-response (fn [_] nil)]
               (atelier/cast-casting! st mock! "pace" 2000000))
           cmds @sent]
       (is (not (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds))
@@ -597,8 +598,8 @@
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)]
-      (with-redefs [atelier/parse-hostile-response (fn [_] nil)
-                    atelier/parse-all-hostiles (fn [_] [])]
+      (with-redefs [aim/parse-hostile-response (fn [_] nil)
+                    aim/parse-all-hostiles (fn [_] [])]
         (let [cast? (atelier/spell-auto-defense! coco-st "Coco" mock! 2000000)
               cmds @sent]
           (is (false? cast?) "Sem hostil, a auto-defesa nao conjura")
