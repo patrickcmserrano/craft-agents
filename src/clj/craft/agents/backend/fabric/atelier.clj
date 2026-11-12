@@ -665,8 +665,7 @@
         :fireball
         (let [snapshot (player-aim-snapshot send-cmd! player-name 48.0)
               resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name 48.0))
-              scanned (parse-hostile-response resp-hostiles)
-              hostiles (if (map? scanned) [scanned] (or scanned []))
+              hostiles (vec (or (parse-all-hostiles resp-hostiles) []))
               aim-mob (select-aim-target snapshot hostiles)
               [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
               [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
@@ -726,8 +725,7 @@
         :wind-charge
         (let [snapshot (player-aim-snapshot send-cmd! player-name 24.0)
               resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name spell-scan-radius))
-              scanned (parse-hostile-response resp-hostiles)
-              hostiles (if (map? scanned) [scanned] (or scanned []))
+              hostiles (vec (or (parse-all-hostiles resp-hostiles) []))
               aim-mob (select-aim-target snapshot hostiles)
               [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
               [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
@@ -773,8 +771,7 @@
             (let [thunder-range 80.0
                   snapshot (player-aim-snapshot send-cmd! player-name thunder-range)
                   resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name thunder-range))
-                  scanned (parse-hostile-response resp-hostiles)
-                  hostiles (if (map? scanned) [scanned] (or scanned []))
+                  hostiles (vec (or (parse-all-hostiles resp-hostiles) []))
                   ;; Cone restrito de 20° (cos >= 0.94) para só focar em mob se estiver realmente na mira
                   aim-mob (select-aim-target-cone snapshot hostiles 0.94)
                   [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
@@ -818,8 +815,7 @@
         (let [frost-range 48.0
               snapshot (player-aim-snapshot send-cmd! player-name frost-range)
               resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name frost-range))
-              scanned (parse-hostile-response resp-hostiles)
-              hostiles (if (map? scanned) [scanned] (or scanned []))
+              hostiles (vec (or (parse-all-hostiles resp-hostiles) []))
               aim-mob (select-aim-target-cone snapshot hostiles 0.94)
               [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
               [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
@@ -914,25 +910,20 @@
         (let [max-reach 48.0
               snapshot (player-aim-snapshot send-cmd! player-name max-reach)
               resp-hostiles (send-cmd! (uformat "TARGET_HOSTILE|%s|%.1f" player-name max-reach))
-              scanned (parse-hostile-response resp-hostiles)
-              hostiles (if (map? scanned) [scanned] (or scanned []))
-              aim-mob (select-aim-target-cone snapshot hostiles 0.94)
+              hostiles (vec (or (parse-all-hostiles resp-hostiles) []))
               [ox oy oz] (or (:ray-origin snapshot) (:pos @st) [0.0 64.0 0.0])
               [lx ly lz] (or (:look-direction snapshot) [1.0 0.0 0.0])
-              [ix iy iz] (cond
-                           aim-mob
-                           [(:x aim-mob) (:y aim-mob) (:z aim-mob)]
-
-                           :else
-                           (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name max-reach))]
-                             (if (and rc-resp (str/starts-with? rc-resp "OK|"))
-                               (let [parts (str/split rc-resp #"\|")]
-                                 [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
-                                  (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
-                                  (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
-                               [(+ ox (* 24.0 lx))
-                                (+ oy (* 24.0 ly))
-                                (+ oz (* 24.0 lz))])))
+              ;; A Torrente mira o bloco, nao o mob: assim clicar numa lagoa
+              ;; de lava neutraliza exatamente a area apontada.
+              [ix iy iz] (let [rc-resp (send-cmd! (uformat "RAYCAST_BLOCK|%s|%.1f" player-name max-reach))]
+                           (if (and rc-resp (str/starts-with? rc-resp "OK|"))
+                             (let [parts (str/split rc-resp #"\|")]
+                               [(try (+ (Double/parseDouble (nth parts 2)) 0.5) (catch Throwable _ (+ ox (* 24.0 lx))))
+                                (try (+ (Double/parseDouble (nth parts 3)) 1.0) (catch Throwable _ (+ oy (* 24.0 ly))))
+                                (try (+ (Double/parseDouble (nth parts 4)) 0.5) (catch Throwable _ (+ oz (* 24.0 lz))))])
+                             [(+ ox (* 24.0 lx))
+                              (+ oy (* 24.0 ly))
+                              (+ oz (* 24.0 lz))]))
               spd 1.8
               [vx vy vz] [(* spd lx) (* spd ly) (* spd lz)]]
           (swap! st assoc :last-spell-ms now)
@@ -948,26 +939,38 @@
                                 (+ vx (* offset (- lz)))
                                 vy
                                 (+ vz (* offset lx)))))
-          ;; 2. Apaga fogo no cenario (raio de 3 blocos ao redor do impacto)
+          ;; 2. Deixa uma fonte no ponto de impacto. No Nether, agua solta
+          ;; evapora como no balde vanilla; uma cauldron cheia preserva a magia.
+          (send-cmd! (uformat "CMD|execute if dimension minecraft:the_nether positioned %.2f %.2f %.2f run setblock ~ ~ ~ minecraft:water_cauldron[level=3] keep"
+                              ix iy iz))
+          (send-cmd! (uformat "CMD|execute unless dimension minecraft:the_nether positioned %.2f %.2f %.2f run setblock ~ ~ ~ minecraft:water keep"
+                              ix iy iz))
+          ;; 3. Neutraliza lava diretamente: no Nether a agua evapora, entao
+          ;; a conversao explicita para obsidiana garante o efeito do balde.
+          (send-cmd! (uformat "CMD|execute at %s run fill ~-4 ~-2 ~-4 ~4 ~2 ~4 minecraft:obsidian replace minecraft:lava"
+                              player-name))
+          (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run fill ~-4 ~-2 ~-4 ~4 ~2 ~4 minecraft:obsidian replace minecraft:lava"
+                              ix iy iz))
+          ;; 4. Apaga fogo no cenario (raio de 3 blocos ao redor do impacto)
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run fill ~-3 ~-1 ~-3 ~3 ~2 ~3 minecraft:air replace minecraft:fire"
                               ix iy iz))
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run fill ~-3 ~-1 ~-3 ~3 ~2 ~3 minecraft:air replace minecraft:soul_fire"
                               ix iy iz))
-          ;; 3. Molha entidades / apaga chamas (raio de 5 blocos)
+          ;; 5. Molha entidades / apaga chamas (raio de 5 blocos)
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[distance=..5.0] run data modify entity @s Fire set value 0s"
                               ix iy iz))
-          ;; 4. Dano de afogamento (35 de dano drown) em area de 4.5 blocos ao redor do impacto
+          ;; 6. Dano de afogamento (35 de dano drown) em area de 4.5 blocos ao redor do impacto
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=!minecraft:player,type=!minecraft:item,type=!minecraft:experience_orb,distance=..4.5] run damage @s 35 minecraft:drown"
                               ix iy iz))
           ;; Dano critico extra de 50 contra Blazes (elementais de fogo tomam choque termico)
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f as @e[type=minecraft:blaze,distance=..6.0] run damage @s 50 minecraft:drown"
                               ix iy iz))
-          ;; 5. Efeitos sonoros aquaticos
+          ;; 7. Efeitos sonoros aquaticos
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound entity.generic.splash master @a ~ ~ ~ 2.5 1.0"
                               ix iy iz))
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run playsound ambient.underwater.enter master @a ~ ~ ~ 2.0 1.2"
                               ix iy iz))
-          ;; 6. Particulas de torrente aquatica e chuva
+          ;; 8. Particulas de torrente aquatica e chuva
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:splash ~ ~0.5 ~ 1.8 1.0 1.8 0.2 100 normal"
                               ix iy iz))
           (send-cmd! (uformat "CMD|execute positioned %.2f %.2f %.2f run particle minecraft:bubble_pop ~ ~0.5 ~ 1.5 1.0 1.5 0.15 60 normal"

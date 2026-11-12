@@ -61,15 +61,16 @@
   "Mock da bridge: registra os comandos e responde aos opcodes de combate.
    `held` e o item devolvido por INSPECT_INVENTORY (o item de fogo, ou nil sem ele).
    `raycast-resp` fixa a resposta do RAYCAST_BLOCK (o fallback da mira).
-   `opts` (mapa opcional) aceita :look-resp (a resposta do op LOOK) e
-   :held-nbt (o custom_data do item na mao, lido pelo op HELD_ITEM)."
+   `opts` (mapa opcional) aceita :look-resp (a resposta do op LOOK),
+   :hostile-resp (resposta do scanner) e :held-nbt (o custom_data do item
+   na mao, lido pelo op HELD_ITEM)."
   ([sent-cmds] (spell-mock! sent-cmds "minecraft:blaze_rod,1"))
   ([sent-cmds held]
    (spell-mock! sent-cmds held nil))
   ([sent-cmds held raycast-resp]
    (spell-mock! sent-cmds held raycast-resp nil))
   ([sent-cmds held raycast-resp opts]
-   (let [{:keys [look-resp held-nbt blocks]} opts]
+   (let [{:keys [look-resp hostile-resp held-nbt blocks]} opts]
      (fn [cmd]
        (swap! sent-cmds conj cmd)
        (cond
@@ -77,7 +78,7 @@
          (if held (str "OK|1|" held) "OK|0|")
          (str/starts-with? cmd "LOOK") (or look-resp "ERR|UNKNOWN_OP")
          (str/starts-with? cmd "HELD_ITEM") (or held-nbt "ERR|NO_ITEM")
-         (str/starts-with? cmd "TARGET_HOSTILE") (hostile-response)
+         (str/starts-with? cmd "TARGET_HOSTILE") (or hostile-resp (hostile-response))
          (str/starts-with? cmd "RAYCAST_BLOCK") (or raycast-resp "ERR|NO_BLOCK_IN_SIGHT")
          (str/starts-with? cmd "BLOCK|")
          (let [parts (str/split cmd #"\|")
@@ -757,6 +758,27 @@
                 cmds)
           "Aplica dano eletrico forte em area preservando o jogador"))))
 
+(deftest test-dispatch-spell-selects-aimed-enderman
+  (testing "uma magia escolhe o Enderman mirado mesmo quando outro hostil esta mais perto"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])
+          mock! (spell-mock! sent "minecraft:trial_key,1" nil
+                             {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"
+                              :hostile-resp
+                              "OK|2|41,minecraft:zombie,2.00,65.00,2.00,2.83,20.0;77,minecraft:enderman,8.00,66.62,0.00,8.00,40.0"})
+          spell-info {:item-id "minecraft:trial_key"
+                      :damage 1
+                      :max-damage 64
+                      :spell (get atelier/spell-registry "minecraft:trial_key")}
+          cast? (atelier/dispatch-held-spell! st mock! "pace" spell-info 2000000)
+          cmds @sent]
+      (is (true? cast?) "Relampago disparado com sucesso")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "positioned 8.00 66.62 0.00")
+                      (str/includes? % "summon minecraft:lightning_bolt"))
+                cmds)
+          "O impacto deve ser resolvido nas coordenadas do Enderman mirado"))))
+
 (deftest test-dispatch-frost-beam-spell
   (testing "dispatch-held-spell! para amethyst_shard dispara raio congelante com projeteis de gelo, lentidao extrema e dano freeze"
     (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
@@ -988,7 +1010,25 @@
                       (str/includes? % "minecraft:water"))
                 cmds)
           "Lanca projeteis/pocao de agua na direcao da mira")
-      ;; 2. Apaga fogo no cenario (raio de 3 blocos)
+      ;; 2. Deixa agua no chao; no Nether usa cauldron para nao evaporar
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "setblock ~ ~ ~ minecraft:water keep"))
+                cmds)
+          "Deixa uma fonte de agua no ponto de impacto")
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "minecraft:water_cauldron[level=3] keep"))
+                cmds)
+          "Preserva agua no Nether dentro de um caldeirao cheio")
+      ;; 3. Neutraliza lava no raio da magia
+      (is (some #(and (str/starts-with? % "CMD|")
+                      (str/includes? % "minecraft:obsidian replace minecraft:lava"))
+                cmds)
+          "Transforma lava em obsidiana para neutraliza-la no Nether")
+      (is (some #(and (str/starts-with? % "CMD|execute at pace run fill")
+                      (str/includes? % "minecraft:obsidian replace minecraft:lava"))
+                cmds)
+          "Neutraliza lava tambem ao redor do conjurador")
+      ;; 4. Apaga fogo no cenario (raio de 3 blocos)
       (is (some #(and (str/starts-with? % "CMD|")
                       (str/includes? % "fill")
                       (str/includes? % "minecraft:air replace minecraft:fire"))
