@@ -11,13 +11,18 @@
             [craft.agents.backend.fabric.atelier.chat :as chat]))
 
 (defmacro ^:private reexport
-  "Reexporta vars dos sub-namespaces preservando docstring e arglists."
+  "Reexporta vars dos sub-namespaces preservando docstring e arglists.
+   Funcoes delegam pela VAR a cada chamada (nao copiam o valor): redefinir a
+   funcao no sub-namespace (nREPL, re-attach) vale tambem para quem chama pela
+   fachada. Valores (waypoints, registry) sao copiados."
   [& qsyms]
   `(do ~@(for [q qsyms]
            `(let [v# (var ~q)]
               (intern '~(ns-name *ns*)
                       (with-meta '~(symbol (name q)) (select-keys (meta v#) [:doc :arglists]))
-                      @v#)))))
+                      (if (fn? @v#)
+                        (fn [& args#] (apply v# args#))
+                        @v#))))))
 
 (reexport speech/load-agent-edn
           speech/coco-say!
