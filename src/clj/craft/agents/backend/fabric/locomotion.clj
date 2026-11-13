@@ -91,6 +91,29 @@
     real-pos
     nav-pos))
 
+(def ^:const walk-arrive-radius 0.22)
+
+(defn walk-step
+  "Passo :walk da patrulha (CA-067): avanca no maximo `speed` na horizontal
+   rumo a `target` (ja centrado), tratado como no unico. Mesmas regras de y de
+   advance-path: sobe ja no primeiro tick, so desce ao chegar. Devolve
+   {:pos :yaw :arrived?}."
+  [{:keys [pos target speed yaw]}]
+  (let [[x0 y0 z0] (map double pos)
+        [nx ny nz] (map double target)
+        dx (- nx x0) dz (- nz z0)
+        d (Math/sqrt (+ (* dx dx) (* dz dz)))]
+    (if (<= d walk-arrive-radius)
+      {:pos [nx ny nz] :yaw (or yaw 0.0) :arrived? true}
+      (let [step (min (double speed) d)
+            k (/ step d)
+            x (if (>= step d) nx (+ x0 (* dx k)))
+            z (if (>= step d) nz (+ z0 (* dz k)))
+            y (if (or (> ny y0) (>= step d)) ny y0)]
+        {:pos [x y z]
+         :yaw (nav/compute-yaw dx dz)
+         :arrived? (and (= x nx) (= z nz))}))))
+
 (defn follow-speed
   "Velocidade horizontal por tick conforme a distancia ao lider."
   [dist-to-leader]

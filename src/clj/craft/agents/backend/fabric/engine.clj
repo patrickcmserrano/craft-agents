@@ -1051,7 +1051,7 @@
 
                                      ;; 3. Caminhada normal (conducao segura ou patrulha)
                                      :else
-                                     (if (<= dist 0.25)
+                                     (if (<= dist loco/walk-arrive-radius)
                                        (let [rem-steps (vec (rest (:steps st)))
                                              next-step (first rem-steps)
                                              corner-pause? (when (and is-leashed? (= (:op next-step) :walk) (:target next-step))
@@ -1077,17 +1077,18 @@
                                              speed (if (and is-leashed? (> (:distance leash-info 0.0) 7.5))
                                                      0.090
                                                      base-speed)
-                                             nx (+ cx (* (/ dx dist) speed))
-                                             nz (+ cz (* (/ dz dist) speed))
-                                             yaw (compute-yaw dx dz)]
+                                             stepped (loco/walk-step {:pos [cx cy cz] :target [tx ty tz]
+                                                                      :speed speed :yaw (:yaw st)})
+                                             [nx ny' nz] (:pos stepped)
+                                             yaw (:yaw stepped)]
                                          (send-bridge-cmd!
                                           (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                                                  nx (double ty) nz yaw))
-                                         (swap! nav-state assoc :pos [nx (double ty) nz] :yaw yaw)
+                                                  nx (double ny') nz yaw))
+                                         (swap! nav-state assoc :pos [nx (double ny') nz] :yaw yaw)
                                          (swap! engine-ctx-atom assoc
                                                 :tick tick
                                                 :leases {:legs {:owner :patrol-waypoints} :hands nil :gaze {:owner :path-look}}
-                                                :agents (make-agents-map (:label cur-step) [(/ (Math/round (* nx 10.0)) 10.0) (double ty) (/ (Math/round (* nz 10.0)) 10.0)]))))))
+                                                :agents (make-agents-map (:label cur-step) [(/ (Math/round (* nx 10.0)) 10.0) (double ny') (/ (Math/round (* nz 10.0)) 10.0)]))))))
 
                                  :gate
                                  (do
