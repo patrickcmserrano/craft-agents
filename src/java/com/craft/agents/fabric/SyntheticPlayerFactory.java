@@ -715,6 +715,11 @@ public final class SyntheticPlayerFactory {
                 int bz = Integer.parseInt(parts[3]);
                 try {
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
+                        Object kPm = server.getClass().getMethod("method_3760").invoke(server);
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
+                    }
                     Class<?> bpCls = Class.forName("net.minecraft.class_2338", true, cl);
                     Object bp = bpCls.getConstructor(int.class, int.class, int.class).newInstance(bx, by, bz);
                     Object bState = overworld.getClass().getMethod("method_8320", bpCls).invoke(overworld, bp);
@@ -736,6 +741,11 @@ public final class SyntheticPlayerFactory {
                 boolean targetOpen = parts.length < 5 || Boolean.parseBoolean(parts[4]);
                 try {
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
+                        Object kPm = server.getClass().getMethod("method_3760").invoke(server);
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
+                    }
                     Class<?> bpCls = Class.forName("net.minecraft.class_2338", true, cl);
                     Object cmdMgr = server.getClass().getMethod("method_3756").invoke(server);
                     Object cmdSrc = server.getClass().getMethod("method_3763").invoke(server);
@@ -792,6 +802,11 @@ public final class SyntheticPlayerFactory {
                             new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl);
                     Class<?> voxCls = pathLoader.loadClass("com.craft.agents.fabric.LiveWorldVoxelAccessor");
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
+                        Object kPm = server.getClass().getMethod("method_3760").invoke(server);
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
+                    }
                     Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);
 
                     Class<?> solverCls = pathLoader.loadClass("com.craft.agents.nav.PathSolver3D");
@@ -840,6 +855,11 @@ public final class SyntheticPlayerFactory {
                             new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl);
                     Class<?> voxCls = pathLoader.loadClass("com.craft.agents.fabric.LiveWorldVoxelAccessor");
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
+                        Object kPm = server.getClass().getMethod("method_3760").invoke(server);
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
+                    }
                     Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);
 
                     Class<?> snapCls = pathLoader.loadClass("com.craft.agents.nav.GroundSnap");
