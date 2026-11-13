@@ -1,6 +1,6 @@
 # 12 — Backlog: paridade Mineflayer → Server-Native (locomoção e corpo)
 
-> **Status:** Sprint `karlach-nav-01` planejada — nenhuma tarefa iniciada
+> **Status:** Sprint `karlach-nav-01` concluída e em `main` (`f12b328`, 2026-11-12) · Sprint `karlach-nav-02` planejada — nenhuma tarefa iniciada
 > **Criado em:** 2026-11-12
 > **Origem:** diagnóstico ao vivo da Karlach server-native, documentado em [`11-mineflayer-vs-server-native.md`](11-mineflayer-vs-server-native.md) (evidências M1–M6).
 > **Objetivo da sprint:** a Karlach segue o jogador sem se enterrar e, se travar, sai sozinha em poucos segundos.
@@ -33,8 +33,14 @@ Cada tarefa segue o pipeline do `AGENTS.md`: worktree `feat/CA-0xx`, testes escr
 | CA-077 | Chat: decidir entre chat real do player sintético e `tellraw` por distância | 3 | P2 | — | 13 |
 | CA-078 | Setup do corpo: armadura tingida e machado na mão secundária como no mineflayer | 3 | P2 | — | 15 |
 | CA-079 | Op `PATH`: reutilizar o `URLClassLoader` em vez de criar um por chamada | 3 | P2 | — | — |
+| [CA-080](#ca-080) | Classes de navegação frescas nos ops `PATH`/`GROUND` (classloader *child-first* com cache) | 1 | P0 | — | 5 |
+| [CA-081](#ca-081) | Modo mineração sem descida antecipada (`locomotion/approach-step`) | 1 | P1 | — | 3 |
+| [CA-082](#ca-082) | Implantação e verificação ao vivo da sprint 1 (manual) | 1 | P0 | CA-080 | — |
+| [CA-083](#ca-083) | Picard: passo `:walk` da ponte com `locomotion/walk-step` | 1 | P2 | — | 3 |
 
 Ordem da sprint 1: CA-062 → CA-063 → CA-064 → CA-065 → CA-066 → CA-067.
+
+Ordem da sprint 2 (`karlach-nav-02`): CA-080 → CA-081 → CA-083 (automáticas) e, depois do merge, CA-082 (manual). Com a CA-080 implantada, a CA-079 fica coberta (o loader passa a ser reutilizado).
 
 **Fora da execução automática:** o deploy (`systemctl --user restart craft-agents`, com checagem de jogadores) e as verificações ao vivo do doc 11 §8. Fazem parte do fechamento da sprint, feito à mão.
 
@@ -161,3 +167,71 @@ Ordem da sprint 1: CA-062 → CA-063 → CA-064 → CA-065 → CA-066 → CA-067
   - alvo 1 bloco acima: o y sobe já no primeiro tick;
   - alvo a 0,1: `:arrived?` true e pos = alvo.
 - **Aceite:** `make test` verde. Picard (`picard-state`, mesma linha reta) fica fora: ele anda na ponte plana da Enterprise. Registre isso no arquivo de pendências.
+
+---
+
+## 3. Tarefas da sprint `karlach-nav-02` (pendências da sprint 1)
+
+**Origem:** implantação da sprint 1 em 2026-11-12, ~21:29. Depois do `make attach`, a parte em Clojure entrou no ar, mas a parte em Java não:
+
+- `PATH` com partida dentro de bloco → `ERR|NO_PATH` (o `PATH` normal funciona);
+- `GROUND|x|y|z` → `ERR|null` em qualquer coluna.
+
+Causa, confirmada em `server/logs/latest.log`: `Erro ao definir/redefinir PathSolver3D.class: class redefinition failed: attempted to add a method`. A JVM não aceita redefinição que adiciona método (`recoverStart`), então o servidor mantém o `PathSolver3D` antigo. Os ops `PATH` e `GROUND` criam um `URLClassLoader` sobre `target/classes`, mas ele delega primeiro ao pai (o Knot), que devolve a classe velha. O `GroundSnap` novo chama um helper que não existe na classe velha → `NoSuchMethodError` embrulhado em `InvocationTargetException` (mensagem nula, daí o `ERR|null`). Efeito prático: o passo `:unstick` do watchdog não faz nada e ela vai direto ao teleporte de 8 s.
+
+As convenções da seção 1 continuam valendo. Os testes novos entram em `test/craft/agents/karlach_locomotion_test.clj`. O título do épico em `test_runner.clj` passa a ser `"Epico VIII (Locomocao) — Paridade Mineflayer → Server-Native (CA-062..CA-083)"`.
+
+### CA-080
+**Classes de navegação frescas nos ops `PATH`/`GROUND`** — P0 · camada 5
+
+- **Problema:** ver o início desta seção. Toda mudança futura que adicionar método a uma classe de `com.craft.agents.nav`/`api` repetiria o defeito.
+- **Desenho:**
+  - Nova classe Java `com.craft.agents.fabric.FreshNavClassLoader extends java.net.URLClassLoader`, **child-first** só para nomes que começam com `com.craft.agents.nav.`, `com.craft.agents.api.` ou são exatamente `com.craft.agents.fabric.LiveWorldVoxelAccessor`. Para esses, tenta `findClass` no próprio diretório antes do pai (reutilizando a já carregada via `findLoadedClass`). Todo o resto delega ao pai (classes do Minecraft vêm do Knot).
+  - Fábrica estática com cache: `static synchronized FreshNavClassLoader forDir(java.io.File classesDir, ClassLoader parent)`. Reutiliza a instância enquanto a "versão" do diretório não mudar e o `parent` for o mesmo. Versão = maior `lastModified` entre os `.class` de `nav/`, `api/` e `fabric/LiveWorldVoxelAccessor.class`. Se mudar, cria um loader novo e descarta a referência ao antigo.
+  - Em `SyntheticPlayerFactory.processCommand`, os dois `new java.net.URLClassLoader(...)` (ops `PATH` e `GROUND`) passam a usar `FreshNavClassLoader.forDir(new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl)`. O resto do op continua igual.
+  - **Restrição de hot-reload:** o `SyntheticPlayerFactory` precisa continuar redefinível a quente pelo `BridgeReloadAgent`. Mude só o **corpo** de `processCommand`: nenhum método, campo ou classe interna novos em `SyntheticPlayerFactory`. A classe `FreshNavClassLoader` é nova e o agente a define no Knot (é "definir", não "redefinir").
+  - No `catch` dos ops `PATH` e `GROUND`, se a mensagem da exceção for nula, devolva o nome da classe da causa raiz (ex.: `ERR|java.lang.NoSuchMethodError: ...`) para não esconder o próximo defeito como `ERR|null`. Continua só no corpo de `processCommand`.
+- **Arquivos:** `src/java/com/craft/agents/fabric/FreshNavClassLoader.java` (novo), `src/java/com/craft/agents/fabric/SyntheticPlayerFactory.java`, `test/craft/agents/karlach_locomotion_test.clj`, `test/craft/agents/test_runner.clj` (título do épico).
+- **Testes (Red):**
+  - com `parent` = o classloader do teste (que já tem `com.craft.agents.nav.PathSolver3D`) e diretório `target/classes`: `(.loadClass loader "com.craft.agents.nav.PathSolver3D")` devolve uma classe cujo `getClassLoader` é o próprio `FreshNavClassLoader` (child-first), diferente da classe do pai;
+  - o mesmo vale para `com.craft.agents.api.VoxelAccessor` e `com.craft.agents.fabric.LiveWorldVoxelAccessor`;
+  - `java.lang.String`, `clojure.lang.RT` e `com.craft.agents.fabric.SyntheticPlayerFactory` vêm do pai;
+  - `forDir` duas vezes seguidas, sem mudança no disco → mesma instância;
+  - depois de `setLastModified` (mais recente) num `.class` de `nav/` → instância nova. Use uma **cópia** de `target/classes/com/craft/agents/{nav,api}` num diretório temporário (`java.nio.file.Files/createTempDirectory`) para não tocar no build;
+  - a classe carregada pelo loader fresco expõe `recoverStart` (`getMethod` com a assinatura da CA-062) — é o que falhava ao vivo.
+- **Aceite:** `make test` verde. A verificação ao vivo é a CA-082.
+
+### CA-081
+**Modo mineração sem descida antecipada** — P1 · camada 3
+
+- **Problema:** o ramo de aproximação do minério no modo `:mining` (`engine.clj`, ~linhas 800–825, o único `(<= ndist 0.4)` que restou) tem o mesmo defeito que a CA-064 corrigiu no follow: troca o y para o do nó antes de chegar, perde um tick por nó e anda 0,24 fixo. Em túnel, isso a enterra no teto ou no chão.
+- **Desenho:**
+  - Nova função pura `(locomotion/approach-step {:keys [pos path speed yaw]})` → o mapa de `advance-path` mais `:pitch`. O `:pitch` vem de `navigation/compute-pitch`, do olho (y + 1,62) até o centro do próximo nó da rota resultante; sem próximo nó, 0.0.
+  - O ramo de mineração passa a usar `approach-step` com speed 0.24 e grava em `[:active-mining :path]` a rota devolvida. Mantém o comando `MOVE` com pitch, o descarte de minério inalcançável e o resto do modo.
+- **Arquivos:** `src/clj/craft/agents/backend/fabric/locomotion.clj`, `src/clj/craft/agents/backend/fabric/engine.clj`, `test/craft/agents/karlach_locomotion_test.clj`.
+- **Testes (Red):**
+  - nó 2 blocos abaixo: y mantido até chegar (mesma regra de `advance-path`);
+  - `:pitch` positivo (olhando para baixo, convenção do Minecraft) quando o próximo nó está abaixo do olho, e próximo de 0 quando está na altura do olho;
+  - rota vazia → `:arrived?` true e `:pitch` 0.0.
+- **Aceite:** `make test` verde; nenhum `(<= ndist 0.4)` em `engine.clj`.
+
+### CA-082
+**Implantação e verificação ao vivo da sprint 1** — P0 · **manual** (fora do sprint-runner)
+
+Checklist, depois do merge da CA-080 em `main`:
+
+1. `server/logs/latest.log`: confirmar que não há jogadores online.
+2. Reiniciar o servidor Minecraft **ou** rodar `make attach` (com a CA-080, o `make attach` basta: o `FreshNavClassLoader` é definido no Knot e o `SyntheticPlayerFactory` é só redefinido). Depois, `systemctl --user restart craft-agents`.
+3. `GROUND|-182|62|171` (coluna do santuário com chão em 64) → `OK|65`; `GROUND|-182|69|171` → `OK|65`.
+4. `PATH|-181.5,62.0,171.5|-176.5,65.0,175.5|1.5` (partida enterrada) → `OK|…` com o primeiro passo em pé.
+5. Follow por 5 min em terreno acidentado: nenhuma posição enterrada (`BLOCK` nos pés = ar); distância ao jogador ≤ 6 m andando e ≤ 10 m correndo; linhas `[karlach-watchdog]` raras.
+6. Registrar os resultados neste documento (status da sprint 2) e fazer o push de `main` para `origin` (estava 33+ commits à frente em 2026-11-12).
+
+### CA-083
+**Picard: passo `:walk` da ponte com `locomotion/walk-step`** — P2 · camada 3
+
+- **Problema:** o passo de caminhada entre estações do Picard (`engine.clj`, ~linhas 455–480, `speed 0.16` com `[nx (double ty) nz]`) usa o y do alvo de imediato. Hoje não tem efeito porque a ponte da Enterprise é plana, mas é o mesmo defeito da CA-067.
+- **Desenho:** trocar o avanço inline por `locomotion/walk-step` com `:speed 0.16`, mantendo a chegada (com o `MOVE` final com yaw/pitch da estação), a fase `:wait` e o status.
+- **Arquivos:** `src/clj/craft/agents/backend/fabric/engine.clj`, `test/craft/agents/karlach_locomotion_test.clj`.
+- **Testes (Red):** extrair o cálculo para uma função pura `(engine/picard-walk-tick pst station)` que devolve `{:pos :yaw :arrived?}` e testá-la: estação 1 bloco acima → y sobe já no primeiro tick; estação a 0,1 → `:arrived?` true.
+- **Aceite:** `make test` verde.

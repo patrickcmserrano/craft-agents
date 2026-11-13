@@ -1,0 +1,19 @@
+;; Plano de execução da sprint karlach-nav-02 (pendências da sprint 1) para o
+;; sprint-runner (/home/pace/dev/scripts/sprint_runner.clj): swe + CGE
+;; (repo-index, perfil `locomotion`) + small-router, Claude Code Sonnet 5.5.
+;; Specs em docs/12-backlog-paridade-mineflayer.md, seção 3.
+;; CA-082 (implantação e verificação ao vivo) é manual e fica fora do runner.
+;; :repo é a worktree base da sprint: o checkout principal roda o
+;; craft-agents.service. `git worktree add` funciona a partir de qualquer worktree.
+{:sprint       "karlach-nav-02"
+ :repo         "/home/pace/dev/worktrees/craft-agents-nav-02"
+ :project      "craft-agents"
+ :spec-doc     "docs/12-backlog-paridade-mineflayer.md"
+ :pending-doc  "docs/plans/sprint-karlach-nav-02-pendencias.md"
+ :base-branch  "sprint/karlach-nav-02"
+ :model        "claude-sonnet-5-5"
+ :timeout-min  90
+ :gate-cmds    ["make test"]
+ :tasks [{:id "CA-080" :profile "locomotion"}
+         {:id "CA-081" :profile "locomotion"}
+         {:id "CA-083" :profile "locomotion"}]}
