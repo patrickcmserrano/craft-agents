@@ -323,3 +323,26 @@
         caps (.loadClass loader "com.craft.agents.nav.MovementCapabilities")]
     (is (some? (.getMethod solver "recoverStart"
                            (into-array Class [vox caps Integer/TYPE Integer/TYPE Integer/TYPE]))))))
+
+(deftest ca-081-approach-step-test
+  (testing "CA-081: nó 2 blocos abaixo — y mantido até chegar (regra do advance-path)"
+    (let [path [{:x 3 :y 63 :z 0 :action :WALK}]
+          r (loco/approach-step {:pos [0.5 65.0 0.5] :path path :speed 0.24 :yaw 0.0})]
+      (is (= 65.0 (second (:pos r))))
+      (is (not (:arrived? r)))
+      (is (= (:path (loco/advance-path {:pos [0.5 65.0 0.5] :path path :speed 0.24 :yaw 0.0}))
+             (:path r)))))
+  (testing "CA-081: :pitch positivo quando o próximo nó está abaixo do olho"
+    (let [r (loco/approach-step {:pos [0.5 65.0 0.5]
+                                 :path [{:x 3 :y 63 :z 0 :action :WALK}]
+                                 :speed 0.24 :yaw 0.0})]
+      (is (pos? (:pitch r)))))
+  (testing "CA-081: :pitch ~0 quando o nó está na altura do olho"
+    (let [r (loco/approach-step {:pos [0.5 65.0 0.5]
+                                 :path [{:x 5 :y 66.62 :z 0 :action :WALK}]
+                                 :speed 0.24 :yaw 0.0})]
+      (is (< (Math/abs (double (:pitch r))) 1.0))))
+  (testing "CA-081: rota vazia — arrived? true e pitch 0.0"
+    (let [r (loco/approach-step {:pos [0.5 65.0 0.5] :path [] :speed 0.24 :yaw 0.0})]
+      (is (:arrived? r))
+      (is (= 0.0 (double (:pitch r)))))))
