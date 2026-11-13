@@ -2,6 +2,7 @@
  :agent/name "Antigravity"
  :agent/role "Companheiro Tático de Escolta"
  :agent/combat-policy :fight
+ :agent/boot-spawn? false
  :agent/spawn {:dimension "minecraft:overworld" :pos [-26.0 68.0 -48.0]}
  :agent/loadout {:head "minecraft:netherite_helmet"
                  :chest "minecraft:netherite_chestplate"

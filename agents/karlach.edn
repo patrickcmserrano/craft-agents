@@ -5,7 +5,13 @@
  :agent/combat-policy :fight
  :agent/skin "karlach"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-175.0 65.0 180.0]}
+ :agent/effects [{:effect "minecraft:resistance" :amplifier 4}
+                  {:effect "minecraft:fire_resistance" :amplifier 1}]
+ ;; Loadout de runtime (item de alimentacao do santuario, CA-044).
  :agent/loadout {:mainhand "minecraft:apple"}
+ ;; Loadout aplicado no spawn (CA-088); sobrepoe :agent/loadout so no spawn.
+ :agent/spawn-loadout {:hotbar.0 "minecraft:netherite_pickaxe"
+                       :mainhand "minecraft:netherite_pickaxe"}
  :agent/quarters {:id :karlach-bedroom
                   :name "Quarto da Karlach"
                   :pos [-131.0 65.0 195.0]

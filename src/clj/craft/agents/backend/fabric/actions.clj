@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.transport :as transport :refer [uformat]]
+            [craft.agents.npc.spawn :as spawn]
             [craft.agents.npc.speech :as speech]))
 
 (defn karlach-say! [msg]
@@ -46,45 +47,8 @@
           (catch Throwable t
             (println "[craft-agents] Aviso ao anexar bridge:" (.getMessage t)))))))
   (when (transport/bridge-alive?)
-    ;; 1. Spawn Karlach no Santuário
-    (let [{:keys [value signature]} (load-skin-meta "karlach_meta.json")
-          resp (transport/send-bridge-cmd! (str "SPAWN|Karlach|-175.0|65.0|180.0|" value "|" signature))]
-      (transport/send-bridge-cmd! "CMD|gamemode survival Karlach")
-      (transport/send-bridge-cmd! "CMD|effect give Karlach minecraft:resistance infinite 4 true")
-      (transport/send-bridge-cmd! "CMD|effect give Karlach minecraft:fire_resistance infinite 1 true")
-      (transport/send-bridge-cmd! "CMD|item replace entity Karlach hotbar.0 with minecraft:netherite_pickaxe")
-      (transport/send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe")
-      (println "[craft-agents] 🔥 Karlach Server-Native conectada:" resp))
-
-    ;; 2. Spawn Capitão Picard na Ponte da USS Enterprise-D
-    (let [{:keys [value signature]} (load-skin-meta "picard_meta.json")
-          resp (transport/send-bridge-cmd! (str "SPAWN|Picard|-65.0|145.0|101.0|" value "|" signature))]
-      (transport/send-bridge-cmd! "CMD|gamemode survival Picard")
-      (transport/send-bridge-cmd! "CMD|effect give Picard minecraft:resistance infinite 4 true")
-      (transport/send-bridge-cmd! "CMD|item replace entity Picard armor.chest with minecraft:leather_chestplate[dyed_color=10031872]")
-      (transport/send-bridge-cmd! "CMD|item replace entity Picard armor.legs with minecraft:netherite_leggings")
-      (transport/send-bridge-cmd! "CMD|item replace entity Picard armor.feet with minecraft:netherite_boots")
-      (transport/send-bridge-cmd! "CMD|item replace entity Picard weapon.mainhand with minecraft:spyglass")
-      (transport/send-bridge-cmd! "CMD|item replace entity Picard weapon.offhand with minecraft:compass")
-      (println "[craft-agents] 🖖 Capitão Picard Server-Native conectado:" resp))
-
-    ;; 3. Spawn Coco no Castelo dos Touros Negros (Witch Hat Atelier)
-    (let [{:keys [value signature]} (load-skin-meta "coco_meta.json")
-          resp (transport/send-bridge-cmd! (str "SPAWN|Coco|-30.0|66.0|190.0|" value "|" signature))]
-      (transport/send-bridge-cmd! "CMD|gamemode survival Coco")
-      (transport/send-bridge-cmd! "CMD|effect give Coco minecraft:resistance infinite 4 true")
-      (transport/send-bridge-cmd! "CMD|item replace entity Coco weapon.mainhand with minecraft:feather")
-      (transport/send-bridge-cmd! "CMD|item replace entity Coco weapon.offhand with minecraft:writable_book")
-      (println "[craft-agents] ✨ Coco (Witch Hat Atelier) conectada:" resp))
-
-    ;; 4. Spawn Richeh no Castelo dos Touros Negros (Witch Hat Atelier)
-    (let [{:keys [value signature]} (load-skin-meta "richeh_meta.json")
-          resp (transport/send-bridge-cmd! (str "SPAWN|Richeh|-30.0|66.0|192.0|" value "|" signature))]
-      (transport/send-bridge-cmd! "CMD|gamemode survival Richeh")
-      (transport/send-bridge-cmd! "CMD|effect give Richeh minecraft:resistance infinite 4 true")
-      (transport/send-bridge-cmd! "CMD|item replace entity Richeh weapon.mainhand with minecraft:amethyst_shard")
-      (transport/send-bridge-cmd! "CMD|item replace entity Richeh weapon.offhand with minecraft:glow_ink_sac")
-      (println "[craft-agents] 💎 Richeh (Witch Hat Atelier) conectada:" resp))
+    ;; Spawn, gamemode, efeitos e loadout vem do registro agents/*.edn (CA-088)
+    (spawn/spawn-agents! transport/send-bridge-cmd! load-skin-meta)
     true))
 
 (defn query-online-players []

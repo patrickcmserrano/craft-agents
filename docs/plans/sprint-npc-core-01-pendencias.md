@@ -19,3 +19,11 @@
 - O escape agora cobre também barra invertida (antes só aspas); mensagens com `\` mudam de saída (era JSON inválido).
 - `make test` falha em `karlach-rain-shelter-test` (CA-060o, `shelter-route-steps` com um único `:wait`): teste e
   código de rota não são tocados por esta tarefa; não foi possível confirmar na baseline sem checkout. Verificar.
+
+## CA-088 — spawn guiado pelo registro
+
+- `:agent/spawn-loadout` (novo) existe porque o `:agent/loadout` da Karlach (`:mainhand "minecraft:apple"`) é item de runtime usado na alimentação do santuário (CA-044, teste travado). O spec pedia declarar a picareta em `:agent/loadout`; isso quebraria o CA-044. Unificar exige mudar o consumo do loadout em runtime.
+- `:agent/boot-spawn? false` mantém Antigravity fora do spawn de boot: o spawn dele é feito em outro lugar (não migrado, comportamento não verificável sem servidor vivo).
+- Ordem de spawn mudou (id alfabético: Coco, Karlach, Picard, Richeh; antes Karlach, Picard, Coco, Richeh); o log por agente agora é genérico (sem emoji por agente).
+- Armadura da Picard passou a constar em `:agent/loadout` do `picard.edn` (`:chest/:legs/:feet`); verificar se algum consumidor de runtime do loadout reage a isso.
+- Spawn real em servidor vivo (bridge 25595) não foi exercitado: só `spawn-cmds` puro e `spawn-agents!` com stub.

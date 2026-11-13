@@ -5,6 +5,7 @@
  :agent/combat-policy :flee
  :agent/skin "richeh"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-30.0 66.0 192.0]}
+ :agent/effects [{:effect "minecraft:resistance" :amplifier 4}]
  :agent/loadout {:mainhand "minecraft:amethyst_shard"
                  :offhand  "minecraft:glow_ink_sac"}
  :agent/traits {:personality :tsundere-artisan

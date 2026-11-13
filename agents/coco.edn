@@ -5,6 +5,7 @@
  :agent/combat-policy :flee
  :agent/skin "coco"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-30.0 66.0 190.0]}
+ :agent/effects [{:effect "minecraft:resistance" :amplifier 4}]
  :agent/loadout {:mainhand "minecraft:feather"
                  :offhand  "minecraft:writable_book"}
  :agent/traits {:personality :curious-optimistic

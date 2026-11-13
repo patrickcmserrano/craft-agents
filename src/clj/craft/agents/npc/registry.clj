@@ -40,7 +40,12 @@
    [:agent/voice {:optional true} Voice]
    [:agent/combat-policy {:optional true} [:enum :fight :flee :none]]
    [:agent/capabilities {:optional true} [:set :keyword]]
-   [:agent/skin {:optional true} :string]])
+   [:agent/skin {:optional true} :string]
+   [:agent/effects {:optional true} [:vector [:map
+                                              [:effect :string]
+                                              [:amplifier {:optional true} :int]]]]
+   [:agent/spawn-loadout {:optional true} [:map-of :keyword :string]]
+   [:agent/boot-spawn? {:optional true} :boolean]])
 
 (defn- read-spec [^java.io.File f]
   (try
@@ -91,6 +96,11 @@
       (->> (vals (:agents (current)))
            (filter #(= k (str/lower-case (:agent/name %))))
            first))))
+
+(defn all-agents
+  "Specs de todos os agentes do registro, ordenados por id."
+  []
+  (vec (vals (:agents (current)))))
 
 (defn agent-names [] (mapv :agent/name (vals (:agents (current)))))
 
