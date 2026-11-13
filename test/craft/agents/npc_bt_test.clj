@@ -42,16 +42,22 @@
           got       (set @ticked)]
       (is (contains? got :coco) "Coco declara :bt/root e roda a arvore")
       (is (every? with-root got) "so agente com :bt/root e ticado")
-      (is (= (disj with-root :karlach) got) "todos menos a Karlach, que segue no tick-karlach!")
+      (is (= (apply disj with-root bt-tick/self-driven) got)
+          "todos menos os que ja tem tick dedicado (Karlach, Picard, Richeh)")
+      (is (= #{:karlach :picard :richeh} bt-tick/self-driven))
       (is (= (count @ticked) (count got)) "um passo por agente"))))
 
 (deftest agents-without-bt-root-keep-their-tick-test
-  (let [ticked (atom [])]
-    (with-redefs [bt-tick/tick-agent! (fn [_ agent] (swap! ticked conj (:agent/id agent)))]
+  (let [ticked (atom [])
+        real   (registry/all-agents)
+        plain  {:agent/id :plain :agent/name "Plain"
+                :agent/spawn {:dimension "minecraft:overworld" :pos [0.0 65.0 0.0]}}]
+    (with-redefs [registry/all-agents (fn [] (conj real plain))
+                  bt-tick/tick-agent! (fn [_ agent] (swap! ticked conj (:agent/id agent)))]
       (bt-tick/tick-bt-agents! {:engine-ctx-atom (atom {}) :tick 4}))
-    (doseq [id [:picard :richeh]]
-      (is (nil? (:bt/root (registry/agent-by-id id))) (str id " nao declara :bt/root"))
-      (is (not (some #{id} @ticked)) (str id " mantem o tick atual (fora do engine de BT)")))))
+    (is (not (some #{:plain} @ticked)) "agente sem :bt/root mantem o tick atual")
+    (doseq [id [:picard :richeh :karlach]]
+      (is (not (some #{id} @ticked)) (str id " mantem o tick dedicado (tick-picard!/atelier/karlach)")))))
 
 (deftest bt-engine-runs-at-5hz-and-isolates-errors-test
   (let [ticked (atom [])]
