@@ -770,7 +770,7 @@ public final class SyntheticPlayerFactory {
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
                     { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
                         Object kPm = server.getClass().getMethod("method_3760").invoke(server);
-                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, (String) FreshNavClassLoader.forDir(new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl).loadClass("com.craft.agents.nav.BridgeAgentArg").getMethod("agentName", String[].class).invoke(null, (Object) parts));
                         if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
                     }
                     Class<?> bpCls = Class.forName("net.minecraft.class_2338", true, cl);
@@ -791,12 +791,12 @@ public final class SyntheticPlayerFactory {
                 int bx = Integer.parseInt(parts[1]);
                 int by = Integer.parseInt(parts[2]);
                 int bz = Integer.parseInt(parts[3]);
-                boolean targetOpen = parts.length < 5 || Boolean.parseBoolean(parts[4]);
+                boolean targetOpen = parts.length < 5 || parts[4].startsWith("agent=") || Boolean.parseBoolean(parts[4]);
                 try {
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
                     { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
                         Object kPm = server.getClass().getMethod("method_3760").invoke(server);
-                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, (String) FreshNavClassLoader.forDir(new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl).loadClass("com.craft.agents.nav.BridgeAgentArg").getMethod("agentName", String[].class).invoke(null, (Object) parts));
                         if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
                     }
                     Class<?> bpCls = Class.forName("net.minecraft.class_2338", true, cl);
@@ -843,7 +843,7 @@ public final class SyntheticPlayerFactory {
             if ("PATH".equals(op) && parts.length >= 3) {
                 String[] from = parts[1].split(",");
                 String[] to = parts[2].split(",");
-                double radius = parts.length >= 4 ? Double.parseDouble(parts[3]) : 1.5;
+                double radius = parts.length >= 4 && !parts[3].startsWith("agent=") ? Double.parseDouble(parts[3]) : 1.5;
                 int fx = (int) Math.floor(Double.parseDouble(from[0]));
                 int fy = (int) Math.floor(Double.parseDouble(from[1]));
                 int fz = (int) Math.floor(Double.parseDouble(from[2]));
@@ -857,7 +857,7 @@ public final class SyntheticPlayerFactory {
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
                     { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
                         Object kPm = server.getClass().getMethod("method_3760").invoke(server);
-                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, (String) FreshNavClassLoader.forDir(new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl).loadClass("com.craft.agents.nav.BridgeAgentArg").getMethod("agentName", String[].class).invoke(null, (Object) parts));
                         if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
                     }
                     Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);
@@ -910,7 +910,7 @@ public final class SyntheticPlayerFactory {
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
                     { // mundo real da Karlach (Nether/End), sem metodo novo: hot-swap nao aceita
                         Object kPm = server.getClass().getMethod("method_3760").invoke(server);
-                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, "Karlach");
+                        Object kPl = kPm.getClass().getMethod("method_14566", String.class).invoke(kPm, (String) FreshNavClassLoader.forDir(new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl).loadClass("com.craft.agents.nav.BridgeAgentArg").getMethod("agentName", String[].class).invoke(null, (Object) parts));
                         if (kPl != null) overworld = kPl.getClass().getMethod("method_51469").invoke(kPl);
                     }
                     Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);

@@ -57,3 +57,8 @@
 - Perdeu o líder por 60 ticks: a Karlach volta a `:sanctuary-patrol`; os demais voltam a `:idle`.
 - `tick-other-followers!` (em `karlach-tick`) percorre `(:agent-states ctx)`; a meta `:follow-player` da CA-091 ainda precisa
   gravar `:mode :follow` no estado do agente (não verificado aqui). Teste de watchdog/teleporte usa ponte stubada.
+
+## CA-095 — verificação ao vivo (pendente)
+- Verificar com um agente no Nether (ex.: Picard) que `PATH|...|agent=Picard`, `GROUND|x|y|z|agent=Picard`, `BLOCK` e `TOGGLE_PORTAL` resolvem o mundo do jogador nomeado. Exige servidor Fabric real; não executado na worktree.
+- A `SyntheticPlayerFactory` só teve corpos de método alterados (hot-swap): o novo helper `com.craft.agents.nav.BridgeAgentArg` é carregado pelo `FreshNavClassLoader` a partir de `target/classes` (exige `make compile-java`).
+- Callers (`request-path3d`, `generate-walk-steps`) ainda não repassam `:agent-name`; sem o campo o padrão segue "Karlach".

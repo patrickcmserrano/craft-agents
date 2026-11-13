@@ -11,12 +11,13 @@
 
 (defn raw-request-path3d
   "Requisita rota A* 3D com percepcao real de voxels e portais via ponte in-server."
-  [[fx fy fz] [tx ty tz] & [radius]]
+  [[fx fy fz] [tx ty tz] & [radius & {:keys [agent-name]}]]
   (let [r (or radius 1.2)
-        cmd (uformat "PATH|%.1f,%.1f,%.1f|%.1f,%.1f,%.1f|%.1f"
-                    (double fx) (double fy) (double fz)
-                    (double tx) (double ty) (double tz)
-                    (double r))
+        cmd (str (uformat "PATH|%.1f,%.1f,%.1f|%.1f,%.1f,%.1f|%.1f"
+                          (double fx) (double fy) (double fz)
+                          (double tx) (double ty) (double tz)
+                          (double r))
+                 (when agent-name (str "|agent=" agent-name)))
         raw (transport/send-bridge-cmd! cmd)]
     (when (str/starts-with? (or raw "") "OK|")
       (let [steps-str (subs raw 3)
@@ -32,10 +33,11 @@
 (defn query-ground-y
   "Pergunta a ponte pelo y em pe da coluna de [x y z] (op GROUND, CA-063).
    Devolve o y como double, ou nil em erro, ERR ou resposta malformada."
-  [[x y z]]
+  [[x y z] & {:keys [agent-name]}]
   (let [cmd (str "GROUND|" (long (Math/floor (double x)))
                  "|" (long (Math/floor (double y)))
-                 "|" (long (Math/floor (double z))))
+                 "|" (long (Math/floor (double z)))
+                 (when agent-name (str "|agent=" agent-name)))
         raw (try (transport/send-bridge-cmd! cmd) (catch Throwable _ nil))]
     (when (and (string? raw) (str/starts-with? raw "OK|"))
       (try (Double/parseDouble (str/trim (subs raw 3)))
