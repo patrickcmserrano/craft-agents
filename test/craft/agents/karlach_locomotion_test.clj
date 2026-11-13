@@ -1,6 +1,7 @@
 (ns craft.agents.karlach-locomotion-test
   "Locomocao da Karlach: A* recupera partida dentro de solido (CA-062)."
   (:require [clojure.test :refer [deftest is testing]]
+            [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.fixtures.world-fixture :as wf])
@@ -81,3 +82,68 @@
       (is (nil? (nav/query-ground-y [0.0 65.0 0.0]))))
     (with-redefs [transport/send-bridge-cmd! (fn [_] "OK|abc")]
       (is (nil? (nav/query-ground-y [0.0 65.0 0.0]))))))
+
+(defn- hdist [[x _ z] {nx :x nz :z}]
+  (let [dx (- (+ nx 0.5) x) dz (- (+ nz 0.5) z)]
+    (Math/sqrt (+ (* dx dx) (* dz dz)))))
+
+(deftest ca-064-advance-path-test
+  (testing "descida: mantem o y ate chegar a <= 0,35 do no"
+    (let [node {:x 1 :y 66 :z 0 :action :DROP_DOWN}
+          r1 (loco/advance-path {:pos [0.5 69.0 0.5] :path [node] :speed 0.24})]
+      (is (= 69.0 (second (:pos r1))))
+      (is (> (first (:pos r1)) 0.5))
+      (is (false? (:arrived? r1)))
+      (loop [r r1 n 0]
+        (let [d (hdist (:pos r) node)]
+          (cond
+            (> n 50) (is false "nao chegou")
+            (:arrived? r) (is (= 66.0 (second (:pos r))))
+            :else (do (is (= 69.0 (second (:pos r))) "y so muda ao chegar")
+                      (is (> d 0.35))
+                      (recur (loco/advance-path {:pos (:pos r) :path (:path r) :speed 0.24}) (inc n))))))))
+  (testing "subida: y do no ja no primeiro tick"
+    (let [r (loco/advance-path {:pos [0.5 69.0 0.5]
+                                :path [{:x 1 :y 70 :z 0 :action :JUMP_UP}] :speed 0.24})]
+      (is (= 70.0 (second (:pos r))))))
+  (testing "sem tick ocioso: consome o no 1 e anda em direcao ao 2"
+    (let [n1 {:x 0 :y 65 :z 0 :action :WALK}
+          n2 {:x 3 :y 65 :z 0 :action :WALK}
+          r (loco/advance-path {:pos [0.5 65.0 0.5] :path [n1 n2] :speed 0.24})]
+      (is (= [n2] (:path r)))
+      (is (< (Math/abs (- (first (:pos r)) 0.74)) 1e-9))
+      (is (false? (:arrived? r)))
+      (is (= n2 (:node r)))))
+  (testing "nunca ultrapassa o no"
+    (let [r (loco/advance-path {:pos [0.5 65.0 0.5]
+                                :path [{:x 1 :y 65 :z 0 :action :WALK}] :speed 5.0})]
+      (is (= [1.5 65.0 0.5] (:pos r)))
+      (is (true? (:arrived? r)))
+      (is (empty? (:path r)))))
+  (testing "SWIM: y do no + 0,2"
+    (let [r (loco/advance-path {:pos [0.5 63.0 0.5]
+                                :path [{:x 3 :y 63 :z 0 :action :SWIM}] :speed 0.24})]
+      (is (< (Math/abs (- (second (:pos r)) 63.2)) 1e-9))))
+  (testing "yaw mantido sem deslocamento"
+    (let [r (loco/advance-path {:pos [0.5 65.0 0.5] :path [] :speed 0.24 :yaw 42.0})]
+      (is (= 42.0 (double (:yaw r))))
+      (is (true? (:arrived? r))))))
+
+(deftest ca-064-needs-replan-test
+  (let [far [{:x 10 :y 65 :z 0 :action :WALK}]]
+    (testing "lider subiu 4 blocos"
+      (is (true? (loco/needs-replan? {:path far :pos [5.5 65.0 0.5]
+                                      :target [0.0 70.0 0.0] :last-target [0.0 66.0 0.0]}))))
+    (testing "lider andou 1 bloco"
+      (is (false? (loco/needs-replan? {:path far :pos [9.5 65.0 0.5]
+                                       :target [1.0 66.0 0.0] :last-target [0.0 66.0 0.0]}))))
+    (testing "rota vazia"
+      (is (true? (loco/needs-replan? {:path [] :pos [0.5 65.0 0.5]
+                                      :target [0.0 66.0 0.0] :last-target [0.0 66.0 0.0]}))))
+    (testing "pos a 3 blocos do proximo no"
+      (is (true? (loco/needs-replan? {:path far :pos [7.5 65.0 0.5]
+                                      :target [0.0 66.0 0.0] :last-target [0.0 66.0 0.0]}))))))
+
+(deftest ca-064-follow-speed-test
+  (is (= 0.28 (loco/follow-speed 10.0)))
+  (is (= 0.22 (loco/follow-speed 3.0))))
