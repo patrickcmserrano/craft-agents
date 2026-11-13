@@ -58,6 +58,21 @@
          :arrived? (empty? path2)
          :node (first path2)}))))
 
+(defn approach-step
+  "Passo de aproximacao do modo :mining (CA-081): advance-path mais :pitch, do
+   olho (y + 1,62) ate o centro do proximo no da rota resultante; 0.0 sem no."
+  [args]
+  (let [r (advance-path args)
+        [_ ey _] (:pos r)]
+    (assoc r :pitch
+           (if-let [node (first (:path r))]
+             (let [[nx ny nz] (node-center node)
+                   [x _ z] (:pos r)
+                   dx (- nx x) dz (- nz z)]
+               (double (nav/compute-pitch (- ny (+ (double ey) 1.62))
+                                          (Math/sqrt (+ (* dx dx) (* dz dz))))))
+             0.0))))
+
 (defn needs-replan?
   "Rota vazia, alvo movido > 3,0 em 3D desde last-target, ou pos > 2,5 (horizontal)
    do centro do proximo no."

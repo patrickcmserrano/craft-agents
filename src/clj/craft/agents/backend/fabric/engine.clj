@@ -804,24 +804,16 @@
                                                            (request-path3d [cx cy cz] [stand-x stand-y stand-z] 1.0)
                                                            path-queue)]
                                          (if-let [next-node (first active-path)]
-                                           (let [nx (+ (double (:x next-node)) 0.5)
-                                                 ny (double (:y next-node))
-                                                 nz (+ (double (:z next-node)) 0.5)
-                                                 ndx (- nx cx)
-                                                 ndz (- nz cz)
-                                                 ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
-                                                 nyaw (compute-yaw ndx ndz)
-                                                 npitch (compute-pitch (- ny (+ (double cy) 1.62)) ndist)]
-                                             (if (<= ndist 0.4)
-                                               (swap! nav-state assoc-in [:active-mining :path] (vec (rest active-path)))
-                                               (let [step-d (min 0.24 (max 0.05 ndist))
-                                                     safe-ndist (max 0.001 ndist)
-                                                     step-x (+ cx (* (/ ndx safe-ndist) step-d))
-                                                     step-z (+ cz (* (/ ndz safe-ndist) step-d))]
-                                                 (send-bridge-cmd!
-                                                  (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
-                                                          step-x ny step-z nyaw npitch))
-                                                 (swap! nav-state assoc :pos [step-x ny step-z] :yaw nyaw :pitch npitch))))
+                                           (let [{[step-x step-y step-z] :pos
+                                                  nyaw :yaw npitch :pitch rpath :path}
+                                                 (loco/approach-step {:pos [cx cy cz] :path active-path
+                                                                      :speed 0.24 :yaw (:yaw st)})]
+                                             (send-bridge-cmd!
+                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
+                                                      step-x step-y step-z nyaw npitch))
+                                             (swap! nav-state #(-> %
+                                                                   (assoc :pos [step-x step-y step-z] :yaw nyaw :pitch npitch)
+                                                                   (assoc-in [:active-mining :path] rpath))))
                                            ;; Sem caminho A* alcançável: minério inacessível sem quebrar outras rochas.
                                            ;; Descarta sem atravessar parede!
                                            (swap! nav-state #(-> %
