@@ -830,6 +830,30 @@ public final class SyntheticPlayerFactory {
                 }
             }
 
+            if ("GROUND".equals(op) && parts.length >= 4) {
+                try {
+                    int gx = Integer.parseInt(parts[1].trim());
+                    int gy = Integer.parseInt(parts[2].trim());
+                    int gz = Integer.parseInt(parts[3].trim());
+                    java.net.URLClassLoader pathLoader = new java.net.URLClassLoader(
+                            new java.net.URL[]{ new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/").toURI().toURL() },
+                            cl
+                    );
+                    Class<?> voxCls = pathLoader.loadClass("com.craft.agents.fabric.LiveWorldVoxelAccessor");
+                    Object overworld = server.getClass().getMethod("method_30002").invoke(server);
+                    Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);
+
+                    Class<?> snapCls = pathLoader.loadClass("com.craft.agents.nav.GroundSnap");
+                    Class<?> voxInterface = pathLoader.loadClass("com.craft.agents.api.VoxelAccessor");
+                    Method snapMethod = snapCls.getMethod("findStandableY",
+                            voxInterface, int.class, int.class, int.class, int.class, int.class);
+                    int found = (Integer) snapMethod.invoke(null, liveVox, gx, gy, gz, 4, 6);
+                    return found == Integer.MIN_VALUE ? "ERR|NO_GROUND" : "OK|" + found;
+                } catch (Throwable t) {
+                    return "ERR|" + t.getMessage();
+                }
+            }
+
             if ("LEASH".equals(op) && parts.length >= 2) {
                 String pName = parts[1];
                 String targetType = parts.length >= 3 ? parts[2].trim().toLowerCase() : "";

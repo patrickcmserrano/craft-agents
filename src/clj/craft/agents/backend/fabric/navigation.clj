@@ -29,6 +29,18 @@
                    :action (keyword act)}))
               parts)))))
 
+(defn query-ground-y
+  "Pergunta a ponte pelo y em pe da coluna de [x y z] (op GROUND, CA-063).
+   Devolve o y como double, ou nil em erro, ERR ou resposta malformada."
+  [[x y z]]
+  (let [cmd (str "GROUND|" (long (Math/floor (double x)))
+                 "|" (long (Math/floor (double y)))
+                 "|" (long (Math/floor (double z))))
+        raw (try (transport/send-bridge-cmd! cmd) (catch Throwable _ nil))]
+    (when (and (string? raw) (str/starts-with? raw "OK|"))
+      (try (Double/parseDouble (str/trim (subs raw 3)))
+           (catch Throwable _ nil)))))
+
 (defn request-path3d
   "Ponto de entrada unificado para busca de caminhos 3D.
    Delega dinamicamente se craft.agents.backend.fabric/request-path3d tiver sido redefinido (ex: em suites de teste)."

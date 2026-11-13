@@ -188,7 +188,7 @@ public final class PathSolver3D {
         return new PathResult(PathResult.Status.SUCCESS, steps, totalCost, visitedNodes, elapsedMicros);
     }
 
-    private static boolean isValidStart(VoxelAccessor world, MovementCapabilities caps, int x, int y, int z) {
+    static boolean isValidStart(VoxelAccessor world, MovementCapabilities caps, int x, int y, int z) {
         CollisionType feet = world.getCollisionType(x, y, z);
         if (feet == CollisionType.SOLID || world.getCollisionType(x, y + 1, z) == CollisionType.SOLID) {
             return false;
