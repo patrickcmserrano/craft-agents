@@ -143,6 +143,52 @@
         "direction": "out"
       },
       "closure": ["declares:both"]
+    },
+    "locomotion": {
+      "description": "locomotion of the synthetic agents (sprint karlach-nav): the A* PathSolver3D and voxel accessors in Java, the bridge ops (MOVE/PATH/PLAYERS/BLOCK), the Clojure follow/patrol executors and the navigation tests",
+      "roots": [
+        {
+          "id": "nav-java",
+          "node_types": ["file"],
+          "path_globs": ["src/java/com/craft/agents/nav/**", "src/java/com/craft/agents/api/**"],
+          "priority": "critical",
+          "why": "the A* solver, goals, movement capabilities and the VoxelAccessor contract"
+        },
+        {
+          "id": "fabric-java-locomotion",
+          "node_types": ["file"],
+          "path_globs": ["src/java/com/craft/agents/fabric/LiveWorldVoxelAccessor.java", "src/java/com/craft/agents/fabric/ChunkSnapshotVoxelAccessor.java", "src/java/com/craft/agents/fabric/SyntheticPlayerFactory.java", "src/java/com/craft/agents/fabric/SyntheticMotorController.java"],
+          "priority": "critical",
+          "why": "the live voxel view and the in-server bridge (MOVE, PATH, PLAYERS, BLOCK ops)"
+        },
+        {
+          "id": "locomotion-namespaces",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.backend.fabric", "craft.agents.backend.fabric.navigation", "craft.agents.backend.fabric.engine", "craft.agents.backend.fabric.goals", "craft.agents.backend.fabric.locomotion", "craft.agents.backend.fabric.watchdog"],
+          "defined_in_repository": true,
+          "why": "the 20Hz executors that turn A* paths into MOVE commands"
+        },
+        {
+          "id": "locomotion-tests",
+          "node_types": ["namespace"],
+          "name_globs": ["craft.agents.epic3-navigation-3d-test", "craft.agents.karlach-locomotion-test", "craft.agents.karlach-rain-shelter-test", "craft.agents.test-runner"],
+          "defined_in_repository": true,
+          "why": "how navigation is tested and how a new test namespace is registered in the runner"
+        },
+        {
+          "id": "locomotion-docs",
+          "node_types": ["file"],
+          "path_globs": ["docs/11-*.md", "docs/12-*.md"],
+          "priority": "critical",
+          "why": "the mineflayer gap analysis (11) and the sprint backlog with the task specs (12)"
+        }
+      ],
+      "expand": {
+        "edge_types": ["requires"],
+        "hops": 1,
+        "direction": "out"
+      },
+      "closure": ["declares:both"]
     }
   }
 }

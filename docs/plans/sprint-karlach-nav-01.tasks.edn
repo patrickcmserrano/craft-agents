@@ -1,0 +1,21 @@
+;; Plano de execução da sprint karlach-nav-01 para o sprint-runner
+;; (/home/pace/dev/scripts/sprint_runner.clj): swe + CGE (repo-index, perfil
+;; `locomotion`) + small-router, Claude Code Sonnet 5.5.
+;; Ordem = ordem do backlog (docs/12-backlog-paridade-mineflayer.md); cada
+;; tarefa parte da branch da anterior, a primeira de sprint/karlach-nav-01.
+;; Deploy e verificações ao vivo (doc 11 §8) ficam fora: dependem do servidor.
+{:sprint       "karlach-nav-01"
+ :repo         "/home/pace/dev/minecraft/craft-agents"
+ :project      "craft-agents"
+ :spec-doc     "docs/12-backlog-paridade-mineflayer.md"
+ :pending-doc  "docs/plans/sprint-karlach-nav-01-pendencias.md"
+ :base-branch  "sprint/karlach-nav-01"
+ :model        "claude-sonnet-5-5"
+ :timeout-min  90
+ :gate-cmds    ["make test"]
+ :tasks [{:id "CA-062" :profile "locomotion"}
+         {:id "CA-063" :profile "locomotion"}
+         {:id "CA-064" :profile "locomotion"}
+         {:id "CA-065" :profile "locomotion"}
+         {:id "CA-066" :profile "locomotion"}
+         {:id "CA-067" :profile "locomotion"}]}
