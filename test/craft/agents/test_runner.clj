@@ -27,7 +27,8 @@
             [craft.agents.engine-characterization-test]
             [craft.agents.goals-characterization-test]
             [craft.agents.npc.registry-test]
-            [craft.agents.npc-speech-test]))
+            [craft.agents.npc-speech-test]
+            [craft.agents.npc-spawn-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
