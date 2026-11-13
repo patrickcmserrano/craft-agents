@@ -5,6 +5,7 @@
   (:require [clojure.string :as str]
             [malli.core :as m]
             [craft.agents.cognition.semantic-router :as router]
+            [craft.agents.npc.addressing :as addressing]
             [craft.agents.schemas :as schemas]))
 
 (def IntentType
@@ -199,7 +200,7 @@
 (defn extract-teach-instruction
   "Extrai o payload da instrução de aprendizado de skill removendo menções e prefixos."
   [raw-text]
-  (let [stripped (str/replace raw-text #"(?i)^[!/]?(karlach|picard)[,\s:]*" "")]
+  (let [stripped (addressing/strip-addressing raw-text)]
     (if-let [m (re-find #"(?i)\b(?:aprend\w*|ensin\w*|nova skill|novo comando|criar skill|crie a skill)[,\s:]*(.*)$" stripped)]
       (str/trim (second m))
       (str/trim stripped))))

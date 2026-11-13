@@ -432,11 +432,28 @@
                  :reason :UNRECOGNIZED_STEPS
                  :message (str "Não foi possível reconhecer ações válidas em: '" trimmed "'")}))))))))
 
+(defn custom-anchors
+  "Âncoras (aliases) da skill no Semantic Router: o texto puro e a versão prefixada com
+   o nome do agente que aprendeu (default \"karlach\"). CA-090."
+  [agent-name {:keys [body clean-name skill-name raw]}]
+  (let [prefix  (str/lower-case (or agent-name "karlach"))
+        pref    (fn [s] (str prefix " " s))
+        no-co   (str/replace body #"(?i)\s+(?:comigo|junto|aqui)" "")
+        raw-new (when (not= raw body) raw)]
+    (vec (distinct
+          (remove str/blank?
+                  [body (pref body)
+                   no-co (pref no-co)
+                   clean-name (pref clean-name)
+                   skill-name
+                   raw-new (when raw-new (pref raw-new))])))))
+
 (defn synthesize-and-register-skill-from-chat!
   "Sintetizador do Sistema 2 para Linguagem Natural via Chat (CA-037/CA-040).
    Converte a instrução do chat numa árvore Malli segura, valida, salva em skills/
-   e registra a nova rota no Semantic Router."
-  [skill-registry skills-dir raw-instruction speaker & [{:keys [routes-dir] :or {routes-dir "agents/routes"}}]]
+   e registra a nova rota no Semantic Router. Opção `:agent-name` (default
+   \"karlach\") define o agente que aprendeu e prefixa os aliases (CA-090)."
+  [skill-registry skills-dir raw-instruction speaker & [{:keys [routes-dir agent-name] :or {routes-dir "agents/routes"}}]]
   (let [{:keys [name body]} (parse-instruction-name-and-body raw-instruction)]
     (if (empty? body)
       {:ok? false :reason :EMPTY_INSTRUCTION :message "Instrução de skill vazia"}
@@ -448,18 +465,10 @@
                 clean-name   (str/replace (:name ast-res) #"[-_]" " ")
                 trimmed-body (str/trim (or body ""))
                 trimmed-raw  (str/trim (or raw-instruction ""))
-                custom-anchors (vec
-                                (distinct
-                                 (remove str/blank?
-                                         [trimmed-body
-                                          (str "karlach " trimmed-body)
-                                          (str/replace trimmed-body #"(?i)\s+(?:comigo|junto|aqui)" "")
-                                          (str "karlach " (str/replace trimmed-body #"(?i)\s+(?:comigo|junto|aqui)" ""))
-                                          clean-name
-                                          (str "karlach " clean-name)
-                                          (:name ast-res)
-                                          (when (not= trimmed-raw trimmed-body) trimmed-raw)
-                                          (when (not= trimmed-raw trimmed-body) (str "karlach " trimmed-raw))])))
+                custom-anchors (custom-anchors agent-name {:body trimmed-body
+                                                           :clean-name clean-name
+                                                           :skill-name (:name ast-res)
+                                                           :raw trimmed-raw})
                 skill-def {:skill/id         skill-id
                            :skill/name       (str "Habilidade " (:name ast-res))
                            :skill/author     (str "Player-" (or speaker "pace"))

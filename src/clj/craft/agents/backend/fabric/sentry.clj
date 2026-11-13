@@ -10,7 +10,8 @@
             [craft.agents.backend.fabric.transport :as transport :refer [uformat]]
             [craft.agents.cognition.critic :as critic]
             [craft.agents.cognition.grounding :as grounding]
-            [craft.agents.cognition.intent :as intent]))
+            [craft.agents.cognition.intent :as intent]
+            [craft.agents.npc.addressing :as addressing]))
 
 (defonce ^:private global-seen-chat (atom {}))
 
@@ -184,19 +185,24 @@
                                           (atelier/richeh-say! text)))))
 
        ;; 1. Comandos para Karlach (Pipeline Cognitivo Desacoplado: Router -> Grounding -> Multimethod)
-      (when (or (str/includes? lower "karlach")
-                (str/starts-with? lower "!karlach"))
+      ;; CA-090: qualquer agente do registro pode ser chamado pelo nome; o intent leva
+      ;; :agent/id. Metas genericas por agente chamado sao a CA-091; ate la so a
+      ;; Karlach executa a meta, os demais apenas registram a rota.
+      (doseq [agent-id (addressing/addressed-agents msg)]
         (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
         (let [t0         (System/currentTimeMillis)
-              intent-res (intent/classify-intent-semantic msg speaker)
-              dt         (- (System/currentTimeMillis) t0)
-              goal-spec  (grounding/ground-goal intent-res)]
+              intent-res (assoc (intent/classify-intent-semantic msg speaker)
+                                :agent/id agent-id)
+              dt         (- (System/currentTimeMillis) t0)]
           (record-cognitive-event! engine-ctx-atom :router "System 1 Intent Router"
-                                   (str "Intenção: " (:intent/type intent-res)
+                                   (str "Agente: " (name agent-id)
+                                        " | Intenção: " (:intent/type intent-res)
                                         " | Confiança: " (int (* 100 (:intent/confidence intent-res 0.0))) "%"
                                         " | Latência: " dt "ms"
                                         " | Slots: " (:intent/slots intent-res)))
-          (goals/execute-karlach-goal! goal-spec engine-ctx-atom nav-state sanctuary-route)))
+          (when (= :karlach agent-id)
+            (goals/execute-karlach-goal! (grounding/ground-goal intent-res)
+                                         engine-ctx-atom nav-state sanctuary-route))))
 
       ;; 2. Previsão do Tempo e Comandos para o Capitão Picard
       (cond
