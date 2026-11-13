@@ -18,7 +18,8 @@
             [craft.agents.sentry-test]
             [craft.agents.astrophysics-test]
             [craft.agents.karlach-rain-shelter-test]
-            [craft.agents.karlach-locomotion-test]))
+            [craft.agents.karlach-locomotion-test]
+            [craft.agents.karlach-strike-cooldown-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -38,7 +39,8 @@
    {:epic 16 :title "Epico VII (Sentry) — Deduplicacao de Chat por Identidade de Evento" :ns 'craft.agents.sentry-test}
    {:epic 14 :title "Epico V (Astrophysics) — Efemerides, HR Starfield & Consciencia Celeste (CA-050..CA-052)" :ns 'craft.agents.astrophysics-test}
    {:epic 15 :title "Epico VI (Clima) — Abrigo Autonomo da Karlach contra Chuva (CA-060)" :ns 'craft.agents.karlach-rain-shelter-test}
-   {:epic 17 :title "Epico VIII (Locomocao) — Karlach: A* recupera partida, walk-step, watchdog e classes frescas (CA-062..CA-080)" :ns 'craft.agents.karlach-locomotion-test}])
+   {:epic 17 :title "Epico VIII (Locomocao) — Karlach: A* recupera partida, walk-step, watchdog e classes frescas (CA-062..CA-080)" :ns 'craft.agents.karlach-locomotion-test}
+   {:epic 18 :title "Epico IX (Combate) — Karlach: cooldown de golpe melee" :ns 'craft.agents.karlach-strike-cooldown-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]

@@ -46,6 +46,15 @@
                      :speed 0.16
                      :yaw (:yaw pst)})))
 
+(def strike-cooldown-ticks
+  "Ticks (20Hz) entre golpes melee da Karlach: ~1s, cadencia de machado."
+  20)
+
+(defn strike-ready?
+  "true se ja passou o cooldown desde o ultimo golpe (`last-tick` nil = nunca golpeou)."
+  [last-tick tick]
+  (or (nil? last-tick) (>= (- tick last-tick) strike-cooldown-ticks)))
+
 (defn evaluate-combat-preemption
   "Avalia preempção de combate reativo, tether anti-kiting de escolta e proteção de embarque (CA-049).
    Retorna mapa de decisão:
@@ -649,10 +658,12 @@
                                          hdz        (- (double mz) (double cz))
                                          hyaw       (compute-yaw hdx hdz)]
                                      (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz hyaw))
-                                     (when target-id (attack-hostile-target! "Karlach" target-id))
-                                     (send-bridge-cmd! "SWING|Karlach")
-                                     (send-bridge-cmd! (uformat "CMD|particle minecraft:crit %.2f %.2f %.2f 0.3 0.3 0.3 0.1 5 normal"
-                                                               (double mx) (+ (double my) 1.0) (double mz)))
+                                     (when (strike-ready? (:last-strike-tick @nav-state) tick)
+                                       (swap! nav-state assoc :last-strike-tick tick)
+                                       (when target-id (attack-hostile-target! "Karlach" target-id))
+                                       (send-bridge-cmd! "SWING|Karlach")
+                                       (send-bridge-cmd! (uformat "CMD|particle minecraft:crit %.2f %.2f %.2f 0.3 0.3 0.3 0.1 5 normal"
+                                                                 (double mx) (+ (double my) 1.0) (double mz))))
                                      (when (zero? (mod tick 30))
                                        (karlach-say! "Toma essa! Não mexe com meu esquadrão! 🔥 🛡️"))
                                      (swap! engine-ctx-atom assoc
