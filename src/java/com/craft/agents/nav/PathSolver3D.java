@@ -42,10 +42,30 @@ public final class PathSolver3D {
             goal = new GoalBlock(startX, startY, startZ);
         }
 
+        // CA-062: partida dentro de sólido -> recupera uma partida válida próxima
+        final int originalY = startY;
+        PathNodeStep recoveryStep = null;
+        if (!isValidStart(world, capabilities, startX, startY, startZ)) {
+            long rec = recoverStart(world, capabilities, startX, startY, startZ);
+            if (rec == -1L) {
+                return new PathResult(PathResult.Status.NO_PATH, List.of(), 0.0, 0,
+                    (System.nanoTime() - startTime) / 1000L);
+            }
+            startX = PackedPos.unpackX(rec);
+            startY = PackedPos.unpackY(rec);
+            startZ = PackedPos.unpackZ(rec);
+            recoveryStep = new PathNodeStep(startX, startY, startZ,
+                startY > originalY ? PathNodeStep.StepAction.JUMP_UP : PathNodeStep.StepAction.WALK, null);
+        }
+
         long startPacked = PackedPos.pack(startX, startY, startZ);
         if (goal.isSatisfied(startX, startY, startZ)) {
             List<PathNodeStep> steps = new ArrayList<>();
-            steps.add(new PathNodeStep(startX, startY, startZ, PathNodeStep.StepAction.WALK, null));
+            if (recoveryStep != null) {
+                steps.add(recoveryStep);
+            } else {
+                steps.add(new PathNodeStep(startX, startY, startZ, PathNodeStep.StepAction.WALK, null));
+            }
             return new PathResult(PathResult.Status.SUCCESS, steps, 0.0, 1, 0L);
         }
 
@@ -160,9 +180,50 @@ public final class PathSolver3D {
             curr = cameFrom.get(curr);
         }
         Collections.reverse(steps);
+        if (recoveryStep != null) {
+            steps.add(0, recoveryStep);
+        }
 
         double totalCost = gScores.getOrDefault(bestEndPacked, 0.0);
         return new PathResult(PathResult.Status.SUCCESS, steps, totalCost, visitedNodes, elapsedMicros);
+    }
+
+    private static boolean isValidStart(VoxelAccessor world, MovementCapabilities caps, int x, int y, int z) {
+        CollisionType feet = world.getCollisionType(x, y, z);
+        if (feet == CollisionType.SOLID || world.getCollisionType(x, y + 1, z) == CollisionType.SOLID) {
+            return false;
+        }
+        return feet == CollisionType.LIQUID || caps.canStandOn(world, x, y - 1, z);
+    }
+
+    /**
+     * Procura partida válida a partir de uma posição possivelmente dentro de sólido (CA-062).
+     * Ordem: própria posição; mesma coluna y+1..y+3; 8 colunas vizinhas (cardinais, depois
+     * diagonais) com dy em 0,+1,-1,+2,+3. Devolve posição empacotada ou -1L.
+     */
+    public static long recoverStart(VoxelAccessor world, MovementCapabilities caps, int x, int y, int z) {
+        if (caps == null) {
+            caps = MovementCapabilities.defaults();
+        }
+        if (isValidStart(world, caps, x, y, z)) {
+            return PackedPos.pack(x, y, z);
+        }
+        for (int dy = 1; dy <= 3; dy++) {
+            if (isValidStart(world, caps, x, y + dy, z)) {
+                return PackedPos.pack(x, y + dy, z);
+            }
+        }
+        final int[] dys = {0, 1, -1, 2, 3};
+        for (int[][] group : new int[][][] {CARDINAL_DIRS, DIAGONAL_DIRS}) {
+            for (int[] d : group) {
+                for (int dy : dys) {
+                    if (isValidStart(world, caps, x + d[0], y + dy, z + d[1])) {
+                        return PackedPos.pack(x + d[0], y + dy, z + d[1]);
+                    }
+                }
+            }
+        }
+        return -1L;
     }
 
     /**
