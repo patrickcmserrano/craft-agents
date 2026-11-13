@@ -5,16 +5,11 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [craft.agents.backend.fabric.locomotion :as loco]
-            [craft.agents.backend.fabric.transport :as transport :refer [uformat]]))
+            [craft.agents.backend.fabric.transport :as transport :refer [uformat]]
+            [craft.agents.npc.speech :as speech]))
 
 (defn karlach-say! [msg]
-  (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "execute at Karlach run tellraw @a[distance=..16] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"Karlach\",\"color\":\"red\",\"bold\":true},"
-                      "{\"text\":\"> \",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"" safe-msg "\",\"color\":\"red\"}]")]
-    (transport/send-bridge-cmd! (str "CMD|" json-cmd))
-    (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:block.campfire.crackle master @a[distance=..24] ~ ~ ~ 0.9 1.2")))
+  (speech/say! :karlach msg))
 
 (defn teleport-agent-to!
   "Teleporta um agente sintetico pelo op MOVE da bridge. NAO use /tp vanilla:

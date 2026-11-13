@@ -5,7 +5,8 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
-            [craft.agents.backend.fabric.transport :as transport]))
+            [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.npc.speech :as speech]))
 
 (defonce ^:private real-weather-cache
   (atom {:updated-at 0
@@ -102,13 +103,10 @@
 (def picard-stations (build-picard-stations))
 
 (defn picard-say! [msg]
-  (let [safe-msg (str/replace msg "\"" "\\\"")
-        json-cmd (str "execute at Picard run tellraw @a[distance=..16] [{\"text\":\"<\",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"Picard\",\"color\":\"aqua\",\"bold\":true},"
-                      "{\"text\":\"> \",\"color\":\"dark_gray\"},"
-                      "{\"text\":\"" safe-msg "\",\"color\":\"white\"}]")]
-    (transport/send-bridge-cmd! (str "CMD|" json-cmd))
-    (transport/send-bridge-cmd! "CMD|execute at Picard run playsound minecraft:block.beacon.ambient master @a[distance=..32] ~ ~ ~ 0.8 1.4")))
+  ;; opts preservam a saida historica (a voz do registro do Picard e outra).
+  (speech/say! :picard msg {:name-color "aqua" :color "white" :radius 16
+                            :sound "minecraft:block.beacon.ambient" :sound-radius 32
+                            :volume "0.8" :pitch "1.4"}))
 
 (defn picard-broadcast-weather!
   "Emite o Boletim Meteorológico Orbital (Minecraft) e Planetário (Terra) pelo Capitão Picard."
