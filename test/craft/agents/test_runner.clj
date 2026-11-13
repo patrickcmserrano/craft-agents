@@ -34,7 +34,8 @@
             [craft.agents.npc-goals-test]
             [craft.agents.npc-locomotion-test]
             [craft.agents.npc-survival-test]
-            [craft.agents.npc-bt-test]))
+            [craft.agents.npc-bt-test]
+            [craft.agents.npc-bridge-world-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -70,7 +71,8 @@
    {:epic 30 :title "CA-091 — Despacho de metas por agente" :ns 'craft.agents.npc-goals-test}
    {:epic 31 :title "CA-092 — Locomocao compartilhada (follow por agente)" :ns 'craft.agents.npc-locomotion-test}
    {:epic 32 :title "CA-093 — Sobrevivencia compartilhada (abrigo, fome, combate por politica)" :ns 'craft.agents.npc-survival-test}
-   {:epic 33 :title "CA-094 — Behavior Tree para todo agente com :bt/root" :ns 'craft.agents.npc-bt-test}])
+   {:epic 33 :title "CA-094 — Behavior Tree para todo agente com :bt/root" :ns 'craft.agents.npc-bt-test}
+   {:epic 34 :title "CA-095 — Mundo do agente por nome nos ops da ponte" :ns 'craft.agents.npc-bridge-world-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
