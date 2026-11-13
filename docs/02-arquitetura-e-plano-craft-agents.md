@@ -2,6 +2,8 @@
 
 Documento consolidado com todas as decisões de design fechadas para o **`craft-agents`** (`/home/pace/dev/minecraft/craft-agents`, Licença **MIT**) — motor de agentes autônomos, NPCs vivos e IA incorporada projetado para substituir e superar o Mineflayer.
 
+> **Status (sprint `npc-core-01`, CA-084..CA-096):** o NPC Core genérico (registro → estado → endereçamento → metas → ticks/BT → ponte) está implementado e coberto por testes de unidade (`make test` verde, 349 test vars). Verificação em servidor vivo e migrações restantes: ver a [seção 5](#5-npc-core-sprint-npc-core-01-ca-084-a-ca-096) e `docs/plans/sprint-npc-core-01-pendencias.md`.
+
 ---
 
 ## 1. Resumo das Decisões Arquiteturais Consolidadas
@@ -179,3 +181,46 @@ flowchart LR
 1. Declarar `agents/sanctuary.edn`, `agents/karlach.edn`, `agents/picard.edn` e `agents/antigravity.edn`.
 2. Injetar o `craft-agents` ao vivo no servidor Minecraft em execução, validar Karlach alimentando animais e trancando os portões duplos, Picard em patrulha/diálogo e Antigravity em escolta/combate com *JEG*.
 3. Desativar os serviços Node.js legados (`mc-karlach`, `mc-picard`, `mc-npc`), medir a queda de ~600 MB de RAM e rodar a suíte de testes automatizados.
+
+---
+
+## 5. NPC Core (sprint `npc-core-01`, CA-084 a CA-096)
+
+O que antes era "a Karlach" com um Picard colado ao lado agora é um núcleo genérico: qualquer agente declarado em `agents/*.edn` ganha spawn, fala, estado, endereçamento, metas, locomoção, sobrevivência e Behavior Tree pelos mesmos caminhos. O fluxo, na ordem em que um dado o atravessa:
+
+```mermaid
+flowchart LR
+    REG["registro<br/>npc.registry"] --> EST["estado<br/>npc.state"]
+    EST --> END["enderecamento<br/>npc.addressing"]
+    END --> MET["metas<br/>intent, grounding, execute-goal!"]
+    MET --> TICK["ticks e BT<br/>engine.*_tick, goals.bt"]
+    TICK --> PON["ponte<br/>transport e ops Java"]
+```
+
+1. **Registro** (`npc.registry`, CA-086): carrega os `agents/*.edn` do nível superior (as subpastas `regions/`, `routes/`, `skills/` são outros dados), valida cada um com `AgentSpec` (Malli) e devolve `{:agents :errors}`; um `.edn` inválido não derruba os outros. Campos: id/nome/spawn, `:agent/voice`, `:agent/skin`, `:agent/combat-policy`, `:agent/capabilities`, `:agent/spawn-loadout`, `:agent/boot-spawn?`, `:bt/root`. Spawn (`npc.spawn`, CA-088) e fala (`npc.speech`, CA-087) leem daqui.
+2. **Estado** (`npc.state`, CA-089): um átomo por agente (`agent-atom`), em vez de estado global da Karlach; o Studio lista os agentes do registro.
+3. **Endereçamento** (`npc.addressing`, CA-090): resolve a qual agente um chat se dirige (por nome, ignorando caixa) e remove a menção antes de classificar a intenção.
+4. **Metas** (CA-091): `cognition.intent` classifica, `cognition.grounding/ground-goal` produz o `:goal/type` e `fabric.goals.dispatch/execute-goal!` (multimethod com contexto `{:agent :state :engine-ctx :sanctuary-route}`) executa. Metas de papel (`role-goals`) exigem a capacidade de mesmo nome em `:agent/capabilities`; sem ela, o agente recusa em voz. `execute-karlach-goal!` segue como wrapper legado.
+5. **Ticks e BT** (CA-092..CA-094): `engine.follow`/`patrol` (locomoção compartilhada, watchdog por agente), `engine.shelter` e política de combate por agente (CA-093), e `engine.bt_tick` + `goals.bt` (defmulti `bt-action`, guards puros, `face-entity`/`social-gaze` genéricos): todo agente com `:bt/root` roda seu BT. Picard, Richeh e Karlach mantêm tick dedicado.
+6. **Ponte** (CA-095): os ops `PATH`/`GROUND`/`BLOCK`/`TOGGLE_PORTAL` aceitam `agent=Nome` (padrão Karlach) e resolvem o mundo do jogador nomeado (`nav.BridgeAgentArg`, Java).
+
+### 5.1 Mapa de namespaces novo
+
+| Namespace | Papel |
+| :--- | :--- |
+| `craft.agents.npc.registry` | Registro + schema `AgentSpec` dos `agents/*.edn` |
+| `craft.agents.npc.state` | Átomo de estado por agente |
+| `craft.agents.npc.addressing` | Resolução de nome e remoção de menção |
+| `craft.agents.npc.speech` | Fala unificada pela voz do registro |
+| `craft.agents.npc.spawn` | Comandos e laço de spawn guiados pelo registro |
+| `craft.agents.backend.fabric.goals` | Fachada (requires obrigatórios + reexportações) |
+| `...fabric.goals.dispatch` | `execute-goal!`, capacidades, wrapper legado |
+| `...fabric.goals.{rescue,companion,work,furniture,skills}` | `defmethod` por tipo de meta |
+| `...fabric.goals.{bt,bt_actions}` | Interpretador de BT e ações (`bt-action`) |
+| `...fabric.engine.{state,follow,patrol,patrol_ops,shelter,combat,mining,chat,watchdog}` | Sub-namespaces do antigo `engine.clj` |
+| `...fabric.engine.{karlach_tick,picard_tick,atelier_tick,bt_tick}` | Ticks por agente e tick genérico de BT |
+| `...fabric.atelier.*` | Sub-namespaces do antigo `atelier.clj` (a fachada `atelier.clj` só reexporta) |
+
+Invariantes estruturais verificados por `test/craft/agents/npc_docs_test.clj`: nenhum `.clj` de `fabric/` ou `npc/` passa de 400 linhas (a lista de exceções está vazia), todo `agents/*.edn` valida em `AgentSpec`, e todo `:goal/type` produzido pelo grounding tem `defmethod` em `execute-goal!` (`:dialogue` cai de propósito no `:default`).
+
+Pendências e verificação ao vivo: `docs/plans/sprint-npc-core-01-pendencias.md`.

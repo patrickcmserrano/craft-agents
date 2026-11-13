@@ -62,3 +62,15 @@
 - Verificar com um agente no Nether (ex.: Picard) que `PATH|...|agent=Picard`, `GROUND|x|y|z|agent=Picard`, `BLOCK` e `TOGGLE_PORTAL` resolvem o mundo do jogador nomeado. Exige servidor Fabric real; não executado na worktree.
 - A `SyntheticPlayerFactory` só teve corpos de método alterados (hot-swap): o novo helper `com.craft.agents.nav.BridgeAgentArg` é carregado pelo `FreshNavClassLoader` a partir de `target/classes` (exige `make compile-java`).
 - Callers (`request-path3d`, `generate-walk-steps`) ainda não repassam `:agent-name`; sem o campo o padrão segue "Karlach".
+
+## CA-096 — documentação e invariantes
+
+- `AGENTS.md` do workspace (`/home/pace/dev/AGENTS.md`) fica **fora do repo**: a contagem de testes dele não foi atualizada. Após esta sprint a suíte tem 349 test vars (345 antes do CA-096 + 4 de `npc_docs_test`); atualizar à mão se o documento citar a contagem.
+- `npc_docs_test` nasceu verde: os invariantes (arquivos ≤ 400 linhas, perfis válidos, cobertura de `execute-goal!`) já valiam, então não houve fase Red falhando. A lista `size-exceptions` está vazia; se um arquivo de `fabric/` ou `npc/` passar de 400 linhas, ele entra lá com o tamanho atual.
+- `:dialogue` é o único tipo de meta do grounding sem `defmethod` próprio (tratado pelo `:default`); o teste o exclui explicitamente.
+
+## Resumo — o que exige servidor vivo ou não foi migrado
+
+- Ao vivo (nada disto foi exercitado): spawn real pela ponte 25595 (CA-088); metas, follow e combate de escolta de agentes que não são a Karlach (CA-091/092); `PATH`/`GROUND`/`BLOCK`/`TOGGLE_PORTAL` com `agent=Nome` no Nether e `make compile-java` para o `BridgeAgentArg` (CA-095).
+- Não migrado: consumidores do registro (`sanctuary/karlach-dialogues`, `actions/ensure-live-bridge-and-agents!`, `studio/server.clj`); consumidores de `execute-karlach-goal!` fora de `goals/` (engine, MCP, studio); callers que ainda não repassam `:agent-name` (`request-path3d`, `generate-walk-steps`); exceções da Karlach mantidas por testes travados (`:mount-boat`, `:dismount-vehicle`); padrões "Richeh"/"Coco" das ações do Ateliê; `opts` de voz dos wrappers de fala legados; vozes/skins de Picard a conferir.
+- A falha de `karlach-rain-shelter-test` citada em CA-087 não aparece mais: `make test` está verde nesta worktree (345 test vars, 0 falhas, antes do CA-096).
