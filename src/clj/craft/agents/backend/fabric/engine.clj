@@ -21,7 +21,8 @@
             [craft.agents.backend.fabric.sanctuary :refer [sanctuary-route]]
             [craft.agents.backend.fabric.sentry :refer [handle-player-command!]]
             [craft.agents.backend.fabric.telemetry :refer [global-command-dispatcher]]
-            [craft.agents.backend.fabric.transport :refer [bridge-alive? send-bridge-cmd!]]))
+            [craft.agents.backend.fabric.transport :refer [bridge-alive? send-bridge-cmd!]]
+            [craft.agents.npc.state :as npc-state]))
 
 ;; Reexportacoes: a API publica de antes da quebra em sub-namespaces (CA-084).
 (def strike-cooldown-ticks combat/strike-cooldown-ticks)
@@ -78,7 +79,7 @@
   (ensure-live-bridge-and-agents!)
   (refresh-real-world-weather-async!)
   (let [env {:engine-ctx-atom engine-ctx-atom
-             :nav-state    (atom (state/initial-nav-state))
+             :nav-state    (npc-state/agent-atom engine-ctx-atom :karlach (state/initial-nav-state))
              :picard-state (atom (state/initial-picard-state))
              :coco-state   (atelier/create-coco-state)
              :richeh-state (atelier/create-richeh-state)
