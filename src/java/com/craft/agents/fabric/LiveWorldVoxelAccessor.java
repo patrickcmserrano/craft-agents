@@ -46,7 +46,7 @@ public final class LiveWorldVoxelAccessor implements VoxelAccessor {
             boolean noCollision = false;
             try {
                 Class<?> blockViewCls = Class.forName("net.minecraft.class_1922", true, cl);
-                Object shape = bState.getClass().getMethod("method_26218", blockViewCls, bpCls).invoke(bState, overworld, bp);
+                Object shape = bState.getClass().getMethod("method_26220", blockViewCls, bpCls).invoke(bState, overworld, bp);
                 noCollision = (Boolean) shape.getClass().getMethod("method_1110").invoke(shape);
             } catch (Throwable ignored) {
                 noCollision = isAir || id.equals("minecraft:light") || id.contains("air")
