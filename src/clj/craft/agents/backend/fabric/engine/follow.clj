@@ -1,7 +1,12 @@
 (ns craft.agents.backend.fabric.engine.follow
-  "Follow / bodyguard da Karlach (Navegacao Universal via A* 3D): decisoes puras
-   (barco, teleporte de aproximacao, debounce de perda) e o tick com combate de
-   escolta, voo de elytra e watchdog (CA-049, CA-065, CA-066)."
+  "Follow / bodyguard (Navegacao Universal via A* 3D): decisoes puras (barco,
+   teleporte de aproximacao, debounce de perda, `follow-tick`) e o tick com combate
+   de escolta, voo de elytra e watchdog (CA-049, CA-065, CA-066).
+
+   CA-092: o tick e parametrizado pelo agente: `(tick-follow! env agent-id)`. Qualquer
+   agente com `:mode :follow` no seu estado segue o lider; a Karlach mantem o combate de
+   escolta e o cartao do Studio. Limitacao: os ops Java PATH/GROUND ainda nao recebem o
+   nome do agente (dependem da CA-095) e continuam no mundo da Karlach."
   (:require [clojure.string :as str]
             [craft.agents.backend.fabric.actions :refer [attack-hostile-target! karlach-say!
                                                          query-online-players
@@ -14,14 +19,18 @@
             [craft.agents.backend.fabric.navigation :as nav
              :refer [compute-yaw request-path3d]]
             [craft.agents.backend.fabric.sanctuary :refer [close-portal-at-coord! open-portal-at-coord!]]
-            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]))
+            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]
+            [craft.agents.npc.registry :as registry]
+            [craft.agents.npc.state :as npc-state]
+            [craft.agents.npc.speech :as speech]))
 
 (def ^:private teleport-distance-m 48.0)
 (def ^:private hold-distance-m 2.6)
 (def ^:private lost-debounce-ticks 60)
 
-(def ^:private ride-boat-cmd
-  "CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..4,sort=nearest,limit=1]")
+(defn- ride-boat-cmd [agent-name]
+  (str "CMD|execute at " agent-name " run ride " agent-name
+       " mount @e[type=boat,distance=..4,sort=nearest,limit=1]"))
 
 (defn follow-tick-decision
   "Decisao pura do follow. Entrada: {:pos [x y z] :leader [x y z] :in-vehicle? bool
@@ -45,21 +54,46 @@
   [dist action]
   (and (<= dist hold-distance-m) (not= action :tether-snap-recall)))
 
+(defn follow-tick
+  "Passo puro de locomocao do follow (CA-092). Entrada: {:agent-name :pos :leader :path
+   :speed :sprint :sneak :hold? (default: dist <= 2.6m)}. Saida: {:commands [\"MOVE|<nome>|...\"]
+   :pos :yaw :path :holding?}. Colado no lider: so gira e espelha o agachar; senao avanca
+   `path` (NUNCA atravessa paredes: sem caminho, gira e espera)."
+  [{:keys [agent-name pos leader path speed sprint sneak hold?]}]
+  (let [[cx cy cz] pos
+        [tx _ tz] leader
+        dx (- tx cx)
+        dz (- tz cz)
+        dist (Math/sqrt (+ (* dx dx) (* dz dz)))
+        yaw (compute-yaw dx dz)
+        sn (str (boolean sneak))
+        hold (if (some? hold?) hold? (follow-hold? dist nil))
+        stand (fn [] {:commands [(uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|%s"
+                                          agent-name (double cx) (double cy) (double cz) yaw sn)]
+                      :pos [cx cy cz] :yaw yaw :path [] :holding? hold})]
+    (if (or hold (empty? path))
+      (stand)
+      (let [r (loco/advance-path {:pos [cx cy cz] :path path :speed speed :yaw yaw})
+            [sx sy sz] (:pos r)]
+        {:commands [(uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|%s|%s"
+                             agent-name sx sy sz (:yaw r) (str (boolean sprint)) sn)]
+         :pos (:pos r) :yaw (:yaw r) :path (:path r) :holding? false}))))
+
 (defn boat-transition
-  "Sincronia Terra-Barco (2Hz). Entrada: {:actual-sitting? :target-sitting? :dist}
-   (sitting = montado no barco; nil = leitura ausente). Saida: {:commands [..]
-   :in-vehicle? bool}, sem :in-vehicle? quando nada muda. Lider desembarcou ->
+  "Sincronia Terra-Barco (2Hz). Entrada: {:agent-name (default \"Karlach\") :actual-sitting?
+   :target-sitting? :dist} (sitting = montado no barco; nil = leitura ausente). Saida:
+   {:commands [..] :in-vehicle? bool}, sem :in-vehicle? quando nada muda. Lider desembarcou ->
    STAND; lider embarcou e ela esta a <= 3.5m fora do barco -> monta."
-  [{:keys [actual-sitting? target-sitting? dist]}]
+  [{:keys [agent-name actual-sitting? target-sitting? dist] :or {agent-name "Karlach"}}]
   (cond
     (nil? actual-sitting?)
     {:commands []}
 
     (and actual-sitting? (false? target-sitting?))
-    {:commands ["STAND|Karlach"] :in-vehicle? false}
+    {:commands [(str "STAND|" agent-name)] :in-vehicle? false}
 
     (and (false? actual-sitting?) target-sitting? (<= dist 3.5))
-    {:commands [ride-boat-cmd] :in-vehicle? true}
+    {:commands [(ride-boat-cmd agent-name)] :in-vehicle? true}
 
     :else
     {:commands [] :in-vehicle? actual-sitting?}))
@@ -73,9 +107,10 @@
       {:action :give-up :follow-lost-ticks 0}
       {:action :wait :follow-lost-ticks lost-cnt})))
 
-(defn- sync-boat! [nav-state target-name dist]
+(defn- sync-boat! [nav-state agent-name target-name dist]
   (try
-    (let [r (boat-transition {:actual-sitting? (query-sitting-status "Karlach")
+    (let [r (boat-transition {:agent-name agent-name
+                              :actual-sitting? (query-sitting-status agent-name)
                               :target-sitting? (query-sitting-status target-name)
                               :dist dist})]
       (run! send-bridge-cmd! (:commands r))
@@ -83,44 +118,54 @@
         (swap! nav-state assoc :in-vehicle? (:in-vehicle? r))))
     (catch Throwable _ nil)))
 
+(defn- karlach? [{:keys [agent-id]}] (= :karlach (or agent-id :karlach)))
+
+(defn- publish!
+  "Publica no engine-ctx. Karlach: :tick/:leases/:agents (como antes). Outros agentes
+   so atualizam a propria entrada em :agents (nao pisam nos leases globais)."
+  [{:keys [engine-ctx-atom tick agent-id] :as env} leases karlach-agents status pos]
+  (if (karlach? env)
+    (swap! engine-ctx-atom assoc :tick tick :leases leases :agents karlach-agents)
+    (swap! engine-ctx-atom update :agents assoc agent-id {:status status :pos pos})))
+
 (defn- follow-glide!
   "Voo de elytra espelhando o lider: tem prioridade sobre combate/A*."
-  [{:keys [nav-state engine-ctx-atom tick make-agents-map]} st target-p dist3]
+  [{:keys [nav-state agent-name make-agents-map] :as env} st target-p dist3]
   (let [{tx :x ty :y tz :z} target-p
         phase (loco/glide-phase target-p (:gliding? @nav-state) dist3)]
     (case phase
-        (:fly :land)
-        (let [r (loco/flight-step {:pos (:pos @nav-state) :leader [tx ty tz]
-                                   :trail (if (= phase :fly) 3.0 1.5) :max-step 2.5})
-              [fx fy fz] (:pos r)]
-          (when-not (:gliding? @nav-state)
-            (send-bridge-cmd! "CMD|item replace entity Karlach armor.chest with minecraft:elytra")
-            (send-bridge-cmd! "CMD|tag Karlach add craft_glide"))
-          (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
-                                     fx fy fz (double (:yaw r)) (double (:pitch r))))
-          (swap! nav-state assoc :gliding? true :pos [fx fy fz] :yaw (:yaw r) :follow-path []
-                 :watchdog nil)
-          (swap! engine-ctx-atom assoc :tick tick
-                 :leases {:legs {:owner :elytra-follow} :hands nil :gaze {:owner :elytra-follow}}
-                 :agents (make-agents-map "🪽 voando com você" [fx fy fz])))
-        :touchdown
-        (let [[px py pz] (:pos @nav-state)
-              gy (or (nav/query-ground-y [px py pz]) py)]
-          (send-bridge-cmd! "CMD|tag Karlach remove craft_glide")
-          (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                                     px (double gy) pz (double (:yaw st 0.0))))
-          (swap! nav-state assoc :gliding? false :pos [px (double gy) pz] :follow-path []))
-        nil)))
+      (:fly :land)
+      (let [r (loco/flight-step {:pos (:pos @nav-state) :leader [tx ty tz]
+                                 :trail (if (= phase :fly) 3.0 1.5) :max-step 2.5})
+            [fx fy fz] (:pos r)]
+        (when-not (:gliding? @nav-state)
+          (send-bridge-cmd! (str "CMD|item replace entity " agent-name " armor.chest with minecraft:elytra"))
+          (send-bridge-cmd! (str "CMD|tag " agent-name " add craft_glide")))
+        (send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
+                                   agent-name fx fy fz (double (:yaw r)) (double (:pitch r))))
+        (swap! nav-state assoc :gliding? true :pos [fx fy fz] :yaw (:yaw r) :follow-path []
+               :watchdog nil)
+        (publish! env {:legs {:owner :elytra-follow} :hands nil :gaze {:owner :elytra-follow}}
+                  (when (karlach? env) (make-agents-map "🪽 voando com você" [fx fy fz]))
+                  "🪽 voando com você" [fx fy fz]))
+      :touchdown
+      (let [[px py pz] (:pos @nav-state)
+            gy (or (nav/query-ground-y [px py pz]) py)]
+        (send-bridge-cmd! (str "CMD|tag " agent-name " remove craft_glide"))
+        (send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                                   agent-name px (double gy) pz (double (:yaw st 0.0))))
+        (swap! nav-state assoc :gliding? false :pos [px (double gy) pz] :follow-path []))
+      nil)))
 
 (defn- follow-combat!
   "Varredura tatica e preempcao de combate reativo (CA-049) + locomocao de escolta."
-  [{:keys [nav-state engine-ctx-atom tick make-agents-map make-karlach-card picard-card]}
+  [{:keys [nav-state tick agent-name make-agents-map make-karlach-card picard-card] :as env}
    st target-p]
   (let [[cx cy cz] (:pos st)
         {tx :x ty :y tz :z} target-p
         yaw (compute-yaw (- tx cx) (- tz cz))]
     (let [hostiles (if (zero? (mod tick 4))
-                     (try (let [h (scan-nearby-hostiles "Karlach" 14.0)]
+                     (try (let [h (scan-nearby-hostiles agent-name 14.0)]
                             (swap! nav-state assoc :last-hostiles h)
                             h)
                           (catch Throwable _ (:last-hostiles @nav-state [])))
@@ -135,21 +180,22 @@
               hdx        (- (double mx) (double cx))
               hdz        (- (double mz) (double cz))
               hyaw       (compute-yaw hdx hdz)]
-          (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz hyaw))
+          (send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" agent-name cx cy cz hyaw))
           (when (strike-ready? (:last-strike-tick @nav-state) tick)
             (swap! nav-state assoc :last-strike-tick tick)
-            (when target-id (attack-hostile-target! "Karlach" target-id))
-            (send-bridge-cmd! "SWING|Karlach")
+            (when target-id (attack-hostile-target! agent-name target-id))
+            (send-bridge-cmd! (str "SWING|" agent-name))
             (send-bridge-cmd! (uformat "CMD|particle minecraft:crit %.2f %.2f %.2f 0.3 0.3 0.3 0.1 5 normal"
                                       (double mx) (+ (double my) 1.0) (double mz))))
           (when (battle-cry-ready? (:last-battle-cry-tick @nav-state) tick)
             (swap! nav-state assoc :last-battle-cry-tick tick)
-            (karlach-say! "Toma essa! Não mexe com meu esquadrão! 🔥 🛡️"))
-          (swap! engine-ctx-atom assoc
-                 :tick tick
-                 :leases {:legs {:owner :combat-strike} :hands {:owner :combat-strike} :gaze {:owner :combat-strike}}
-                 :agents (make-agents-map "⚔️ em combate defensivo" (:pos @nav-state))))
-    
+            (if (karlach? env)
+              (karlach-say! "Toma essa! Não mexe com meu esquadrão! 🔥 🛡️")
+              (speech/say! (:agent-id env) "Toma essa! Não mexe com meu esquadrão! 🛡️")))
+          (publish! env {:legs {:owner :combat-strike} :hands {:owner :combat-strike} :gaze {:owner :combat-strike}}
+                    (when (karlach? env) (make-agents-map "⚔️ em combate defensivo" (:pos @nav-state)))
+                    "⚔️ em combate defensivo" (:pos @nav-state)))
+
         :combat-intercept
         (let [[mx my mz] (:target-pos decision)
               path-queue (:follow-path st [])
@@ -163,67 +209,58 @@
                                         :speed 0.28 :yaw yaw})
                   [step-x step-y step-z] (:pos r)]
               (send-bridge-cmd!
-               (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x step-y step-z (:yaw r)))
+               (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|true|false" agent-name step-x step-y step-z (:yaw r)))
               (swap! nav-state assoc :pos (:pos r) :yaw (:yaw r) :follow-path (:path r) :follow-last-target [mx my mz]))
             (let [hdx (- (double mx) (double cx))
                   hdz (- (double mz) (double cz))
                   hyaw (compute-yaw hdx hdz)]
               (send-bridge-cmd!
-               (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz hyaw))
+               (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" agent-name cx cy cz hyaw))
               (swap! nav-state assoc :yaw hyaw)))
-          (swap! engine-ctx-atom assoc
-                 :tick tick
-                 :leases {:legs {:owner :combat-intercept} :hands nil :gaze {:owner :combat-intercept}}
-                 :agents (make-agents-map "🏹 interceptando hostil" (:pos @nav-state))))
-    
+          (publish! env {:legs {:owner :combat-intercept} :hands nil :gaze {:owner :combat-intercept}}
+                    (when (karlach? env) (make-agents-map "🏹 interceptando hostil" (:pos @nav-state)))
+                    "🏹 interceptando hostil" (:pos @nav-state)))
+
         :remain-mounted-passive
         (do
           (send-bridge-cmd!
-           (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
-          (swap! engine-ctx-atom assoc
-                 :tick tick
-                 :leases {:legs nil :hands nil :gaze {:owner :passenger-look}}
-                 :agents (make-agents-map "⛵ navegando embarcada com você" (:pos @nav-state))))
-    
+           (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" agent-name cx cy cz yaw))
+          (publish! env {:legs nil :hands nil :gaze {:owner :passenger-look}}
+                    (when (karlach? env) (make-agents-map "⛵ navegando embarcada com você" (:pos @nav-state)))
+                    "⛵ navegando embarcada com você" (:pos @nav-state)))
+
         ;; Default: :tether-snap-recall ou :follow-player
         (let [;; CA-066: watchdog de progresso (so aqui: combate/barco
               ;; parados de proposito nao contam como travamento)
-              st   (ewd/follow-watchdog-step! nav-state st (:name target-p) [tx ty tz] tick)
+              st   (ewd/follow-watchdog-step! nav-state st (:name target-p) [tx ty tz] tick agent-name)
               [cx cy cz] (:pos st)
               dx   (- tx cx)
               dz   (- tz cz)
               dist (Math/sqrt (+ (* dx dx) (* dz dz)))
-              yaw  (compute-yaw dx dz)
               gait (loco/mirror-gait target-p dist)
-              sn   (str (:sneak gait))]
-          (if (and (<= dist 2.6) (not= (:action decision) :tether-snap-recall))
-            (do
-              (send-bridge-cmd!
-               (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|%s" cx cy cz yaw sn))
-              (swap! nav-state assoc :yaw yaw :follow-path []))
-            (let [path-queue (:follow-path st [])
-                  last-target (:follow-last-target st)
-                  active-path (if (loco/needs-replan? {:path path-queue :pos [cx cy cz]
-                                                       :target [tx ty tz] :last-target last-target})
-                                (request-path3d [cx cy cz] [tx ty tz] 2.2)
-                                path-queue)]
-              (if-let [next-node (first active-path)]
-                (let [act (:action next-node)]
-                  (when (= act :TRAVERSE_PORTAL)
-                    (let [pcoord [(:x next-node) (:y next-node) (:z next-node)]]
-                      (open-portal-at-coord! pcoord)
-                      (swap! nav-state assoc :opened-portal pcoord)))
-                  (let [r (loco/advance-path {:pos [cx cy cz] :path active-path
-                                              :speed (:speed gait) :yaw yaw})
-                        [step-x step-y step-z] (:pos r)]
-                    (send-bridge-cmd!
-                     (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|%s|%s" step-x step-y step-z (:yaw r) (str (:sprint gait)) sn))
-                    (swap! nav-state assoc :pos (:pos r) :yaw (:yaw r) :follow-path (:path r) :follow-last-target [tx ty tz])))
-                ;; Sem caminho navegavel: gira na direcao do jogador e aguarda (NUNCA atravessa paredes!)
-                (do
-                  (send-bridge-cmd!
-                   (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|%s" cx cy cz yaw sn))
-                  (swap! nav-state assoc :yaw yaw)))))
+              hold? (follow-hold? dist (:action decision))
+              path-queue (:follow-path st [])
+              active-path (if (or hold?
+                                  (not (loco/needs-replan? {:path path-queue :pos [cx cy cz]
+                                                            :target [tx ty tz]
+                                                            :last-target (:follow-last-target st)})))
+                            path-queue
+                            (request-path3d [cx cy cz] [tx ty tz] 2.2))
+              next-node (first active-path)
+              _    (when (and (not hold?) (= (:action next-node) :TRAVERSE_PORTAL))
+                     (let [pcoord [(:x next-node) (:y next-node) (:z next-node)]]
+                       (open-portal-at-coord! pcoord)
+                       (swap! nav-state assoc :opened-portal pcoord)))
+              r    (follow-tick {:agent-name agent-name :pos [cx cy cz] :leader [tx ty tz]
+                                 :path active-path :speed (:speed gait)
+                                 :sprint (:sprint gait) :sneak (:sneak gait) :hold? hold?})]
+          (run! send-bridge-cmd! (:commands r))
+          (if (seq (:path r))
+            (swap! nav-state assoc :pos (:pos r) :yaw (:yaw r) :follow-path (:path r)
+                   :follow-last-target [tx ty tz])
+            (swap! nav-state assoc :yaw (:yaw r)
+                   :follow-path []
+                   :pos (if next-node (:pos r) (:pos @nav-state))))
           (when-let [op-portal (:opened-portal @nav-state)]
             (let [[ox _ oz] op-portal
                   pdist (Math/sqrt (+ (Math/pow (- cx (+ (double ox) 0.5)) 2)
@@ -231,51 +268,68 @@
               (when (> pdist 2.2)
                 (close-portal-at-coord! op-portal)
                 (swap! nav-state assoc :opened-portal nil))))
-          (swap! engine-ctx-atom assoc
-                 :tick tick
-                 :leases {:legs {:owner :escort-player} :hands nil :gaze {:owner :social-gaze}}
-                 :agents {:karlach (make-karlach-card (if (= (:action decision) :tether-snap-recall)
-                                                        (str "⚡ retornando ao líder (tether snap)")
-                                                        (if (= (:mode st) :bodyguard) (str "🛡️ guarda-costas de " (:name target-p)) (str "escoltando " (:name target-p))))
-                                                      (:pos @nav-state))
-    :picard  picard-card}))))))
+          (let [status (if (= (:action decision) :tether-snap-recall)
+                         "⚡ retornando ao líder (tether snap)"
+                         (if (= (:mode st) :bodyguard)
+                           (str "🛡️ guarda-costas de " (:name target-p))
+                           (str "escoltando " (:name target-p))))]
+            (publish! env {:legs {:owner :escort-player} :hands nil :gaze {:owner :social-gaze}}
+                      {:karlach (when (karlach? env) (make-karlach-card status (:pos @nav-state)))
+                       :picard  picard-card}
+                      status (:pos @nav-state))))))))
 
 (defn- find-player [players name]
   (first (filter #(= (str/lower-case (:name %)) (str/lower-case name)) players)))
 
+(defn- agent-name-of [agent-id]
+  (or (:agent/name (registry/agent-by-id agent-id))
+      (str/capitalize (name agent-id))))
+
 (defn tick-follow!
-  "Um tick do modo :follow / :bodyguard. `env` traz os atoms e os construtores de
-   cartao do tick (ver karlach-tick/tick-karlach!); `st` e o snapshot de nav-state."
-  [{:keys [nav-state tick] :as env} st]
-  (let [players  (query-online-players)
-        target-p (find-player players (or (:follow-target st) "pace"))
-        ;; CA-065: re-ancora nav-state :pos pela posicao real (mesma lista,
-        ;; sem chamada extra). Se divergiu, forca replanejamento.
-        real-pos (loco/agent-pos-from-players players "Karlach")
-        rec-pos  (loco/reconcile-pos (:pos st) real-pos 0.75)
-        resync?  (not= rec-pos (:pos st))
-        _        (when resync?
-                   (swap! nav-state assoc :pos rec-pos :follow-path []))
-        st       (if resync? (assoc st :pos rec-pos :follow-path []) st)]
-    (if target-p
-      (let [leader [(:x target-p) (:y target-p) (:z target-p)]
-            d (follow-tick-decision {:pos (:pos st) :leader leader
-                                     :in-vehicle? (:in-vehicle? st false)
-                                     :hostiles (:last-hostiles @nav-state [])})]
-        (swap! nav-state assoc :follow-lost-ticks 0)
-        ;; Teleporte de aproximação se o jogador estiver muito distante (> 48m / outro bioma)
-        (when (:teleport? d)
-          (ewd/teleport-karlach-to-leader! nav-state (:name target-p) leader))
-        ;; Sincronização e Composição Multimodal Terra-Barco (2Hz)
-        (when (zero? (mod tick 10))
-          (sync-boat! nav-state (:name target-p) (:dist d)))
-        (follow-glide! env st target-p (:dist3 d))
-        (when-not (:gliding? @nav-state)
-          (follow-combat! env st target-p)))
-      ;; Debounce para evitar cancelamento por oscilação momentânea do socket
-      (let [r (follow-lost-decision st)]
-        (if (= :give-up (:action r))
-          (do
-            (swap! nav-state assoc :mode :sanctuary-patrol :steps [] :route-idx 0 :follow-lost-ticks 0)
-            (karlach-say! "Perdi você de vista, soldado! Vou voltar pra patrulha dos cercados."))
-          (swap! nav-state assoc :follow-lost-ticks (:follow-lost-ticks r)))))))
+  "Um tick do modo :follow / :bodyguard do agente `agent-id` (default :karlach, CA-092).
+   `env` traz os atoms e os construtores de cartao do tick (ver karlach-tick/tick-karlach!).
+   O estado do agente e `:nav-state` (Karlach) ou `(npc-state/agent-atom ctx id)`."
+  ([env] (tick-follow! env :karlach))
+  ([env agent-id]
+   (let [nav-state  (if (= agent-id :karlach)
+                      (:nav-state env)
+                      (npc-state/agent-atom (:engine-ctx-atom env) agent-id))
+         agent-name (agent-name-of agent-id)
+         env        (assoc env :nav-state nav-state :agent-id agent-id :agent-name agent-name)
+         st         @nav-state
+         tick       (:tick env)
+         players  (query-online-players)
+         target-p (find-player players (or (:follow-target st) "pace"))
+         ;; CA-065: re-ancora nav-state :pos pela posicao real (mesma lista,
+         ;; sem chamada extra). Se divergiu, forca replanejamento.
+         real-pos (loco/agent-pos-from-players players agent-name)
+         rec-pos  (loco/reconcile-pos (:pos st) real-pos 0.75)
+         resync?  (not= rec-pos (:pos st))
+         _        (when resync?
+                    (swap! nav-state assoc :pos rec-pos :follow-path []))
+         st       (if resync? (assoc st :pos rec-pos :follow-path []) st)]
+     (if target-p
+       (let [leader [(:x target-p) (:y target-p) (:z target-p)]
+             d (follow-tick-decision {:pos (:pos st) :leader leader
+                                      :in-vehicle? (:in-vehicle? st false)
+                                      :hostiles (:last-hostiles @nav-state [])})]
+         (swap! nav-state assoc :follow-lost-ticks 0)
+         ;; Teleporte de aproximação se o jogador estiver muito distante (> 48m / outro bioma)
+         (when (:teleport? d)
+           (ewd/teleport-agent-to-leader! nav-state agent-name (:name target-p) leader))
+         ;; Sincronização e Composição Multimodal Terra-Barco (2Hz)
+         (when (zero? (mod tick 10))
+           (sync-boat! nav-state agent-name (:name target-p) (:dist d)))
+         (follow-glide! env st target-p (:dist3 d))
+         (when-not (:gliding? @nav-state)
+           (follow-combat! env st target-p)))
+       ;; Debounce para evitar cancelamento por oscilação momentânea do socket
+       (let [r (follow-lost-decision st)]
+         (if (= :give-up (:action r))
+           (do
+             (swap! nav-state assoc :mode (if (= agent-id :karlach) :sanctuary-patrol :idle)
+                    :steps [] :route-idx 0 :follow-lost-ticks 0)
+             (if (= agent-id :karlach)
+               (karlach-say! "Perdi você de vista, soldado! Vou voltar pra patrulha dos cercados.")
+               (speech/say! agent-id "Perdi você de vista! Vou ficar por aqui.")))
+           (swap! nav-state assoc :follow-lost-ticks (:follow-lost-ticks r))))))))

@@ -36,6 +36,7 @@
 (def sit-karlach-at-quarters! shelter/sit-karlach-at-quarters!)
 (def stand-karlach! shelter/stand-karlach!)
 (def teleport-karlach-to-leader! ewd/teleport-karlach-to-leader!)
+(def teleport-agent-to-leader! ewd/teleport-agent-to-leader!)
 (def follow-watchdog-step! ewd/follow-watchdog-step!)
 (def patrol-watchdog-fired! ewd/patrol-watchdog-fired!)
 (def picard-walk-tick picard-tick/picard-walk-tick)

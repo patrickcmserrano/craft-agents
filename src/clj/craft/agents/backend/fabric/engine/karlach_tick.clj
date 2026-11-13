@@ -99,6 +99,17 @@
                :leases nil
                :agents (make-agents-map "Retomando a patrulha ☀️" [cx cy cz]))))))
 
+(defn- tick-other-followers!
+  "CA-092: qualquer agente (fora a Karlach) com `:mode :follow` no seu estado segue o
+   lider (a meta :follow-player da CA-091 liga isso). Erro de um agente nao derruba o tick."
+  [{:keys [engine-ctx-atom] :as env}]
+  (doseq [[id st-atom] (:agent-states @engine-ctx-atom)
+          :when (and (not= id :karlach)
+                     (contains? #{:follow :bodyguard} (:mode @st-atom)))]
+    (try (follow/tick-follow! (with-cards env) id)
+         (catch Throwable t
+           (println "[follow-ERROR]" id (.getMessage t))))))
+
 (defn tick-karlach!
   "Um tick da Karlach. `env`: :engine-ctx-atom :nav-state :picard-state :coco-state
    :richeh-state :tick."
@@ -111,6 +122,7 @@
       (send-bridge-cmd!
        (uformat "CMD|particle minecraft:smoke %.2f %.2f %.2f 0.15 0.25 0.15 0.01 2 normal"
                 kx (+ ky 1.2) kz))))
+  (tick-other-followers! env0)
   (let [env (with-cards env0)
         st  @nav-state]
     ;; CA-060: expoe o modo e o clima da Karlach para observabilidade
@@ -126,7 +138,7 @@
           shelter     (when patrolling? (shelter-decision st))]
       (cond
         (pos? (:dance-ticks st 0))                       (tick-dance! env st)
-        (contains? #{:follow :bodyguard} (:mode st))     (follow/tick-follow! env st)
+        (contains? #{:follow :bodyguard} (:mode st))     (follow/tick-follow! env :karlach)
         (= (:mode st) :mining)                           (mining/tick-mining! env st)
         (contains? #{:shelter :resume} (:action shelter)) (tick-shelter! env st shelter)
 

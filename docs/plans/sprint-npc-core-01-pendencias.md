@@ -45,3 +45,15 @@
 - Falas de agentes que não estão no registro (`npc.speech/say!` resolve a voz por id no registro) não emitem nada.
 - Os consumidores do multimethod fora de `goals/` (engine, MCP, studio) continuam chamando `execute-karlach-goal!`; migrar
   para `execute-goal!` com o agente endereçado (CA-090) fica para a tarefa seguinte. Não foi exercitado em servidor vivo.
+
+## CA-092 — locomoção compartilhada
+
+- Os ops Java `PATH`/`GROUND` (via `nav/request-path3d` e `nav/query-ground-y`) **não recebem o nome do agente**: a CA-095 ainda
+  não existe, então o A* de qualquer agente continua planejando no mundo/posição da Karlach no lado Java. Só os comandos
+  `MOVE`/`STAND`/`SWING`/`CMD` carregam o nome certo.
+- Para agentes que não são a Karlach, `tick-follow!` mantém o estado em `npc.state/agent-atom` e publica só a própria entrada
+  em `(:agents @engine-ctx)` (não mexe em `:leases`/`:tick`); sem cartão do Studio com skills. Combate de escolta
+  (`scan-nearby-hostiles`/`attack-hostile-target!`) usa o nome do agente, mas não foi exercitado em servidor vivo.
+- Perdeu o líder por 60 ticks: a Karlach volta a `:sanctuary-patrol`; os demais voltam a `:idle`.
+- `tick-other-followers!` (em `karlach-tick`) percorre `(:agent-states ctx)`; a meta `:follow-player` da CA-091 ainda precisa
+  gravar `:mode :follow` no estado do agente (não verificado aqui). Teste de watchdog/teleporte usa ponte stubada.
