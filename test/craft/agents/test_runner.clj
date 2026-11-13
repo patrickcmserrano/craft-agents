@@ -21,7 +21,8 @@
             [craft.agents.karlach-locomotion-test]
             [craft.agents.karlach-strike-cooldown-test]
             [craft.agents.karlach-gait-mirror-test]
-            [craft.agents.karlach-elytra-follow-test]))
+            [craft.agents.karlach-elytra-follow-test]
+            [craft.agents.karlach-combat-escort-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -44,7 +45,8 @@
    {:epic 17 :title "Epico VIII (Locomocao) — Karlach: A* recupera partida, walk-step, watchdog e classes frescas (CA-062..CA-080)" :ns 'craft.agents.karlach-locomotion-test}
    {:epic 18 :title "Epico IX (Combate) — Karlach: cooldown de golpe melee" :ns 'craft.agents.karlach-strike-cooldown-test}
    {:epic 19 :title "Epico X (Marcha) — Karlach espelha sprint/agachar do lider" :ns 'craft.agents.karlach-gait-mirror-test}
-   {:epic 20 :title "Epico XI (Elytra) — Karlach segue o lider em voo" :ns 'craft.agents.karlach-elytra-follow-test}])
+   {:epic 20 :title "Epico XI (Elytra) — Karlach segue o lider em voo" :ns 'craft.agents.karlach-elytra-follow-test}
+   {:epic 21 :title "Epico XII (Escolta) — Karlach luta sem abandonar o lider, grito com cooldown" :ns 'craft.agents.karlach-combat-escort-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]

@@ -55,6 +55,24 @@
   [last-tick tick]
   (or (nil? last-tick) (>= (- tick last-tick) strike-cooldown-ticks)))
 
+(def battle-cry-cooldown-ticks
+  "Ticks (20Hz) minimos entre gritos de guerra no chat: 30s."
+  600)
+
+(defn battle-cry-ready?
+  "true se pode gritar de novo (`last-tick` nil = nunca gritou)."
+  [last-tick tick]
+  (or (nil? last-tick) (>= (- tick last-tick) battle-cry-cooldown-ticks)))
+
+(def ^:private escort-tether-m 12.0)
+(def ^:private escort-guard-radius-m 8.0)
+(def ^:private self-defense-radius-m 4.0)
+
+(defn- dist3 [[ax ay az] [bx by bz]]
+  (Math/sqrt (+ (Math/pow (- (double ax) (double bx)) 2)
+                (Math/pow (- (double ay) (double by)) 2)
+                (Math/pow (- (double az) (double bz)) 2))))
+
 (defn evaluate-combat-preemption
   "Avalia preempção de combate reativo, tether anti-kiting de escolta e proteção de embarque (CA-049).
    Retorna mapa de decisão:
@@ -83,10 +101,15 @@
                                          (Math/pow (- (double ly) (double by)) 2)
                                          (Math/pow (- (double lz) (double bz)) 2)))
                            0.0)
-          target-mob (first hostiles)]
+          ;; Escolta: so engaja mob que ameaca o lider (<= 8m dele) ou colado nela (<= 4m).
+          ;; Mob que ficou pra tras e ignorado, senao ela abandona o follow.
+          target-mob (first (filter #(or (<= (double (:distance %)) self-defense-radius-m)
+                                         (and leader-pos
+                                              (<= (dist3 [(:x %) (:y %) (:z %)] leader-pos) escort-guard-radius-m)))
+                                    hostiles))]
       (cond
-        ;; A) Tether Tático Anti-Kiting: líder está além de 18.0m -> recall de emergência
-        (> dist-to-leader 18.0)
+        ;; A) Tether Tático Anti-Kiting: líder além de 12m -> recall de emergência
+        (> dist-to-leader escort-tether-m)
         {:action :tether-snap-recall
          :target-pos leader-pos
          :clear-follow-path? false}
@@ -692,7 +715,8 @@
                                        (send-bridge-cmd! "SWING|Karlach")
                                        (send-bridge-cmd! (uformat "CMD|particle minecraft:crit %.2f %.2f %.2f 0.3 0.3 0.3 0.1 5 normal"
                                                                  (double mx) (+ (double my) 1.0) (double mz))))
-                                     (when (zero? (mod tick 30))
+                                     (when (battle-cry-ready? (:last-battle-cry-tick @nav-state) tick)
+                                       (swap! nav-state assoc :last-battle-cry-tick tick)
                                        (karlach-say! "Toma essa! Não mexe com meu esquadrão! 🔥 🛡️"))
                                      (swap! engine-ctx-atom assoc
                                             :tick tick
