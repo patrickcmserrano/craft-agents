@@ -788,10 +788,8 @@ public final class SyntheticPlayerFactory {
                 int ty = (int) Math.floor(Double.parseDouble(to[1]));
                 int tz = (int) Math.floor(Double.parseDouble(to[2]));
                 try {
-                    java.net.URLClassLoader pathLoader = new java.net.URLClassLoader(
-                            new java.net.URL[]{ new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/").toURI().toURL() },
-                            cl
-                    );
+                    ClassLoader pathLoader = FreshNavClassLoader.forDir(
+                            new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl);
                     Class<?> voxCls = pathLoader.loadClass("com.craft.agents.fabric.LiveWorldVoxelAccessor");
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
                     Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);
@@ -826,7 +824,10 @@ public final class SyntheticPlayerFactory {
                         return "ERR|NO_PATH";
                     }
                 } catch (Throwable t) {
-                    return "ERR|" + t.getMessage();
+                    Throwable root = t;
+                    while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                    return "ERR|" + (t.getMessage() != null ? t.getMessage()
+                            : root.getClass().getName() + (root.getMessage() != null ? ": " + root.getMessage() : ""));
                 }
             }
 
@@ -835,10 +836,8 @@ public final class SyntheticPlayerFactory {
                     int gx = Integer.parseInt(parts[1].trim());
                     int gy = Integer.parseInt(parts[2].trim());
                     int gz = Integer.parseInt(parts[3].trim());
-                    java.net.URLClassLoader pathLoader = new java.net.URLClassLoader(
-                            new java.net.URL[]{ new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/").toURI().toURL() },
-                            cl
-                    );
+                    ClassLoader pathLoader = FreshNavClassLoader.forDir(
+                            new java.io.File("/home/pace/dev/minecraft/craft-agents/target/classes/"), cl);
                     Class<?> voxCls = pathLoader.loadClass("com.craft.agents.fabric.LiveWorldVoxelAccessor");
                     Object overworld = server.getClass().getMethod("method_30002").invoke(server);
                     Object liveVox = voxCls.getConstructor(Object.class, ClassLoader.class).newInstance(overworld, cl);
@@ -850,7 +849,10 @@ public final class SyntheticPlayerFactory {
                     int found = (Integer) snapMethod.invoke(null, liveVox, gx, gy, gz, 4, 6);
                     return found == Integer.MIN_VALUE ? "ERR|NO_GROUND" : "OK|" + found;
                 } catch (Throwable t) {
-                    return "ERR|" + t.getMessage();
+                    Throwable root = t;
+                    while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                    return "ERR|" + (t.getMessage() != null ? t.getMessage()
+                            : root.getClass().getName() + (root.getMessage() != null ? ": " + root.getMessage() : ""));
                 }
             }
 
