@@ -1,0 +1,29 @@
+;; Plano da sprint npc-core-01 para o sprint-runner
+;; (/home/pace/dev/scripts/sprint_runner.clj): swe + CGE + small-router,
+;; Claude Code Sonnet 5.5. Specs em docs/13-backlog-npc-core.md.
+;; Disparo e retomada: /home/pace/dev/scripts/sprint_autoresume.clj via
+;; sprint-npc-core-01.timer (2026-11-13 01:31 BRT e de hora em hora até 12:31).
+;; :repo é a worktree base da sprint: o checkout principal roda o craft-agents.service.
+{:sprint       "npc-core-01"
+ :repo         "/home/pace/dev/worktrees/craft-agents-npc-core-01"
+ :project      "craft-agents"
+ :spec-doc     "docs/13-backlog-npc-core.md"
+ :pending-doc  "docs/plans/sprint-npc-core-01-pendencias.md"
+ :base-branch  "sprint/npc-core-01"
+ :model        "claude-sonnet-5-5"
+ :timeout-min  120
+ :gate-cmds    ["make test"]
+ :max-attempts 3
+ :tasks [{:id "CA-084" :profile "backend-fabric"}
+         {:id "CA-085" :profile "backend-fabric"}
+         {:id "CA-086" :profile "architecture"}
+         {:id "CA-087" :profile "backend-fabric"}
+         {:id "CA-088" :profile "backend-fabric"}
+         {:id "CA-089" :profile "architecture"}
+         {:id "CA-090" :profile "cognition"}
+         {:id "CA-091" :profile "cognition"}
+         {:id "CA-092" :profile "locomotion"}
+         {:id "CA-093" :profile "backend-fabric"}
+         {:id "CA-094" :profile "cognition"}
+         {:id "CA-095" :profile "backend-fabric"}
+         {:id "CA-096" :profile "architecture"}]}
