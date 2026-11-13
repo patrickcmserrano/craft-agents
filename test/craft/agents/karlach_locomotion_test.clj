@@ -1,6 +1,7 @@
 (ns craft.agents.karlach-locomotion-test
   "Locomocao da Karlach: A* recupera partida dentro de solido (CA-062)."
   (:require [clojure.test :refer [deftest is testing]]
+            [craft.agents.backend.fabric.engine :as engine]
             [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.transport :as transport]
@@ -346,3 +347,14 @@
     (let [r (loco/approach-step {:pos [0.5 65.0 0.5] :path [] :speed 0.24 :yaw 0.0})]
       (is (:arrived? r))
       (is (= 0.0 (double (:pitch r)))))))
+
+(deftest ca-083-picard-walk-tick-test
+  (testing "CA-083: estação 1 bloco acima — y sobe já no primeiro tick"
+    (let [r (engine/picard-walk-tick {:pos [0.0 64.0 0.0]} {:pos [5.0 65.0 0.0]})]
+      (is (= 65.0 (second (:pos r))))
+      (is (not (:arrived? r)))
+      (is (< 0.0 (first (:pos r)) 0.2))))
+  (testing "CA-083: estação a 0,1 — chegou"
+    (let [r (engine/picard-walk-tick {:pos [0.0 64.0 0.0]} {:pos [0.1 64.0 0.0]})]
+      (is (:arrived? r))
+      (is (= [0.1 64.0 0.0] (:pos r))))))
