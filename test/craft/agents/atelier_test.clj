@@ -1,8 +1,10 @@
 (ns craft.agents.atelier-test
   "Testes da dinâmica comportamental de Coco e Richeh no Ateliê dos Touros Negros."
   (:require [clojure.test :refer [deftest is testing]]
+            [craft.agents.backend.fabric.transport :as transport]
             [clojure.string :as str]
-            [craft.agents.backend.fabric.atelier :as atelier]))
+            [craft.agents.backend.fabric.atelier :as atelier]
+            [craft.agents.backend.fabric.atelier.aim :as aim]))
 
 (deftest test-coco-and-richeh-initial-state
   (testing "Inicializacao de estado e waypoints de Coco e Richeh"
@@ -461,8 +463,8 @@
           sent (atom [])
           mock! (spell-mock! sent "minecraft:blaze_powder,1" nil
                              {:look-resp "OK|1.0|0.0|0.0|90.0|0.0"})
-          _ (with-redefs [atelier/parse-all-hostiles (fn [_] [])
-                          atelier/parse-hostile-response (fn [_] nil)]
+          _ (with-redefs [aim/parse-all-hostiles (fn [_] [])
+                          aim/parse-hostile-response (fn [_] nil)]
               (atelier/cast-casting! coco-st mock! "pace" 2000000))
           cmds @sent
           proj (first (filter #(and (str/starts-with? % "CMD|")
@@ -486,8 +488,8 @@
           sent (atom [])
           mock! (spell-mock! sent "minecraft:blaze_rod,1" nil
                              {:look-resp "OK|0.0|-1.0|0.0|0.0|90.0"})
-          _ (with-redefs [atelier/parse-all-hostiles (fn [_] [])
-                          atelier/parse-hostile-response (fn [_] nil)]
+          _ (with-redefs [aim/parse-all-hostiles (fn [_] [])
+                          aim/parse-hostile-response (fn [_] nil)]
               (atelier/cast-casting! st mock! "pace" 2000000))
           cmds @sent]
       (is (not (some #(and (str/starts-with? % "CMD|") (str/includes? % "damage")) cmds))
@@ -597,8 +599,8 @@
     (let [coco-st (atelier/create-coco-state [-30.0 66.0 190.0])
           sent (atom [])
           mock! (spell-mock! sent)]
-      (with-redefs [atelier/parse-hostile-response (fn [_] nil)
-                    atelier/parse-all-hostiles (fn [_] [])]
+      (with-redefs [aim/parse-hostile-response (fn [_] nil)
+                    aim/parse-all-hostiles (fn [_] [])]
         (let [cast? (atelier/spell-auto-defense! coco-st "Coco" mock! 2000000)
               cmds @sent]
           (is (false? cast?) "Sem hostil, a auto-defesa nao conjura")
@@ -1077,3 +1079,238 @@
 
 
 
+
+;; =============================================================================
+;; Testes de caracterizacao — areas sem cobertura (falas, motor, duo, celeste,
+;; ramos de chat, chao seguro). Fixam o comportamento ATUAL antes da refatoracao.
+;; =============================================================================
+
+(defn- capture-bridge
+  "Executa `f` com transport/send-bridge-cmd! redirecionado; devolve os comandos."
+  [resp f]
+  (let [sent (atom [])]
+    (with-redefs [transport/send-bridge-cmd! (fn [cmd] (swap! sent conj cmd) resp)]
+      (f))
+    @sent))
+
+(deftest test-load-agent-edn
+  (is (nil? (atelier/load-agent-edn :agente-que-nao-existe)))
+  (is (map? (atelier/load-agent-edn :coco))))
+
+(deftest test-npc-say-emits-tellraw-sound-and-swing
+  (testing "coco-say! ancora no NPC, escapa aspas e termina com SWING"
+    (let [cmds (capture-bridge "OK" #(atelier/coco-say! "oi \"mundo\""))]
+      (is (= 3 (count cmds)))
+      (is (str/starts-with? (first cmds) "CMD|execute at Coco run tellraw @a[distance=..16]"))
+      (is (str/includes? (first cmds) "\"color\":\"yellow\""))
+      (is (str/includes? (first cmds) "oi \\\"mundo\\\""))
+      (is (str/includes? (second cmds) "playsound minecraft:item.book.page_turn"))
+      (is (= "SWING|Coco" (nth cmds 2)))))
+  (testing "richeh-say! usa aqua (light_blue e cor invalida no servidor)"
+    (let [cmds (capture-bridge "OK" #(atelier/richeh-say! "hmph"))]
+      (is (str/starts-with? (first cmds) "CMD|execute at Richeh run tellraw @a[distance=..16]"))
+      (is (str/includes? (first cmds) "\"color\":\"aqua\""))
+      (is (not (str/includes? (first cmds) "light_blue")))
+      (is (= "SWING|Richeh" (nth cmds 2))))))
+
+(deftest test-coco-follow-mode
+  (let [players [{:name "pace" :x -20.0 :z 190.0}]]
+    (testing "longe: anda em direcao ao jogador"
+      (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+            sent (atom [])]
+        (swap! st assoc :mode :follow :follow-target "Pace")
+        (atelier/step-coco-tick! st #(swap! sent conj %) 1 players)
+        (is (> (first (:pos @st)) -30.0))
+        (is (= "Acompanhando pace" (:status @st)))
+        (is (str/starts-with? (first @sent) "MOVE|Coco|"))))
+    (testing "perto (<=2.4): para e conversa"
+      (let [st (atelier/create-coco-state [-21.0 66.0 190.0])]
+        (swap! st assoc :mode :follow :follow-target "pace")
+        (atelier/step-coco-tick! st (fn [_]) 1 players)
+        (is (= [-21.0 66.0 190.0] (:pos @st)))
+        (is (= "Conversando com pace" (:status @st)))))
+    (testing "alvo offline: volta a patrulha"
+      (let [st (atelier/create-coco-state)]
+        (swap! st assoc :mode :follow)
+        (atelier/step-coco-tick! st (fn [_]) 1 [])
+        (is (= :patrol (:mode @st)))))))
+
+(deftest test-coco-patrol-phases
+  (testing "chegando ao waypoint inicia a fase :sketch"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])]
+      (swap! st assoc :waypoint-idx 0)
+      (atelier/step-coco-tick! st #(swap! sent conj %) 1 [])
+      (is (= :sketch (:phase @st)))
+      (is (= 70 (:wait-left @st)))
+      (is (some #{"SWING|Coco"} @sent))))
+  (testing "sketch: fim da espera avanca o waypoint e volta a andar"
+    (let [st (atelier/create-coco-state)]
+      (swap! st assoc :phase :sketch :wait-left 1 :waypoint-idx 4)
+      (atelier/step-coco-tick! st (fn [_]) 1 [])
+      (is (= :walk (:phase @st)))
+      (is (= 0 (:waypoint-idx @st)) "indice dá a volta em castle-waypoints")))
+  (testing "sketch: a cada 25 ticks folheia o caderno; jogador a <7m atrai o olhar"
+    (let [st (atelier/create-coco-state [-30.0 66.0 190.0])
+          sent (atom [])]
+      (swap! st assoc :phase :sketch :wait-left 26)
+      (atelier/step-coco-tick! st #(swap! sent conj %) 1 [{:name "pace" :x -27.0 :z 190.0}])
+      (is (= 25 (:wait-left @st)))
+      (is (some #{"SWING|Coco"} @sent))
+      (is (some #(str/starts-with? % "MOVE|Coco|") @sent)))))
+
+(deftest test-richeh-follow-and-spacing
+  (let [players [{:name "pace" :x -20.0 :z 190.0}]
+        coco (atelier/create-coco-state [-30.0 66.0 190.0])]
+    (testing "follow longe"
+      (let [st (atelier/create-richeh-state [-30.0 66.0 190.0])]
+        (swap! st assoc :mode :follow :follow-target "pace")
+        (atelier/step-richeh-tick! st coco (fn [_]) 1 players)
+        (is (= "Seguindo pace" (:status @st)))
+        (is (> (first (:pos @st)) -30.0))))
+    (testing "follow perto"
+      (let [st (atelier/create-richeh-state [-21.0 66.0 190.0])]
+        (swap! st assoc :mode :follow :follow-target "pace")
+        (atelier/step-richeh-tick! st coco (fn [_]) 1 players)
+        (is (= "Vigiando pace" (:status @st)))))
+    (testing "follow sem alvo volta a orbitar"
+      (let [st (atelier/create-richeh-state)]
+        (swap! st assoc :mode :follow)
+        (atelier/step-richeh-tick! st coco (fn [_]) 1 [])
+        (is (= :tether-orbit (:mode @st)))))
+    (testing "distancia ideal: inscreve micro-glifos a cada 60 ticks"
+      (let [st (atelier/create-richeh-state [-30.0 66.0 193.0])
+            sent (atom [])]
+        (atelier/step-richeh-tick! st coco #(swap! sent conj %) 60 [])
+        (is (= "Inscrevendo micro-glifos" (:status @st)))
+        (is (some #{"SWING|Richeh"} @sent))))
+    (testing "muito perto: passo lateral"
+      (let [st (atelier/create-richeh-state [-30.0 66.0 191.0])]
+        (atelier/step-richeh-tick! st coco (fn [_]) 1 [])
+        (is (= "Guardando distância" (:status @st)))
+        (is (not= [-30.0 66.0 191.0] (:pos @st)))))))
+
+(deftest test-duo-synchrony
+  (let [fire (fn [coco-pos richeh-pos]
+               (let [c (atelier/create-coco-state coco-pos)
+                     r (atelier/create-richeh-state richeh-pos)
+                     said (atom [])
+                     sent (atom [])
+                     say! (fn [who _] (swap! said conj who))]
+                 (atelier/check-duo-synchrony! c r #(swap! sent conj %) say!)
+                 {:c c :r r :said said :sent sent :say! say!}))]
+    (testing "perto: interage, fala uma vez e arma o cooldown"
+      (let [{:keys [c r said sent say!]} (fire [-30.0 66.0 190.0] [-30.0 66.0 192.0])]
+        (is (= 1 (count @said)))
+        (is (contains? #{:coco :richeh} (first @said)))
+        (is (pos? (:last-duo-ms @c)))
+        (is (some #{"SWING|Coco"} @sent))
+        (is (some #{"SWING|Richeh"} @sent))
+        (atelier/check-duo-synchrony! c r (fn [_]) say!)
+        (is (= 1 (count @said)) "segunda chamada imediata e barrada pelo cooldown de 45s")))
+    (testing "longe: nada acontece"
+      (let [{:keys [said sent]} (fire [-30.0 66.0 190.0] [-20.0 66.0 190.0])]
+        (is (empty? @said))
+        (is (empty? @sent))))))
+
+(deftest test-celestial-reaction
+  (let [run (fn [phenomenon]
+              (let [c (atelier/create-coco-state)
+                    r (atelier/create-richeh-state)
+                    said (atom [])
+                    sent (atom [])]
+                (atelier/check-celestial-reaction! c r {:phenomenon phenomenon} #(swap! sent conj %)
+                                                   (fn [who _] (swap! said conj who)))
+                {:c c :r r :said said :sent sent}))]
+    (testing "nominal: ignora"
+      (let [{:keys [said sent]} (run :nominal)]
+        (is (empty? @said))
+        (is (empty? @sent))))
+    (testing "eclipse: Coco reage"
+      (let [{:keys [said sent]} (run :solar-eclipse)]
+        (is (= [:coco] @said))
+        (is (some #(str/starts-with? % "MOVE|Richeh|") @sent))))
+    (testing "aurora de cristal: Richeh reage"
+      (is (= [:richeh] @(:said (run :crystal-aurora)))))
+    (testing "fenomeno desconhecido: olham o ceu mas ninguem fala"
+      (let [{:keys [said sent]} (run :meteor)]
+        (is (empty? @said))
+        (is (seq @sent))))
+    (testing "cooldown de 45s"
+      (let [c (atelier/create-coco-state)
+            r (atelier/create-richeh-state)
+            said (atom [])
+            say! (fn [who _] (swap! said conj who))]
+        (atelier/check-celestial-reaction! c r {:phenomenon :solar-eclipse} (fn [_]) say!)
+        (atelier/check-celestial-reaction! c r {:phenomenon :solar-eclipse} (fn [_]) say!)
+        (is (= 1 (count @said)))))))
+
+(deftest test-handle-chat-branches
+  (let [coco (atelier/create-coco-state)
+        richeh (atelier/create-richeh-state)
+        said (atom [])
+        say! (fn [who msg] (swap! said conj [who msg]))
+        chat (fn [speaker msg]
+               (reset! said [])
+               (let [r (atom nil)]
+                 (capture-bridge "OK|0|" #(reset! r (atelier/handle-atelier-chat! speaker msg coco richeh say!)))
+                 @r))]
+    (testing "mensagem sem bruxa nem magia nao e consumida"
+      (is (false? (chat "pace" "bom dia pessoal")))
+      (is (empty? @said)))
+    (testing "Coco: fica/patrulha volta ao modo patrulha"
+      (swap! coco assoc :mode :follow :follow-target "pace")
+      (is (true? (chat "pace" "coco volta pro castelo")))
+      (is (= :patrol (:mode @coco)))
+      (is (nil? (:follow-target @coco))))
+    (testing "Coco: ceu/eclipse fala do ceu; generico fala algo"
+      (is (true? (chat "pace" "coco viu o eclipse?")))
+      (is (= :coco (ffirst @said)))
+      (is (true? (chat "pace" "coco tudo bem")))
+      (is (= 1 (count @said))))
+    (testing "Coco: ataque sem grimorio recusa"
+      (is (true? (chat "pace" "coco ataca")))
+      (is (str/includes? (second (first @said)) "Sem o teu grimório")))
+    (testing "Richeh: segue / fica / ceu / generico"
+      (is (true? (chat "pace" "richeh segue")))
+      (is (= :follow (:mode @richeh)))
+      (is (true? (chat "pace" "richeh fica")))
+      (is (= :tether-orbit (:mode @richeh)))
+      (is (true? (chat "pace" "richeh olha a aurora")))
+      (is (= :richeh (ffirst @said)))
+      (is (true? (chat "pace" "richeh oi")))
+      (is (= :richeh (ffirst @said))))
+    (testing "Richeh: ataque sem grimorio recusa"
+      (is (true? (chat "pace" "richeh lança cristal")))
+      (is (str/includes? (second (first @said)) "Sem o teu grimório")))
+    (testing "casting puro sem grimorio: resposta sai da posicao do jogador"
+      (reset! said [])
+      (let [cmds (capture-bridge "OK|0|" #(atelier/handle-atelier-chat! "pace" "fireball" coco richeh say!))]
+        (is (some #(and (str/includes? % "execute at pace run tellraw")
+                        (str/includes? % "Sem o teu grimório")) cmds))
+        (is (empty? @said) "nao passa pelo say-fn das bruxas")))))
+
+(deftest test-find-safe-ground-y
+  (let [world (fn [solid-ys]
+                (fn [cmd]
+                  (let [y (Long/parseLong (nth (str/split cmd #"\|") 2))]
+                    (if (contains? solid-ys y) "OK|minecraft:stone|s" "OK|minecraft:air|s"))))]
+    (testing "ja no ar: mantem a altura"
+      (is (= 64.0 (atelier/find-safe-ground-y (world #{}) 0.5 64.2 0.5 60.0))))
+    (testing "enterrado: sobe ate o primeiro ar"
+      (is (= 66.0 (atelier/find-safe-ground-y (world #{64 65}) 0.5 64.2 0.5 60.0))))
+    (testing "sem espaco para a cabeca: pula dois blocos"
+      (is (= 67.0 (atelier/find-safe-ground-y (world #{65 66}) 0.5 65.0 0.5 60.0))))
+    (testing "tudo solido: recua para a altura dos pes"
+      (is (= 60.0 (atelier/find-safe-ground-y (constantly "OK|minecraft:stone|s") 0.5 64.2 0.5 60.0))))
+    (testing "resposta de erro conta como passavel"
+      (is (= 64.0 (atelier/find-safe-ground-y (constantly "ERR") 0.5 64.2 0.5 60.0))))))
+
+(deftest test-select-aim-target-cone
+  (let [snap {:look-direction [1.0 0.0 0.0] :ray-origin [0.0 0.0 0.0] :ray-max-dist 20.0}
+        ahead {:id 1 :x 10.0 :y 0.0 :z 0.0}
+        side {:id 2 :x 5.0 :y 0.0 :z 5.0}]
+    (is (= 1 (:id (atelier/select-aim-target-cone snap [side ahead] 0.94))))
+    (is (nil? (atelier/select-aim-target-cone snap [side] 0.94)) "fora do cone nao conta")
+    (is (nil? (atelier/select-aim-target-cone snap [] 0.94)))
+    (is (nil? (atelier/select-aim-target-cone nil [ahead] 0.94)))))
