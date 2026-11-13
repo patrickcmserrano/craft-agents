@@ -253,3 +253,73 @@
     (is (true? (:arrived? r)))
     (is (= [3.5 64.0 0.5] (:pos r)))
     (is (= 12.0 (:yaw r)))))
+
+;; ---------------------------------------------------------------- CA-080
+
+(def ^:private nav-parent
+  (.getClassLoader PathSolver3D))
+
+(defn- copy-tree! [^java.nio.file.Path src ^java.nio.file.Path dst]
+  (with-open [s (java.nio.file.Files/walk src (make-array java.nio.file.FileVisitOption 0))]
+    (doseq [^java.nio.file.Path p (iterator-seq (.iterator s))]
+      (let [target (.resolve dst (.toString (.relativize src p)))]
+        (if (java.nio.file.Files/isDirectory p (make-array java.nio.file.LinkOption 0))
+          (java.nio.file.Files/createDirectories target (make-array java.nio.file.attribute.FileAttribute 0))
+          (do (java.nio.file.Files/createDirectories (.getParent target) (make-array java.nio.file.attribute.FileAttribute 0))
+              (java.nio.file.Files/copy p target (into-array java.nio.file.CopyOption
+                                                            [java.nio.file.StandardCopyOption/REPLACE_EXISTING
+                                                             java.nio.file.StandardCopyOption/COPY_ATTRIBUTES]))))))))
+
+(defn- temp-classes-dir
+  "Copia nav/, api/ e fabric/LiveWorldVoxelAccessor.class de target/classes."
+  ^java.io.File []
+  (let [root (.toPath (java.io.File. "target/classes"))
+        tmp (java.nio.file.Files/createTempDirectory "fresh-nav" (make-array java.nio.file.attribute.FileAttribute 0))]
+    (copy-tree! (.resolve root "com/craft/agents/nav") (.resolve tmp "com/craft/agents/nav"))
+    (copy-tree! (.resolve root "com/craft/agents/api") (.resolve tmp "com/craft/agents/api"))
+    (let [f (.resolve root "com/craft/agents/fabric/LiveWorldVoxelAccessor.class")
+          d (.resolve tmp "com/craft/agents/fabric/LiveWorldVoxelAccessor.class")]
+      (java.nio.file.Files/createDirectories (.getParent d) (make-array java.nio.file.attribute.FileAttribute 0))
+      (java.nio.file.Files/copy f d (into-array java.nio.file.CopyOption
+                                               [java.nio.file.StandardCopyOption/COPY_ATTRIBUTES])))
+    (.toFile tmp)))
+
+(deftest ca-080-child-first-for-nav-classes-test
+  (let [loader (com.craft.agents.fabric.FreshNavClassLoader/forDir (java.io.File. "target/classes") nav-parent)]
+    (testing "nav/, api/ e LiveWorldVoxelAccessor vêm do próprio loader fresco"
+      (doseq [n ["com.craft.agents.nav.PathSolver3D"
+                 "com.craft.agents.api.VoxelAccessor"
+                 "com.craft.agents.fabric.LiveWorldVoxelAccessor"]]
+        (let [c (.loadClass loader n)]
+          (is (identical? loader (.getClassLoader c)) n)
+          (is (not (identical? (Class/forName n true nav-parent) c)) n)
+          (is (identical? c (.loadClass loader n)) "reutiliza a já carregada"))))
+    (testing "o resto delega ao pai"
+      (is (nil? (.getClassLoader (.loadClass loader "java.lang.String"))))
+      (is (identical? (.getClassLoader clojure.lang.RT)
+                      (.getClassLoader (.loadClass loader "clojure.lang.RT"))))
+      (is (identical? (.getClassLoader com.craft.agents.fabric.SyntheticPlayerFactory)
+                      (.getClassLoader (.loadClass loader "com.craft.agents.fabric.SyntheticPlayerFactory")))))))
+
+(deftest ca-080-for-dir-cache-test
+  (let [dir (temp-classes-dir)
+        l1 (com.craft.agents.fabric.FreshNavClassLoader/forDir dir nav-parent)
+        l2 (com.craft.agents.fabric.FreshNavClassLoader/forDir dir nav-parent)]
+    (testing "sem mudança no disco => mesma instância"
+      (is (identical? l1 l2)))
+    (testing "pai diferente => instância nova"
+      (is (not (identical? l1 (com.craft.agents.fabric.FreshNavClassLoader/forDir dir (.getParent nav-parent))))))
+    (testing ".class de nav/ mais recente => instância nova"
+      (let [f (java.io.File. dir "com/craft/agents/nav/PathSolver3D.class")]
+        (is (.setLastModified f (+ (System/currentTimeMillis) 60000)))
+        (let [l3 (com.craft.agents.fabric.FreshNavClassLoader/forDir dir nav-parent)]
+          (is (not (identical? l1 l3)))
+          (is (identical? l3 (com.craft.agents.fabric.FreshNavClassLoader/forDir dir nav-parent))))))))
+
+(deftest ca-080-fresh-loader-exposes-recover-start-test
+  (let [loader (com.craft.agents.fabric.FreshNavClassLoader/forDir (java.io.File. "target/classes") nav-parent)
+        solver (.loadClass loader "com.craft.agents.nav.PathSolver3D")
+        vox (.loadClass loader "com.craft.agents.api.VoxelAccessor")
+        caps (.loadClass loader "com.craft.agents.nav.MovementCapabilities")]
+    (is (some? (.getMethod solver "recoverStart"
+                           (into-array Class [vox caps Integer/TYPE Integer/TYPE Integer/TYPE]))))))
