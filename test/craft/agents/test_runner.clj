@@ -25,7 +25,8 @@
             [craft.agents.karlach-combat-escort-test]
             [craft.agents.karlach-teleport-test]
             [craft.agents.engine-characterization-test]
-            [craft.agents.goals-characterization-test]))
+            [craft.agents.goals-characterization-test]
+            [craft.agents.npc.registry-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -52,7 +53,8 @@
    {:epic 21 :title "Epico XII (Escolta) — Karlach luta sem abandonar o lider, grito com cooldown" :ns 'craft.agents.karlach-combat-escort-test}
    {:epic 22 :title "Karlach teleporte via MOVE (sem loop de /tp)" :ns 'craft.agents.karlach-teleport-test}
    {:epic 23 :title "CA-084 — Caracterizacao do engine.clj e sub-namespaces" :ns 'craft.agents.engine-characterization-test}
-   {:epic 24 :title "CA-085 — Caracterizacao do goals.clj e sub-namespaces" :ns 'craft.agents.goals-characterization-test}])
+   {:epic 24 :title "CA-085 — Caracterizacao do goals.clj e sub-namespaces" :ns 'craft.agents.goals-characterization-test}
+   {:epic 25 :title "CA-086 — Registro de agentes com schema Malli" :ns 'craft.agents.npc.registry-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
