@@ -11,6 +11,7 @@
                      query-sitting-status scan-nearby-hostiles
                      sit-agent! stand-agent!]]
             [craft.agents.backend.fabric.atelier :as atelier]
+            [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.navigation :as nav
              :refer [compute-pitch compute-yaw expand-route-microsteps
                      generate-walk-steps request-path3d]]
@@ -577,32 +578,18 @@
                                    :combat-intercept
                                    (let [[mx my mz] (:target-pos decision)
                                          path-queue (:follow-path st [])
-                                         last-target (or (:follow-last-target st) [0.0 0.0 0.0])
-                                         target-moved? (> (+ (Math/abs (- (double mx) (double (or (first last-target) 0.0))))
-                                                             (Math/abs (- (double mz) (double (or (nth last-target 2 nil) 0.0)))))
-                                                          2.5)
-                                         active-path (if (or (empty? path-queue) target-moved?)
+                                         last-target (:follow-last-target st)
+                                         active-path (if (loco/needs-replan? {:path path-queue :pos [cx cy cz]
+                                                                              :target [mx my mz] :last-target last-target})
                                                        (request-path3d [cx cy cz] [mx my mz] 2.0)
                                                        path-queue)]
-                                     (if-let [next-node (first active-path)]
-                                       (let [nx (+ (double (:x next-node)) 0.5)
-                                             ny (double (:y next-node))
-                                             nz (+ (double (:z next-node)) 0.5)
-                                             ndx (- nx cx)
-                                             ndz (- nz cz)
-                                             ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
-                                             nyaw (compute-yaw ndx ndz)]
-                                         (if (<= ndist 0.4)
-                                           (swap! nav-state #(-> %
-                                                                 (assoc :follow-path (vec (rest active-path)))
-                                                                 (assoc :follow-last-target [mx my mz])))
-                                           (let [step-d (min 0.28 (max 0.05 ndist))
-                                                 safe-ndist (max 0.001 ndist)
-                                                 step-x (+ cx (* (/ ndx safe-ndist) step-d))
-                                                 step-z (+ cz (* (/ ndz safe-ndist) step-d))]
-                                             (send-bridge-cmd!
-                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x ny step-z nyaw))
-                                             (swap! nav-state assoc :pos [step-x ny step-z] :yaw nyaw :follow-path active-path :follow-last-target [mx my mz]))))
+                                     (if (seq active-path)
+                                       (let [r (loco/advance-path {:pos [cx cy cz] :path active-path
+                                                                   :speed 0.28 :yaw yaw})
+                                             [step-x step-y step-z] (:pos r)]
+                                         (send-bridge-cmd!
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x step-y step-z (:yaw r)))
+                                         (swap! nav-state assoc :pos (:pos r) :yaw (:yaw r) :follow-path (:path r) :follow-last-target [mx my mz]))
                                        (let [hdx (- (double mx) (double cx))
                                              hdz (- (double mz) (double cz))
                                              hyaw (compute-yaw hdx hdz)]
@@ -631,41 +618,23 @@
                                           (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
                                          (swap! nav-state assoc :yaw yaw :follow-path []))
                                        (let [path-queue (:follow-path st [])
-                                             last-target (or (:follow-last-target st) [0.0 0.0 0.0])
-                                             target-moved? (> (+ (Math/abs (- (double tx) (double (or (first last-target) 0.0))))
-                                                                 (Math/abs (- (double tz) (double (or (nth last-target 2 nil) 0.0)))))
-                                                              3.0)
-                                             active-path (if (or (empty? path-queue) target-moved?)
+                                             last-target (:follow-last-target st)
+                                             active-path (if (loco/needs-replan? {:path path-queue :pos [cx cy cz]
+                                                                                  :target [tx ty tz] :last-target last-target})
                                                            (request-path3d [cx cy cz] [tx ty tz] 2.2)
                                                            path-queue)]
                                          (if-let [next-node (first active-path)]
-                                           (let [nx (+ (double (:x next-node)) 0.5)
-                                                 ny (double (:y next-node))
-                                                 nz (+ (double (:z next-node)) 0.5)
-                                                 act (:action next-node)
-                                                 ndx (- nx cx)
-                                                 ndz (- nz cz)
-                                                 ndist (Math/sqrt (+ (* ndx ndx) (* ndz ndz)))
-                                                 nyaw (compute-yaw ndx ndz)]
+                                           (let [act (:action next-node)]
                                              (when (= act :TRAVERSE_PORTAL)
                                                (let [pcoord [(:x next-node) (:y next-node) (:z next-node)]]
                                                  (open-portal-at-coord! pcoord)
                                                  (swap! nav-state assoc :opened-portal pcoord)))
-                                             (if (<= ndist 0.4)
-                                               (swap! nav-state #(-> %
-                                                                     (assoc :follow-path (vec (rest active-path)))
-                                                                     (assoc :follow-last-target [tx ty tz])))
-                                               (let [step-d (min 0.24 (max 0.05 ndist))
-                                                     safe-ndist (max 0.001 ndist)
-                                                     step-x (+ cx (* (/ ndx safe-ndist) step-d))
-                                                     step-z (+ cz (* (/ ndz safe-ndist) step-d))
-                                                     safe-ny (cond
-                                                               (= act :SWIM) (+ (double ny) 0.2)
-                                                               (and (< ny ty) (< ty 64.0) (>= ty 62.0)) (max ny (- (double ty) 0.15))
-                                                               :else ny)]
-                                                 (send-bridge-cmd!
-                                                  (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x safe-ny step-z nyaw))
-                                                 (swap! nav-state assoc :pos [step-x safe-ny step-z] :yaw nyaw :follow-path active-path :follow-last-target [tx ty tz]))))
+                                             (let [r (loco/advance-path {:pos [cx cy cz] :path active-path
+                                                                         :speed (loco/follow-speed dist) :yaw yaw})
+                                                   [step-x step-y step-z] (:pos r)]
+                                               (send-bridge-cmd!
+                                                (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x step-y step-z (:yaw r)))
+                                               (swap! nav-state assoc :pos (:pos r) :yaw (:yaw r) :follow-path (:path r) :follow-last-target [tx ty tz])))
                                            ;; Sem caminho navegavel: gira na direcao do jogador e aguarda (NUNCA atravessa paredes!)
                                            (do
                                              (send-bridge-cmd!
