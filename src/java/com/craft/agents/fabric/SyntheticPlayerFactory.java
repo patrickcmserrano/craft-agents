@@ -562,7 +562,11 @@ public final class SyntheticPlayerFactory {
                                 Object posingNow = player.getClass().getMethod("method_18376").invoke(player);
                                 Object swimPose = poseCls.getField("field_18079").get(null);
                                 boolean stuckSwimming = posingNow != null && posingNow.equals(swimPose);
-                                if (!sneak || stuckSwimming) {
+                                if (sneak) {
+                                    // setSneaking nao muda a pose: sem CROUCHING ela fica em pe
+                                    Object crouchPose = poseCls.getField("field_18081").get(null); // CROUCHING
+                                    player.getClass().getMethod("method_18380", poseCls).invoke(player, crouchPose);
+                                } else {
                                     Object standPose = poseCls.getField("field_18076").get(null);
                                     player.getClass().getMethod("method_18380", poseCls).invoke(player, standPose);
                                 }
