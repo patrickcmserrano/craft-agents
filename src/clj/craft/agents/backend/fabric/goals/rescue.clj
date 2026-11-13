@@ -1,9 +1,11 @@
 (ns craft.agents.backend.fabric.goals.rescue
-  "Metas de resgate de animal e procriacao: o papel da Karlach no Santuario (CA-085)."
+  "Metas de papel no Santuario: resgate de animal e procriacao (CA-085). Exigem as
+   capacidades `:animal-rescue` e `:breed-animals` em `:agent/capabilities` (CA-091):
+   o gate fica em `dispatch/execute-goal!`."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [craft.agents.backend.fabric.actions :as actions]
-            [craft.agents.backend.fabric.goals.dispatch :refer [execute-karlach-goal!]]
+            [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.sanctuary :as sanctuary]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
@@ -11,13 +13,13 @@
             [craft.agents.cognition.critic :as critic]
             [craft.agents.skills.composer :as composer]))
 
-(defmethod execute-karlach-goal! :animal-rescue
+(defmethod execute-goal! :animal-rescue
   [{:goal/keys [id name entity species pen-id gate-pos gate-block gate-facing inside-pos outside-pos feed-pos bait-item voice-line speaker] :as _goal-spec}
-   engine-ctx-atom nav-state _sanctuary-route]
-  ;; 1. Fala inicial da Karlach acusando o estímulo
-  (transport/send-bridge-cmd! "SWING|Karlach")
-  (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
-  (actions/karlach-say! voice-line)
+   {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
+  ;; 1. Fala inicial do agente acusando o estímulo
+  (transport/send-bridge-cmd! (str "SWING|" (dispatch/agent-name ctx)))
+  (transport/send-bridge-cmd! (str "CMD|execute at " (dispatch/agent-name ctx) " run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2"))
+  (dispatch/say! ctx voice-line)
 
   (record-cognitive-event! engine-ctx-atom :grounding "Grounding Engine"
                            (str "Ancorado em " (clojure.core/name pen-id) " | Alvo: " entity " | Portão: " gate-pos " | Isca: " bait-item))
@@ -55,14 +57,14 @@
 
     ;; Atualiza telemetria do Agent Studio
     (when engine-ctx-atom
-      (swap! engine-ctx-atom update-in [:agents :karlach :skills] (fnil #(vec (distinct (conj % skill-id-str))) []))
-      (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] (str id " (Malli OK)"))
+      (swap! engine-ctx-atom update-in [:agents (dispatch/agent-id ctx) :skills] (fnil #(vec (distinct (conj % skill-id-str))) []))
+      (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :last-learned] (str id " (Malli OK)"))
       (let [enc-title (or (:enclosure/name (get sanctuary/sanctuary-enclosures-by-id (or pen-id :pen-south-west))) "Cercado")]
-        (swap! engine-ctx-atom assoc-in [:agents :karlach :task] (str "Conduzindo " entity " ao " enc-title))))
+        (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :task] (str "Conduzindo " entity " ao " enc-title))))
 
     ;; 4. Execução imediata da rota motora de resgate com targeting real e A* 3D
     (let [norm-sp (critic/normalize-species (or species entity))
-          mob-resp (transport/send-bridge-cmd! (str "LOCATE_MOB|Karlach|" norm-sp))
+          mob-resp (transport/send-bridge-cmd! (str "LOCATE_MOB|" (dispatch/agent-name ctx) "|" norm-sp))
           mob-pos (when (and mob-resp (str/starts-with? mob-resp "OK|"))
                     (let [parts (str/split mob-resp #"\|")]
                       [(Double/parseDouble (nth parts 1))
@@ -146,16 +148,16 @@
              :follow-target nil
              :steps (vec main-steps)))))
 
-(defmethod execute-karlach-goal! :breed-animals
-  [{:goal/keys [speaker voice-line]} engine-ctx-atom nav-state _sanctuary-route]
+(defmethod execute-goal! :breed-animals
+  [{:goal/keys [speaker voice-line]} {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
   (record-cognitive-event! engine-ctx-atom :action "Reprodução de Animais em AFK"
                            "Ativando protocolo de reprodução e procriação de gatos no Santuário")
   (when engine-ctx-atom
-    (swap! engine-ctx-atom assoc-in [:agents :karlach :task] "Reprodução de Gatos em AFK (Cupido Felino)"))
-  (transport/send-bridge-cmd! "SWING|Karlach")
-  (transport/send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:cod")
+    (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :task] "Reprodução de Gatos em AFK (Cupido Felino)"))
+  (transport/send-bridge-cmd! (str "SWING|" (dispatch/agent-name ctx)))
+  (transport/send-bridge-cmd! (str "CMD|item replace entity " (dispatch/agent-name ctx) " weapon.mainhand with minecraft:cod"))
   (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
-  (actions/karlach-say! (or voice-line (str "Pode deixar, " (or speaker "soldado") "! Ativando reprodução de gatos em AFK! 🔥 🐱")))
+  (dispatch/say! ctx (or voice-line (str "Pode deixar, " (or speaker "soldado") "! Ativando reprodução de gatos em AFK! 🔥 🐱")))
   ;; Pulso imediato de reprodução para gatos próximos à Karlach
   (let [[cx cy cz] (:pos @nav-state [-175.0 65.0 180.0])]
     (transport/send-bridge-cmd!

@@ -27,3 +27,21 @@
 - Ordem de spawn mudou (id alfabético: Coco, Karlach, Picard, Richeh; antes Karlach, Picard, Coco, Richeh); o log por agente agora é genérico (sem emoji por agente).
 - Armadura da Picard passou a constar em `:agent/loadout` do `picard.edn` (`:chest/:legs/:feet`); verificar se algum consumidor de runtime do loadout reage a isso.
 - Spawn real em servidor vivo (bridge 25595) não foi exercitado: só `spawn-cmds` puro e `spawn-agents!` com stub.
+
+## CA-091 — despacho de metas por agente
+
+- `execute-goal!` (multimethod em `goals/dispatch.clj`) recebe `{:agent spec :state atom :engine-ctx atom :sanctuary-route route}`.
+  `execute-karlach-goal!` continua **multimethod** (não `defn`): os testes travados de CA-085 fazem
+  `(methods dispatch/execute-karlach-goal!)` e `identical?` com a fachada. A fachada registra um método-wrapper por tipo
+  de meta de `execute-goal!` (`register-karlach-wrappers!`); metas registradas depois do load da fachada caem no `:default`, que também delega.
+- Karlach ganhou `:agent/capabilities #{:animal-rescue :breed-animals :patrol-sanctuary}` em `agents/karlach.edn`;
+  sem isso o wrapper recusaria as metas de papel dela. Picard/Coco/Richeh/Antigravity seguem sem capacidades (recusam).
+- `skills/actions.clj`: `:mount-vehicle`, `:swim-follow` e `:detect-and-attack-dangerous-mobs` falham com `:NO_AGENT_NAME` sem `:agent-name`
+  no contexto. Exceções mantidas por testes travados do epic5 (CA-047/CA-048): `:mount-boat` (alias legado) sem nome cai em
+  "Karlach" e `:dismount-vehicle` aceita `:speaker "Karlach"`. Remover essas duas exceções exige alterar esses testes.
+  Os padrões "Richeh"/"Coco" das ações do Ateliê (`:tether-follow-ally` etc.) não foram tocados (fora do escopo listado).
+- `bt/execute-tree-node!` ganhou a aridade com `agent` (6º argumento); sem ele usa a Karlach. O contexto das ações modulares
+  agora leva `:agent-name`/`:agent-id`/`:say!` (a chave `:karlach-say!` foi removida; nenhuma ação a consumia).
+- Falas de agentes que não estão no registro (`npc.speech/say!` resolve a voz por id no registro) não emitem nada.
+- Os consumidores do multimethod fora de `goals/` (engine, MCP, studio) continuam chamando `execute-karlach-goal!`; migrar
+  para `execute-goal!` com o agente endereçado (CA-090) fica para a tarefa seguinte. Não foi exercitado em servidor vivo.

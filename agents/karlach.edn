@@ -3,6 +3,8 @@
  :agent/role "Guardiã do Santuário"
  :agent/voice {:color "red" :sound "block.campfire.crackle" :radius 16.0}
  :agent/combat-policy :fight
+ ;; Metas de papel (CA-091): so quem declara a capacidade executa resgate, procriacao e patrulha.
+ :agent/capabilities #{:animal-rescue :breed-animals :patrol-sanctuary}
  :agent/skin "karlach"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-175.0 65.0 180.0]}
  :agent/effects [{:effect "minecraft:resistance" :amplifier 4}

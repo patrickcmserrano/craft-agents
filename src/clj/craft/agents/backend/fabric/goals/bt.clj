@@ -1,11 +1,11 @@
 (ns craft.agents.backend.fabric.goals.bt
-  "Interpretador de Behavior Tree da Karlach (CA-048, CA-085).
-   As acoes que viram metas chamam o multimethod de goals.dispatch; os defmethod
+  "Interpretador de Behavior Tree (CA-048, CA-085, CA-091).
+   As acoes que viram metas chamam o multimethod `execute-goal!` de goals.dispatch com o
+   agente da arvore (6o argumento de `execute-tree-node!`; sem ele, a Karlach); os defmethod
    sao registrados pela fachada goals.clj."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [craft.agents.backend.fabric.actions :as actions]
-            [craft.agents.backend.fabric.goals.dispatch :refer [execute-karlach-goal!]]
+            [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.skills.actions :as skill-actions]))
@@ -14,7 +14,7 @@
 
 (defn- eval-condition
   "Avalia a condicao `cond-id` de um nó :guard/:condition contra engine-ctx e nav-state."
-  [cond-id args engine-ctx-atom nav-state]
+  [cond-id args engine-ctx-atom nav-state agent-id]
   (case cond-id
     (:leader-in-vehicle? :leader-in-boat?)
     (boolean (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
@@ -24,12 +24,12 @@
     (:self-in-vehicle? :self-in-boat?)
     (boolean (or (:in-vehicle? @nav-state)
                  (get-in @engine-ctx-atom [:perception :self :in-vehicle?])
-                 (get-in @engine-ctx-atom [:agents :karlach :in-vehicle?])))
+                 (get-in @engine-ctx-atom [:agents agent-id :in-vehicle?])))
 
     :not-self-in-vehicle?
     (not (or (:in-vehicle? @nav-state)
              (get-in @engine-ctx-atom [:perception :self :in-vehicle?])
-             (get-in @engine-ctx-atom [:agents :karlach :in-vehicle?])))
+             (get-in @engine-ctx-atom [:agents agent-id :in-vehicle?])))
 
     :not-leader-in-vehicle?
     (not (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
@@ -84,28 +84,29 @@
 
 (defn- goal-action
   "Acao de BT que delega a uma meta do multimethod. Devolve {:status :success :action-id result-id}."
-  [goal-type result-id extra engine-ctx-atom nav-state sanctuary-route speaker]
-  (execute-karlach-goal! (merge {:goal/type goal-type :goal/speaker speaker} extra)
-                         engine-ctx-atom nav-state sanctuary-route)
+  [goal-type result-id extra ctx speaker]
+  (execute-goal! (merge {:goal/type goal-type :goal/speaker speaker} extra) ctx)
   {:status :success :action-id result-id})
 
 (defn- execute-action-node
   "Executa um nó :action: macro (arquivo skills/ ou :composite-skills), meta embutida,
    som/fala ou acao modular de skills.actions."
-  [action-id action-args engine-ctx-atom nav-state sanctuary-route speaker]
+  [action-id action-args engine-ctx-atom nav-state sanctuary-route speaker agent]
   (let [macro-file (io/file (io/file "skills") (str (clojure.core/name action-id) ".edn"))
         macro-def  (when (.exists macro-file)
                      (try (edn/read-string (slurp macro-file)) (catch Throwable _ nil)))
         macro-tree (or (:skill/tree macro-def)
                        (get-in @engine-ctx-atom [:composite-skills action-id]))
+        ctx        {:agent agent :state nav-state :engine-ctx engine-ctx-atom
+                    :sanctuary-route sanctuary-route}
         goal!      (fn [goal-type result-id extra]
-                     (goal-action goal-type result-id extra engine-ctx-atom nav-state sanctuary-route speaker))]
+                     (goal-action goal-type result-id extra ctx speaker))]
     (if macro-tree
-      (execute-tree-node! macro-tree engine-ctx-atom nav-state sanctuary-route speaker)
+      (execute-tree-node! macro-tree engine-ctx-atom nav-state sanctuary-route speaker agent)
       (try
         (case action-id
-          :social-dance        (do (execute-karlach-goal! {:goal/type :social-dance :goal/voice-line "Olha o passinho de vitória! 🔥"}
-                                                          engine-ctx-atom nav-state sanctuary-route)
+          :social-dance        (do (execute-goal! {:goal/type :social-dance :goal/voice-line "Olha o passinho de vitória! 🔥"}
+                                                  ctx)
                                    {:status :success :action-id :social-dance})
           :sit-furniture       (goal! :sit-furniture :sit-furniture {})
           :stand-up            (goal! :stand-up :stand-up {})
@@ -120,7 +121,7 @@
           :move-to-quarters    (goal! :weather-shelter :move-to-quarters {})
 
           :say-message
-          (do (actions/karlach-say! (or (:text action-args) "Comando concluído com sucesso, soldado!"))
+          (do (dispatch/say! ctx (or (:text action-args) "Comando concluído com sucesso, soldado!"))
               {:status :success :action-id :say-message})
 
           :play-sound
@@ -129,7 +130,9 @@
 
           (let [act-res (skill-actions/execute-action action-id action-args
                                                       {:send-cmd! transport/send-bridge-cmd!
-                                                       :karlach-say! actions/karlach-say!
+                                                       :say! (fn [msg] (dispatch/say! ctx msg))
+                                                       :agent-name (:agent/name agent)
+                                                       :agent-id (:agent/id agent)
                                                        :speaker speaker
                                                        :engine-ctx engine-ctx-atom
                                                        :nav-state nav-state
@@ -143,12 +146,14 @@
 (defn execute-tree-node!
   "Executa nó da Behavior Tree preservando semântica de controle (:fallback, :sequence, :parallel, :inverter),
    avaliação de condições (:guard, :condition) e expandindo macros com isolamento de leases (CA-048)."
-  [node engine-ctx-atom nav-state sanctuary-route speaker]
+  ([node engine-ctx-atom nav-state sanctuary-route speaker]
+   (execute-tree-node! node engine-ctx-atom nav-state sanctuary-route speaker (dispatch/karlach-agent)))
+  ([node engine-ctx-atom nav-state sanctuary-route speaker agent]
   (if-not (vector? node)
     {:status :failure :reason :INVALID_NODE}
     (let [op   (first node)
           args (rest node)
-          run  (fn [child] (execute-tree-node! child engine-ctx-atom nav-state sanctuary-route speaker))]
+          run  (fn [child] (execute-tree-node! child engine-ctx-atom nav-state sanctuary-route speaker agent))]
       (case op
         :sequence
         (loop [children args
@@ -183,11 +188,11 @@
             child-res))
 
         (:guard :condition)
-        (if (eval-condition (first args) args engine-ctx-atom nav-state)
+        (if (eval-condition (first args) args engine-ctx-atom nav-state (:agent/id agent))
           {:status :success}
           {:status :failure})
 
         :action
-        (execute-action-node (first args) (second args) engine-ctx-atom nav-state sanctuary-route speaker)
+        (execute-action-node (first args) (second args) engine-ctx-atom nav-state sanctuary-route speaker agent)
 
-        {:status :success}))))
+        {:status :success})))))

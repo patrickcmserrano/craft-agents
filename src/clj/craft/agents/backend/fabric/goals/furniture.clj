@@ -1,18 +1,18 @@
 (ns craft.agents.backend.fabric.goals.furniture
-  "Metas de mobilia e abrigo da Karlach: sentar, levantar e abrigo de chuva (CA-085)."
+  "Metas de mobilia e abrigo: sentar, levantar e abrigo de chuva (CA-085, CA-091).
+   O nome e o id do agente vem do contexto de `execute-goal!`."
   (:require [clojure.java.io :as io]
-            [craft.agents.backend.fabric.actions :as actions]
-            [craft.agents.backend.fabric.goals.dispatch :refer [execute-karlach-goal!]]
+            [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.skills.composer :as composer]))
 
-(defmethod execute-karlach-goal! :weather-shelter
-  [{:goal/keys [voice-line]} engine-ctx-atom nav-state sanctuary-route]
-  (transport/send-bridge-cmd! "SWING|Karlach")
-  (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
-  (actions/karlach-say! voice-line)
+(defmethod execute-goal! :weather-shelter
+  [{:goal/keys [voice-line]} {engine-ctx-atom :engine-ctx nav-state :state sanctuary-route :sanctuary-route :as ctx}]
+  (transport/send-bridge-cmd! (str "SWING|" (dispatch/agent-name ctx)))
+  (transport/send-bridge-cmd! (str "CMD|execute at " (dispatch/agent-name ctx) " run playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2"))
+  (dispatch/say! ctx voice-line)
 
   (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"
                            "Objetivo: :shelter-from-rain. Compondo árvore de comportamento [:sequence [:action :check-weather] [:action :move-to-quarters] [:action :rest-at-bed]]")
@@ -42,35 +42,36 @@
                              ":shelter-from-rain registrada permanentemente em skills/shelter-from-rain.edn.")
 
     (when engine-ctx-atom
-      (swap! engine-ctx-atom assoc-in [:agents :karlach :skills] ["shelter-from-rain"])
-      (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] ":shelter-from-rain (Malli OK)")
-      (swap! engine-ctx-atom assoc-in [:agents :karlach :task] "Indo para o Quarto se abrigar"))
+      (swap! engine-ctx-atom update-in [:agents (dispatch/agent-id ctx) :skills]
+             (fnil #(vec (distinct (conj % "shelter-from-rain"))) []))
+      (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :last-learned] ":shelter-from-rain (Malli OK)")
+      (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :task] "Indo para o Quarto se abrigar"))
 
-    (actions/karlach-say! "Chuva detectada, soldado! Indo pro meu quarto me proteger!")
+    (dispatch/say! ctx "Chuva detectada, soldado! Indo pro meu quarto me proteger!")
 
     (let [quarters-stop (some #(when (= (:type %) :quarters) %) sanctuary-route)]
       (if quarters-stop
         (do
           (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller"
-                                   "Iniciando navegação A* com microsteps para Quarto da Karlach [-129, 65, 194]")
+                                   (str "Iniciando navegação A* com microsteps para o quarto de " (dispatch/agent-name ctx)))
           (swap! nav-state assoc
                  :mode :sanctuary-patrol
                  :follow-target nil
                  :steps (vec (nav/expand-route-microsteps quarters-stop (:pos @nav-state)))))
-        (actions/karlach-say! "Meu quarto ainda tá sendo arrumado!")))))
+        (dispatch/say! ctx "Meu quarto ainda tá sendo arrumado!")))))
 
-(defmethod execute-karlach-goal! :sit-furniture
-  [{:goal/keys [speaker voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
+(defmethod execute-goal! :sit-furniture
+  [{:goal/keys [speaker voice-line]} {engine-ctx-atom :engine-ctx :as ctx}]
   (record-cognitive-event! engine-ctx-atom :action "Ação de Mobília / Sentar no Sofá"
-                           (str "Karlach buscando assento livre próximo para sentar"))
-  (actions/karlach-say! (or voice-line (str "Sentando aqui no sofá para descansar um pouco, " (or speaker "soldado") "! 🔥")))
-  (let [res (transport/send-bridge-cmd! "SIT|Karlach")]
+                           (str (dispatch/agent-name ctx) " buscando assento livre próximo para sentar"))
+  (dispatch/say! ctx (or voice-line (str "Sentando aqui no sofá para descansar um pouco, " (or speaker "soldado") "! 🔥")))
+  (let [res (transport/send-bridge-cmd! (str "SIT|" (dispatch/agent-name ctx)))]
     (record-cognitive-event! engine-ctx-atom :motor "Assento Ocupado" (str "Bridge SIT response: " res))
     (transport/send-bridge-cmd! "CMD|playsound minecraft:block.wool.place master @a ~ ~ ~ 0.8 1.0")))
 
-(defmethod execute-karlach-goal! :stand-up
-  [{:goal/keys [speaker voice-line]} engine-ctx-atom _nav-state _sanctuary-route]
-  (let [res (transport/send-bridge-cmd! "STAND|Karlach")]
+(defmethod execute-goal! :stand-up
+  [{:goal/keys [speaker voice-line]} {engine-ctx-atom :engine-ctx :as ctx}]
+  (let [res (transport/send-bridge-cmd! (str "STAND|" (dispatch/agent-name ctx)))]
     (record-cognitive-event! engine-ctx-atom :action "Levantar do Sofá" (str "Bridge STAND response: " res))
-    (actions/karlach-say! (or voice-line (str "De pé e pronta pro combate, " (or speaker "soldado") "! 🔥")))
+    (dispatch/say! ctx (or voice-line (str "De pé e pronta pro combate, " (or speaker "soldado") "! 🔥")))
     (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.player.attack.sweep master @a ~ ~ ~ 0.5 1.2")))

@@ -1,10 +1,10 @@
 (ns craft.agents.backend.fabric.goals.skills
-  "Metas de skills da Karlach: ensinar skill pelo chat e executar skill dinamica (CA-085)."
+  "Metas de skills: ensinar skill pelo chat e executar skill dinamica (CA-085, CA-091).
+   Skills aprendidas gravam em `[:agents <id> :skills]` do engine-ctx."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [craft.agents.backend.fabric.actions :as actions]
             [craft.agents.backend.fabric.goals.bt :as bt]
-            [craft.agents.backend.fabric.goals.dispatch :refer [execute-karlach-goal!]]
+            [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.rsi.curriculum :as curriculum]
@@ -27,7 +27,7 @@
 
 (defn- handle-capability-gap!
   "Lacuna motora: despacha tarefa de auto-engenharia (RSI) e avisa no chat."
-  [engine-ctx-atom instruction]
+  [{engine-ctx-atom :engine-ctx :as ctx} instruction]
   (let [slug (composer/slugify instruction)
         tid  (str "ca-gap-" (subs slug 0 (min (count slug) 24)) "-" (System/currentTimeMillis))
         hyp  {:hypothesis/type :frontier-exploration
@@ -46,14 +46,14 @@
                        "test/craft/agents/epic5_cognition_mcp_studio_test.clj"]})
       (catch Throwable t
         (println "[curriculum] Erro ao despachar SWE:" (.getMessage t))))
-    (transport/send-bridge-cmd! "SWING|Karlach")
+    (transport/send-bridge-cmd! (str "SWING|" (dispatch/agent-name ctx)))
     (transport/send-bridge-cmd! "CMD|playsound minecraft:block.beacon.activate master @a ~ ~ ~ 1.0 1.2")
     (record-cognitive-event! engine-ctx-atom :rsi "Curriculum RSI Loop"
                              (str "Lacuna motora detectada no chat: '" instruction "'. Tarefa " tid " despachada para target/curiosity-queue/."))
-    (actions/karlach-say! (str "Soldado, meu corpo ainda não tem a capacidade motora para '" instruction "'! ⚡ Despachei uma tarefa de auto-engenharia (" tid ") para a fábrica autônoma. O SWE-Runner está programando essa habilidade agora!"))))
+    (dispatch/say! ctx (str "Soldado, meu corpo ainda não tem a capacidade motora para '" instruction "'! ⚡ Despachei uma tarefa de auto-engenharia (" tid ") para a fábrica autônoma. O SWE-Runner está programando essa habilidade agora!"))))
 
-(defmethod execute-karlach-goal! :teach-skill
-  [{:goal/keys [instruction speaker]} engine-ctx-atom _nav-state _sanctuary-route]
+(defmethod execute-goal! :teach-skill
+  [{:goal/keys [instruction speaker]} {engine-ctx-atom :engine-ctx :as ctx}]
   (let [skills-dir (io/file "skills")
         _ (.mkdirs skills-dir)
         skill-reg (atom {:known-actions composer/default-known-actions
@@ -63,7 +63,7 @@
       (let [sid   (:skill-id synth-res)
             sname (:skill-name synth-res)
             sdef  (:skill-def synth-res)]
-        (transport/send-bridge-cmd! "SWING|Karlach")
+        (transport/send-bridge-cmd! (str "SWING|" (dispatch/agent-name ctx)))
         (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.player.levelup master @a ~ ~ ~ 1.0 1.2")
         (record-cognitive-event! engine-ctx-atom :synthesis "System 2 Voyager Synthesizer"
                                  (str "Nova skill sintetizada do chat: '" sname "' -> " (pr-str (:skill/tree sdef))))
@@ -72,19 +72,19 @@
         (record-cognitive-event! engine-ctx-atom :skill-lib "Skill Library"
                                  (str sid " persistida permanentemente em skills/" (clojure.core/name sid) ".edn."))
         (when engine-ctx-atom
-          (swap! engine-ctx-atom update-in [:agents :karlach :skills] (fnil #(vec (distinct (conj % (clojure.core/name sid)))) []))
-          (swap! engine-ctx-atom assoc-in [:agents :karlach :last-learned] (str sid " (Chat OK)")))
-        (actions/karlach-say! (str "Entendido, " (or speaker "soldado") "! Nova habilidade '" sname "' aprendida e gravada na minha memória! 🔥 Experimente dizer '" sname "' quando quiser que eu execute!")))
+          (swap! engine-ctx-atom update-in [:agents (dispatch/agent-id ctx) :skills] (fnil #(vec (distinct (conj % (clojure.core/name sid)))) []))
+          (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :last-learned] (str sid " (Chat OK)")))
+        (dispatch/say! ctx (str "Entendido, " (or speaker "soldado") "! Nova habilidade '" sname "' aprendida e gravada na minha memória! 🔥 Experimente dizer '" sname "' quando quiser que eu execute!")))
       (let [reason (:reason synth-res)
             msg    (or (:message synth-res) (str reason))]
         (if (contains? #{:UNRECOGNIZED_STEPS :UNKNOWN_ACTION} reason)
-          (handle-capability-gap! engine-ctx-atom instruction)
+          (handle-capability-gap! ctx instruction)
           (do
             (transport/send-bridge-cmd! "CMD|playsound minecraft:block.note_block.bass master @a ~ ~ ~ 1.0 0.8")
-            (actions/karlach-say! (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como 'karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))))
+            (dispatch/say! ctx (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como 'karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))))
 
-(defmethod execute-karlach-goal! :execute-dynamic-skill
-  [{:goal/keys [skill-id speaker]} engine-ctx-atom nav-state sanctuary-route]
+(defmethod execute-goal! :execute-dynamic-skill
+  [{:goal/keys [skill-id speaker]} {engine-ctx-atom :engine-ctx nav-state :state sanctuary-route :sanctuary-route :as ctx}]
   (let [skills-dir (io/file "skills")
         skill-file (io/file skills-dir (str (clojure.core/name skill-id) ".edn"))]
     (if (.exists skill-file)
@@ -93,8 +93,8 @@
             skill-name (or (:skill/name skill-def) (clojure.core/name skill-id))]
         (record-cognitive-event! engine-ctx-atom :skill-lib "Execução de Skill Aprendida"
                                  (str "Iniciando AST da skill " skill-id ": " (pr-str skill-tree)))
-        (actions/karlach-say! (str "Executando habilidade aprendida '" skill-name "', " (or speaker "soldado") "! 🔥"))
-        (transport/send-bridge-cmd! "SWING|Karlach")
+        (dispatch/say! ctx (str "Executando habilidade aprendida '" skill-name "', " (or speaker "soldado") "! 🔥"))
+        (transport/send-bridge-cmd! (str "SWING|" (dispatch/agent-name ctx)))
         (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
-        (bt/execute-tree-node! skill-tree engine-ctx-atom nav-state sanctuary-route speaker))
-      (actions/karlach-say! (str "Não encontrei os registros da skill " skill-id " no meu córtex, " (or speaker "soldado") "!")))))
+        (bt/execute-tree-node! skill-tree engine-ctx-atom nav-state sanctuary-route speaker (:agent ctx)))
+      (dispatch/say! ctx (str "Não encontrei os registros da skill " skill-id " no meu córtex, " (or speaker "soldado") "!")))))

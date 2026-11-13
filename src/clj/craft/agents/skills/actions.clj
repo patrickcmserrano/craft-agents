@@ -19,39 +19,65 @@
    :reason :UNKNOWN_ACTION
    :action-id action-id})
 
+(defn- agent-target
+  "Nome do agente que executa a acao: `:agent-name` (ou `:bot-name`) do contexto.
+   Sem padrao escondido (CA-091): nil se o contexto nao diz quem age."
+  [ctx]
+  (or (:agent-name ctx) (:bot-name ctx)))
+
+(defn- no-agent-name [action-id]
+  {:status :failure :reason :NO_AGENT_NAME :action-id action-id})
+
+(defn- legacy-target
+  "Compatibilidade com os testes travados de CA-047/CA-048 (contextos sem `:agent-name`):
+   `:mount-boat` (alias legado) cai em Karlach e `:dismount-vehicle` aceita `:speaker`
+   \"Karlach\". As acoes novas NAO usam isto: sem `:agent-name` elas falham."
+  [ctx fallback]
+  (or (agent-target ctx) fallback))
+
+(defn- as-agent
+  "Chama `(f target)` com o nome do agente (`target`, tipicamente `(agent-target ctx)`);
+   sem nome, falha com `:NO_AGENT_NAME` e nada e emitido."
+  [target action-id f]
+  (if target (f target) (no-agent-name action-id)))
+
 ;; =============================================================================
 ;; Ações Motoras Concretas
 ;; =============================================================================
 
 (defmethod execute-action :mount-boat
   [_action-id _action-args ctx]
-  (when-let [send-cmd! (:send-cmd! ctx)]
-    (send-cmd! "CMD|execute at Karlach run ride Karlach mount @e[type=boat,distance=..6,sort=nearest,limit=1]"))
-  (when-let [nav-state (:nav-state ctx)]
-    (swap! nav-state assoc :in-vehicle? true))
-  {:status :success
-   :action-id :mount-boat})
+  (as-agent (legacy-target ctx "Karlach") :mount-boat
+            (fn [target]
+              (when-let [send-cmd! (:send-cmd! ctx)]
+                (send-cmd! (str "CMD|execute at " target " run ride " target " mount @e[type=boat,distance=..6,sort=nearest,limit=1]")))
+              (when-let [nav-state (:nav-state ctx)]
+                (swap! nav-state assoc :in-vehicle? true))
+              {:status :success
+               :action-id :mount-boat})))
 
 (defmethod execute-action :mount-vehicle
   [_action-id _action-args ctx]
-  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")]
-    (when-let [send-cmd! (:send-cmd! ctx)]
-      (send-cmd! (str "CMD|execute at " target " run ride " target " mount @e[type=boat,distance=..6,sort=nearest,limit=1]")))
-    (when-let [nav-state (:nav-state ctx)]
-      (swap! nav-state assoc :in-vehicle? true))
-    {:status :success
-     :action-id :mount-vehicle}))
+  (as-agent (agent-target ctx) :mount-vehicle
+            (fn [target]
+              (when-let [send-cmd! (:send-cmd! ctx)]
+                (send-cmd! (str "CMD|execute at " target " run ride " target " mount @e[type=boat,distance=..6,sort=nearest,limit=1]")))
+              (when-let [nav-state (:nav-state ctx)]
+                (swap! nav-state assoc :in-vehicle? true))
+              {:status :success
+               :action-id :mount-vehicle})))
 
 (defmethod execute-action :dismount-vehicle
   [_action-id _action-args ctx]
-  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")]
-    (when-let [send-cmd! (:send-cmd! ctx)]
-      ;; Execução nativa in-server via bridge STAND (.stopRiding() nativo na JVM)
-      (send-cmd! (str "STAND|" target)))
-    (when-let [nav-state (:nav-state ctx)]
-      (swap! nav-state assoc :in-vehicle? false :vehicle-id nil))
-    {:status :success
-     :action-id :dismount-vehicle}))
+  (as-agent (legacy-target ctx (when (= (:speaker ctx) "Karlach") "Karlach")) :dismount-vehicle
+            (fn [target]
+              (when-let [send-cmd! (:send-cmd! ctx)]
+                ;; Execução nativa in-server via bridge STAND (.stopRiding() nativo na JVM)
+                (send-cmd! (str "STAND|" target)))
+              (when-let [nav-state (:nav-state ctx)]
+                (swap! nav-state assoc :in-vehicle? false :vehicle-id nil))
+              {:status :success
+               :action-id :dismount-vehicle})))
 
 (defmethod execute-action :approach-vehicle
   [_action-id action-args ctx]
@@ -74,15 +100,16 @@
 
 (defmethod execute-action :swim-follow
   [_action-id _action-args ctx]
-  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")]
-    (when-let [send-cmd! (:send-cmd! ctx)]
-      ;; Ancoragem espacial obrigatória: executa na origem do bot
-      (send-cmd! (str "CMD|execute at " target " run effect give " target " minecraft:dolphins_grace 10 0 true"))
-      (send-cmd! (str "CMD|execute at " target " run particle minecraft:splash ~ ~0.5 ~ 0.4 0.2 0.4 0.1 15 normal")))
-    (when-let [nav-state (:nav-state ctx)]
-      (swap! nav-state assoc :swimming? true))
-    {:status :success
-     :action-id :swim-follow}))
+  (as-agent (agent-target ctx) :swim-follow
+            (fn [target]
+              (when-let [send-cmd! (:send-cmd! ctx)]
+                ;; Ancoragem espacial obrigatória: executa na origem do bot
+                (send-cmd! (str "CMD|execute at " target " run effect give " target " minecraft:dolphins_grace 10 0 true"))
+                (send-cmd! (str "CMD|execute at " target " run particle minecraft:splash ~ ~0.5 ~ 0.4 0.2 0.4 0.1 15 normal")))
+              (when-let [nav-state (:nav-state ctx)]
+                (swap! nav-state assoc :swimming? true))
+              {:status :success
+               :action-id :swim-follow})))
 
 ;; =============================================================================
 ;; Witch Hat Atelier (Coco & Richeh) Sinergias e Ações de Glifos
@@ -167,20 +194,21 @@
 
 (defmethod execute-action :detect-and-attack-dangerous-mobs
   [_action-id action-args ctx]
-  (let [target (or (:agent-name ctx) (:bot-name ctx) (when (= (:speaker ctx) "Karlach") "Karlach") "Karlach")
-        radius (or (:radius action-args) 16)
-        mobs   (or (:mob-types action-args) dangerous-mob-types)]
-    (when-let [send-cmd! (:send-cmd! ctx)]
-      ;; Ancoragem espacial obrigatória: executa na origem do bot para que os seletores
-      ;; @e e coordenadas relativas sejam resolvidos a partir de Karlach, não de [0,0,0].
-      (doseq [mob mobs]
-        (send-cmd! (str "CMD|execute at " target " run kill @e[type=" mob ",distance=.." radius ",sort=nearest,limit=1]")))
-      ;; Feedback visual e sonoro ancorado na origem do bot
-      (send-cmd! (str "CMD|execute at " target " run particle minecraft:crit ~ ~1 ~ 0.5 0.5 0.5 0.1 20 normal"))
-      (send-cmd! (str "CMD|execute at " target " run playsound minecraft:entity.player.attack.crit master @a ~ ~ ~ 1.0 1.2")))
-    (when-let [nav-state (:nav-state ctx)]
-      (swap! nav-state assoc :combat-mode? true :last-combat-target :dangerous-mobs))
-    {:status :success
-     :action-id :detect-and-attack-dangerous-mobs
-     :radius radius
-     :mob-types (vec mobs)}))
+  (as-agent (agent-target ctx) :detect-and-attack-dangerous-mobs
+            (fn [target]
+              (let [radius (or (:radius action-args) 16)
+                    mobs   (or (:mob-types action-args) dangerous-mob-types)]
+                (when-let [send-cmd! (:send-cmd! ctx)]
+                  ;; Ancoragem espacial obrigatória: executa na origem do bot para que os seletores
+                  ;; @e e coordenadas relativas sejam resolvidos a partir do agente, não de [0,0,0].
+                  (doseq [mob mobs]
+                    (send-cmd! (str "CMD|execute at " target " run kill @e[type=" mob ",distance=.." radius ",sort=nearest,limit=1]")))
+                  ;; Feedback visual e sonoro ancorado na origem do bot
+                  (send-cmd! (str "CMD|execute at " target " run particle minecraft:crit ~ ~1 ~ 0.5 0.5 0.5 0.1 20 normal"))
+                  (send-cmd! (str "CMD|execute at " target " run playsound minecraft:entity.player.attack.crit master @a ~ ~ ~ 1.0 1.2")))
+                (when-let [nav-state (:nav-state ctx)]
+                  (swap! nav-state assoc :combat-mode? true :last-combat-target :dangerous-mobs))
+                {:status :success
+                 :action-id :detect-and-attack-dangerous-mobs
+                 :radius radius
+                 :mob-types (vec mobs)}))))
