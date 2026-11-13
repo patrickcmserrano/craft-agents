@@ -72,6 +72,25 @@
        (let [[px _ pz] pos]
          (> (hdist px pz (node-center (first path))) off-route-radius)))))
 
+(defn agent-pos-from-players
+  "[x y z] do jogador `name` (sem diferenciar maiusculas) na lista de
+   actions/query-online-players, ou nil."
+  [players name]
+  (when-let [p (some #(when (and (:name %) (.equalsIgnoreCase ^String (:name %) ^String name)) %)
+                     players)]
+    [(:x p) (:y p) (:z p)]))
+
+(defn reconcile-pos
+  "real-pos se a distancia 3D a nav-pos exceder threshold; senao nav-pos."
+  [nav-pos real-pos threshold]
+  (if (and nav-pos real-pos
+           (let [[ax ay az] (map double nav-pos)
+                 [bx by bz] (map double real-pos)
+                 dx (- ax bx) dy (- ay by) dz (- az bz)]
+             (> (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz))) (double threshold))))
+    real-pos
+    nav-pos))
+
 (defn follow-speed
   "Velocidade horizontal por tick conforme a distancia ao lider."
   [dist-to-leader]

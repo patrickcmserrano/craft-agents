@@ -511,7 +511,16 @@
                          (let [players (query-online-players)
                                target-p (first (filter #(= (str/lower-case (:name %))
                                                            (str/lower-case (or (:follow-target st) "pace")))
-                                                       players))]
+                                                       players))
+                               ;; CA-065: re-ancora nav-state :pos pela posicao real (mesma lista,
+                               ;; sem chamada extra). Se divergiu, forca replanejamento.
+                               real-pos (loco/agent-pos-from-players players "Karlach")
+                               rec-pos  (loco/reconcile-pos (:pos st) real-pos 0.75)
+                               resync?  (not= rec-pos (:pos st))
+                               _        (when resync?
+                                          (swap! nav-state assoc :pos rec-pos :follow-path []))
+                               st       (if resync? (assoc st :pos rec-pos :follow-path []) st)
+                               [cx cy cz] (:pos st)]
                            (if target-p
                              (let [tx (:x target-p)
                                    ty (:y target-p)
@@ -863,7 +872,18 @@
                          nil
 
                          :else
-                         (let [steps (:steps st)]
+                         (let [;; CA-065: a cada 20 ticks na patrulha, re-ancora :pos pela posicao
+                               ;; real (limiar 1,5). O passo :walk corrente e recalculado a cada tick
+                               ;; a partir de :pos, entao ja segue da posicao real.
+                               rec-pos (when (and (= (:mode st) :sanctuary-patrol) (zero? (mod tick 20)))
+                                         (let [real (try (loco/agent-pos-from-players (query-online-players) "Karlach")
+                                                         (catch Throwable _ nil))
+                                               r (loco/reconcile-pos (:pos st) real 1.5)]
+                                           (when (not= r (:pos st)) r)))
+                               _ (when rec-pos (swap! nav-state assoc :pos rec-pos))
+                               st (if rec-pos (assoc st :pos rec-pos) st)
+                               [cx cy cz] (:pos st)
+                               steps (:steps st)]
                            (if (empty? steps)
                              (if (:sheltering? st false)
                                ;; Abrigada e sem steps: ja esta no quarto. Senta no
