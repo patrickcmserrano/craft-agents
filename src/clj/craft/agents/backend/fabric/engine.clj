@@ -30,6 +30,7 @@
              :refer [global-command-dispatcher record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport
              :refer [bridge-alive? send-bridge-cmd! uformat]]
+            [craft.agents.backend.fabric.watchdog :as wd]
             [craft.agents.astrophysics.ephemeris :as ephem]
             [craft.agents.cognition.critic :as critic])
   (:import [java.io RandomAccessFile]
@@ -164,6 +165,78 @@
   "Levanta a Karlach do banco antes de retomar a ronda (CA-060)."
   []
   (stand-agent! "Karlach"))
+
+;; ============================================================================
+;; CA-066 — Watchdog de progresso (follow e patrulha)
+;; ============================================================================
+
+(defn teleport-karlach-to-leader!
+  "Teleporta a Karlach ao lider (tp + som + particula) e ancora :pos nele."
+  [nav-state leader-name [tx ty tz]]
+  (send-bridge-cmd! (uformat "CMD|tp Karlach %s" leader-name))
+  (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
+  (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
+  (swap! nav-state assoc :pos [tx ty tz] :follow-path []))
+
+(defn- watchdog-hdist [[ax _ az] [bx _ bz]]
+  (let [dx (- (double ax) (double bx)) dz (- (double az) (double bz))]
+    (Math/sqrt (+ (* dx dx) (* dz dz)))))
+
+(defn follow-watchdog-step!
+  "Um tick do watchdog do follow. Devolve `st` atualizado (:pos/:follow-path).
+   Age so na escalada (uma vez por nivel) para nao replanejar a cada tick."
+  [nav-state st leader-name leader-pos tick]
+  (let [w0 (:watchdog st)
+        w1 (if (= :follow (:kind w0)) w0 (assoc (wd/arm leader-pos tick) :kind :follow))
+        w2 (if (> (watchdog-hdist (:goal w1) leader-pos) 3.0) (wd/retarget w1 leader-pos) w1)
+        w3 (wd/progress w2 (:pos st) tick)
+        v  (wd/verdict w3 tick wd/follow-cfg)]
+    (if (or (= v :ok) (= v (:fired w3)))
+      (do (swap! nav-state assoc :watchdog (if (= v :ok) (dissoc w3 :fired) w3))
+          st)
+      (let [w4 (assoc w3 :fired v)
+            [cx cy cz] (:pos st)]
+        (println (format "[karlach-watchdog] follow %s tick=%d pos=%s lider=%s"
+                         (name v) tick (pr-str (:pos st)) (pr-str leader-pos)))
+        (case v
+          :replan
+          (do (swap! nav-state assoc :watchdog w4 :follow-path [])
+              (assoc st :follow-path []))
+
+          :unstick
+          (let [gy (nav/query-ground-y [cx cy cz])]
+            (swap! nav-state assoc :watchdog w4 :follow-path [])
+            (if (and gy (> (Math/abs (- (double gy) (double cy))) 1.0e-6))
+              (do (send-bridge-cmd!
+                   (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                            cx gy cz (double (:yaw st 0.0))))
+                  (swap! nav-state assoc :pos [cx gy cz])
+                  (assoc st :pos [cx gy cz] :follow-path []))
+              (assoc st :follow-path [])))
+
+          :teleport
+          (do (teleport-karlach-to-leader! nav-state leader-name leader-pos)
+              (swap! nav-state assoc :watchdog (assoc (wd/arm leader-pos tick) :kind :follow))
+              (assoc st :pos leader-pos :follow-path [])))))))
+
+(defn patrol-watchdog-fired!
+  "Watchdog do passo :walk da patrulha. Arma a cada novo alvo; devolve true (e
+   limpa o watchdog) quando o passo estagnou e deve ser descartado."
+  [nav-state st cur-step pos tick]
+  (let [goal (:target cur-step)
+        w0   (:watchdog st)
+        w1   (if (and (= :patrol (:kind w0)) (= goal (:goal w0)))
+               w0
+               (assoc (wd/arm goal tick) :kind :patrol))
+        w2   (wd/progress w1 pos tick)
+        v    (wd/verdict w2 tick wd/patrol-cfg)]
+    (if (#{:replan :unstick} v)
+      (do (println (format "[karlach-watchdog] patrulha %s tick=%d pos=%s alvo=%s: descartando passo"
+                           (name v) tick (pr-str pos) (pr-str goal)))
+          (swap! nav-state assoc :watchdog nil)
+          true)
+      (do (swap! nav-state assoc :watchdog w2)
+          false))))
 
 (defn start-live-karlach-loop!
   "Inicia o loop de 20Hz da Karlach e do Capitão Picard no servidor Fabric e atualiza o engine-ctx do Agent Studio."
@@ -534,10 +607,7 @@
                                ;; Teleporte de aproximação se o jogador estiver muito distante (> 48m / outro bioma)
                                (let [total-d (Math/sqrt (+ (* dx dx) (* (- (double ty) (double cy)) (- (double ty) (double cy))) (* dz dz)))]
                                  (when (> total-d 48.0)
-                                   (send-bridge-cmd! (uformat "CMD|tp Karlach %s" (:name target-p)))
-                                   (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
-                                   (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
-                                   (swap! nav-state assoc :pos [tx ty tz] :follow-path [])))
+                                   (teleport-karlach-to-leader! nav-state (:name target-p) [tx ty tz])))
 
                                ;; Sincronização e Composição Multimodal Terra-Barco (2Hz)
                                (when (zero? (mod tick 10))
@@ -620,7 +690,14 @@
                                             :agents (make-agents-map "⛵ navegando embarcada com você" (:pos @nav-state))))
 
                                    ;; Default: :tether-snap-recall ou :follow-player
-                                   (do
+                                   (let [;; CA-066: watchdog de progresso (so aqui: combate/barco
+                                         ;; parados de proposito nao contam como travamento)
+                                         st   (follow-watchdog-step! nav-state st (:name target-p) [tx ty tz] tick)
+                                         [cx cy cz] (:pos st)
+                                         dx   (- tx cx)
+                                         dz   (- tz cz)
+                                         dist (Math/sqrt (+ (* dx dx) (* dz dz)))
+                                         yaw  (compute-yaw dx dz)]
                                      (if (and (<= dist 2.6) (not= (:action decision) :tether-snap-recall))
                                        (do
                                          (send-bridge-cmd!
@@ -967,6 +1044,10 @@
                                          (swap! nav-state #(-> %
                                                                (assoc :leashed? false)
                                                                (assoc :steps recovery-seq)))))
+
+                                     ;; 2. CA-066: passo :walk sem progresso por 20 s => descarta e segue
+                                     (patrol-watchdog-fired! nav-state st cur-step [cx cy cz] tick)
+                                     (swap! nav-state update :steps #(vec (rest %)))
 
                                      ;; 3. Caminhada normal (conducao segura ou patrulha)
                                      :else
