@@ -6,13 +6,18 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [craft.agents.backend.fabric.engine.combat :as combat]
+            [craft.agents.backend.fabric.goals.bt-actions :as bt-actions]
             [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
-            [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport]
-            [craft.agents.npc.registry :as registry]
-            [craft.agents.skills.actions :as skill-actions]))
+            [craft.agents.npc.registry :as registry]))
 
 (declare execute-tree-node!)
+
+;; Guards puros e registro de acoes (CA-094) vivem em goals.bt-actions; reexportados aqui.
+(def bt-action bt-actions/bt-action)
+(def guard-holds? bt-actions/guard-holds?)
+(def ^:private guard-world bt-actions/guard-world)
+(def ^:private stamp-cooldowns! bt-actions/stamp-cooldowns!)
 
 (defn- eval-condition
   "Avalia a condicao `cond-id` de um nó :guard/:condition contra engine-ctx e nav-state."
@@ -68,18 +73,14 @@
     (let [radius (or (:radius (second args)) 10.0)]
       (boolean (some #(<= (:distance %) radius) (get-in @engine-ctx-atom [:perception :hostiles] []))))
 
-    :ally-within-range?
-    (let [max-dist (or (:max-dist (second args)) 3.5)
-          cur-dist (or (get-in @engine-ctx-atom [:perception :ally :distance]) 2.5)]
-      (<= cur-dist max-dist))
+    (:ally-within-range? :interesting-block-nearby? :cooldown-ready?)
+    (guard-holds? cond-id (second args) (guard-world engine-ctx-atom nav-state agent-id))
 
     :ally-distance-exceeds?
     (let [min-dist (or (:min-dist (second args)) 8.0)
           cur-dist (or (get-in @engine-ctx-atom [:perception :ally :distance]) 2.5)]
       (> cur-dist min-dist))
 
-    :cooldown-ready? true
-    :interesting-block-nearby? true
     :in-quiet-corner? true
 
     true))
@@ -150,18 +151,7 @@
           (do (transport/send-bridge-cmd! (str "CMD|playsound " (:sound action-args "minecraft:entity.experience_orb.pickup") " master @a ~ ~ ~ 1.0 1.0"))
               {:status :success :action-id :play-sound})
 
-          (let [act-res (skill-actions/execute-action action-id action-args
-                                                      {:send-cmd! transport/send-bridge-cmd!
-                                                       :say! (fn [msg] (dispatch/say! ctx msg))
-                                                       :agent-name (:agent/name agent)
-                                                       :agent-id (:agent/id agent)
-                                                       :speaker speaker
-                                                       :engine-ctx engine-ctx-atom
-                                                       :nav-state nav-state
-                                                       :sanctuary-route sanctuary-route})]
-            (record-cognitive-event! engine-ctx-atom :motor "Ação Modular"
-                                     (str "Executando ação modular: " action-id " -> " (:status act-res)))
-            act-res))
+          (bt-action action-id action-args (assoc ctx :speaker speaker)))
         (catch Throwable _
           {:status :failure :action action-id})))))
 
@@ -181,7 +171,7 @@
         (loop [children args
                last-res {:status :success}]
           (if (empty? children)
-            last-res
+            (do (stamp-cooldowns! engine-ctx-atom args) last-res)
             (let [res (run (first children))]
               (if (= :success (:status res))
                 (recur (rest children) (if (:action-id res) res last-res))

@@ -10,6 +10,7 @@
             [craft.agents.backend.fabric.actions :refer [ensure-live-bridge-and-agents! feed-hungry-agents!]]
             [craft.agents.backend.fabric.atelier :as atelier]
             [craft.agents.backend.fabric.engine.atelier-tick :refer [tick-atelier!]]
+            [craft.agents.backend.fabric.engine.bt-tick :as bt-tick]
             [craft.agents.backend.fabric.engine.chat :as chat]
             [craft.agents.backend.fabric.engine.combat :as combat]
             [craft.agents.backend.fabric.engine.karlach-tick :refer [tick-karlach!]]
@@ -59,6 +60,7 @@
     (feed-hungry-agents!))
   (tick-picard! env)
   (tick-atelier! env)
+  (bt-tick/tick-bt-agents! env)
   (tick-karlach! env))
 
 (defn- run-loop!
