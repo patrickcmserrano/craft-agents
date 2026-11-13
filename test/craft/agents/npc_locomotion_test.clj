@@ -44,7 +44,8 @@
       (testing nm
         (is (= 1 (count (:commands r))))
         (is (str/starts-with? cmd (str "MOVE|" nm "|")))
-        (is (not (str/includes? cmd "Karlach")) (when-not (= nm "Karlach") "nao vaza o nome da Karlach"))
+        (when-not (= nm "Karlach")
+          (is (not (str/includes? cmd "Karlach")) "nao vaza o nome da Karlach"))
         (is (> (first (:pos r)) 0.5) "avancou em direcao ao lider")
         (is (false? (:holding? r)))))))
 
@@ -88,7 +89,10 @@
    (fn []
      (loop [t 0 st @nav-state]
        (when (<= t ticks)
-         (recur (inc t) (ewd/follow-watchdog-step! nav-state st "pace" leader t nm)))))))
+         ;; o watchdog viaja em `st`: reinjeta o de nav-state a cada tick
+         (let [st' (ewd/follow-watchdog-step! nav-state (assoc st :watchdog (:watchdog @nav-state))
+                                              "pace" leader t nm)]
+           (recur (inc t) st')))))))
 
 (deftest watchdogs-fire-independently-per-agent-test
   (let [leader [200.0 ground-y 0.0]
@@ -112,7 +116,8 @@
         sent (capture
               #(loop [t 0 st @nav-state]
                  (when (<= t 600)
-                   (recur (inc t) (ewd/follow-watchdog-step! nav-state st "pace" [200.0 ground-y 0.0] t)))))]
+                   (recur (inc t) (ewd/follow-watchdog-step! nav-state (assoc st :watchdog (:watchdog @nav-state))
+                                                             "pace" [200.0 ground-y 0.0] t)))))]
     (is (some #(str/starts-with? % "MOVE|Karlach|200.000|") sent))))
 
 ;; ----------------------------------------------------------------------------
