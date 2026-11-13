@@ -626,7 +626,13 @@ public final class SyntheticPlayerFactory {
                     double py = (Double) p.getClass().getMethod("method_23318").invoke(p);
                     double pz = (Double) p.getClass().getMethod("method_23321").invoke(p);
                     if (!first) sb.append(";");
-                    sb.append(pName).append(",").append(px).append(",").append(py).append(",").append(pz);
+                    boolean pSprint = false, pSneak = false;
+                    try {
+                        pSprint = (Boolean) p.getClass().getMethod("method_5624").invoke(p); // isSprinting
+                        pSneak = (Boolean) p.getClass().getMethod("method_5715").invoke(p);  // isSneaking
+                    } catch (Throwable ignored) {}
+                    sb.append(pName).append(",").append(px).append(",").append(py).append(",").append(pz)
+                      .append(",").append(pSprint).append(",").append(pSneak);
                     first = false;
                 }
                 return sb.toString();

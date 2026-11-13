@@ -714,11 +714,13 @@
                                          dx   (- tx cx)
                                          dz   (- tz cz)
                                          dist (Math/sqrt (+ (* dx dx) (* dz dz)))
-                                         yaw  (compute-yaw dx dz)]
+                                         yaw  (compute-yaw dx dz)
+                                         gait (loco/mirror-gait target-p dist)
+                                         sn   (str (:sneak gait))]
                                      (if (and (<= dist 2.6) (not= (:action decision) :tether-snap-recall))
                                        (do
                                          (send-bridge-cmd!
-                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                                          (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|%s" cx cy cz yaw sn))
                                          (swap! nav-state assoc :yaw yaw :follow-path []))
                                        (let [path-queue (:follow-path st [])
                                              last-target (:follow-last-target st)
@@ -733,15 +735,15 @@
                                                  (open-portal-at-coord! pcoord)
                                                  (swap! nav-state assoc :opened-portal pcoord)))
                                              (let [r (loco/advance-path {:pos [cx cy cz] :path active-path
-                                                                         :speed (loco/follow-speed dist) :yaw yaw})
+                                                                         :speed (:speed gait) :yaw yaw})
                                                    [step-x step-y step-z] (:pos r)]
                                                (send-bridge-cmd!
-                                                (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|true|false" step-x step-y step-z (:yaw r)))
+                                                (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|%s|%s" step-x step-y step-z (:yaw r) (str (:sprint gait)) sn))
                                                (swap! nav-state assoc :pos (:pos r) :yaw (:yaw r) :follow-path (:path r) :follow-last-target [tx ty tz])))
                                            ;; Sem caminho navegavel: gira na direcao do jogador e aguarda (NUNCA atravessa paredes!)
                                            (do
                                              (send-bridge-cmd!
-                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                                              (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|%s" cx cy cz yaw sn))
                                              (swap! nav-state assoc :yaw yaw)))))
                                      (when-let [op-portal (:opened-portal @nav-state)]
                                        (let [[ox _ oz] op-portal

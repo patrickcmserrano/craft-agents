@@ -129,6 +129,27 @@
          :yaw (nav/compute-yaw dx dz)
          :arrived? (and (= x nx) (= z nz))}))))
 
+(defn parse-player-entry
+  "Entrada de PLAYERS `nome,x,y,z[,sprint,sneak]` -> mapa (flags ausentes = false)."
+  [entry]
+  (let [[pname sx sy sz sprint sneak] (.split ^String entry ",")]
+    (when (and pname sx sy sz)
+      {:name pname
+       :x (Double/parseDouble sx) :y (Double/parseDouble sy) :z (Double/parseDouble sz)
+       :sprinting? (= "true" sprint)
+       :sneaking? (= "true" sneak)})))
+
+(defn mirror-gait
+  "Marcha da Karlach espelhando o lider: {:sprint :sneak :speed}.
+   Agachado devagar (levanta se ficou > 8m pra tras); correndo -> sprint;
+   andando -> anda, mas corre pra alcancar se > 6m."
+  [{:keys [sprinting? sneaking?]} dist-to-leader]
+  (let [d (double dist-to-leader)]
+    (cond
+      (and sneaking? (<= d 8.0)) {:sprint false :sneak true :speed 0.08}
+      (or sprinting? (> d 6.0))  {:sprint true :sneak false :speed 0.28}
+      :else                      {:sprint false :sneak false :speed 0.22})))
+
 (defn follow-speed
   "Velocidade horizontal por tick conforme a distancia ao lider."
   [dist-to-leader]

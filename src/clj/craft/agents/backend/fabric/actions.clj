@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
+            [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.transport :as transport :refer [uformat]]))
 
 (defn karlach-say! [msg]
@@ -89,14 +90,7 @@
         (if (str/blank? payload)
           []
           (vec
-           (keep (fn [entry]
-                   (let [[pname sx sy sz] (str/split entry #",")]
-                     (when (and pname sx sy sz)
-                       {:name pname
-                        :x (Double/parseDouble sx)
-                        :y (Double/parseDouble sy)
-                        :z (Double/parseDouble sz)})))
-                 (str/split payload #";")))))
+           (keep loco/parse-player-entry (str/split payload #";")))))
       [])))
 
 (defn query-leash-status

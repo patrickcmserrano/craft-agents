@@ -19,7 +19,8 @@
             [craft.agents.astrophysics-test]
             [craft.agents.karlach-rain-shelter-test]
             [craft.agents.karlach-locomotion-test]
-            [craft.agents.karlach-strike-cooldown-test]))
+            [craft.agents.karlach-strike-cooldown-test]
+            [craft.agents.karlach-gait-mirror-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -40,6 +41,7 @@
    {:epic 14 :title "Epico V (Astrophysics) — Efemerides, HR Starfield & Consciencia Celeste (CA-050..CA-052)" :ns 'craft.agents.astrophysics-test}
    {:epic 15 :title "Epico VI (Clima) — Abrigo Autonomo da Karlach contra Chuva (CA-060)" :ns 'craft.agents.karlach-rain-shelter-test}
    {:epic 17 :title "Epico VIII (Locomocao) — Karlach: A* recupera partida, walk-step, watchdog e classes frescas (CA-062..CA-080)" :ns 'craft.agents.karlach-locomotion-test}
+   {:epic 19 :title "Epico X (Marcha) — Karlach espelha sprint/agachar do lider" :ns 'craft.agents.karlach-gait-mirror-test}
    {:epic 18 :title "Epico IX (Combate) — Karlach: cooldown de golpe melee" :ns 'craft.agents.karlach-strike-cooldown-test}])
 
 (defn- parse-args [args]
