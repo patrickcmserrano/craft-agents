@@ -1,9 +1,11 @@
 (ns craft.agents.karlach-locomotion-test
   "Locomocao da Karlach: A* recupera partida dentro de solido (CA-062)."
   (:require [clojure.test :refer [deftest is testing]]
+            [craft.agents.backend.fabric.navigation :as nav]
+            [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.fixtures.world-fixture :as wf])
   (:import [com.craft.agents.api CollisionType PathNodeStep$StepAction PathResult$Status]
-           [com.craft.agents.nav GoalBlock GoalNear MovementCapabilities PackedPos PathSolver3D]))
+           [com.craft.agents.nav GoalBlock GoalNear GroundSnap MovementCapabilities PackedPos PathSolver3D]))
 
 (defn- stone! [w coords]
   (doseq [[x y z] coords]
@@ -50,3 +52,32 @@
         (is (= [1 65 0] (step-xyz (first steps))))
         (is (every? #(= PathNodeStep$StepAction/WALK (.action %)) steps))
         (is (= (mapv #(vector % 65 0) (range 1 11)) (mapv step-xyz steps)))))))
+
+(deftest ca-063-ground-snap-test
+  (testing "CA-063: findStandableY no mundo plano (chao 64)"
+    (let [vox (wf/->voxel-accessor (wf/make-flat-world-state 64))]
+      (is (= 65 (GroundSnap/findStandableY vox 0 65 0 4 6)))
+      (is (= 65 (GroundSnap/findStandableY vox 0 62 0 3 6)) "enterrado, sobe 3")
+      (is (= 65 (GroundSnap/findStandableY vox 0 70 0 4 5)) "no ar, desce 5")))
+  (testing "CA-063: morro sobe para 68"
+    (let [w (wf/make-flat-world-state 64)
+          _ (stone! w [[0 65 0] [0 66 0] [0 67 0]])
+          vox (wf/->voxel-accessor w)]
+      (is (= 68 (GroundSnap/findStandableY vox 0 66 0 4 6)))))
+  (testing "CA-063: sem solucao dentro dos limites => MIN_VALUE"
+    (let [vox (wf/->voxel-accessor (wf/make-flat-world-state 64))]
+      (is (= Integer/MIN_VALUE (GroundSnap/findStandableY vox 0 62 0 2 6)))
+      (is (= Integer/MIN_VALUE (GroundSnap/findStandableY vox 0 75 0 4 5))))))
+
+(deftest ca-063-query-ground-y-test
+  (testing "CA-063: query-ground-y traduz a resposta da ponte"
+    (let [sent (atom nil)]
+      (with-redefs [transport/send-bridge-cmd! (fn [c] (reset! sent c) "OK|69")]
+        (is (= 69.0 (nav/query-ground-y [-596.3 67.0 -592.8])))
+        (is (= "GROUND|-597|67|-593" @sent))))
+    (with-redefs [transport/send-bridge-cmd! (fn [_] "ERR|NO_GROUND")]
+      (is (nil? (nav/query-ground-y [0.0 65.0 0.0]))))
+    (with-redefs [transport/send-bridge-cmd! (fn [_] nil)]
+      (is (nil? (nav/query-ground-y [0.0 65.0 0.0]))))
+    (with-redefs [transport/send-bridge-cmd! (fn [_] "OK|abc")]
+      (is (nil? (nav/query-ground-y [0.0 65.0 0.0]))))))
