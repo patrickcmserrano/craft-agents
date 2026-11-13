@@ -38,7 +38,7 @@
    {:epic 16 :title "Epico VII (Sentry) — Deduplicacao de Chat por Identidade de Evento" :ns 'craft.agents.sentry-test}
    {:epic 14 :title "Epico V (Astrophysics) — Efemerides, HR Starfield & Consciencia Celeste (CA-050..CA-052)" :ns 'craft.agents.astrophysics-test}
    {:epic 15 :title "Epico VI (Clima) — Abrigo Autonomo da Karlach contra Chuva (CA-060)" :ns 'craft.agents.karlach-rain-shelter-test}
-   {:epic 17 :title "Epico VIII (Locomocao) — Karlach: A* recupera partida em solido (CA-062)" :ns 'craft.agents.karlach-locomotion-test}])
+   {:epic 17 :title "Epico VIII (Locomocao) — Karlach: A* recupera partida, walk-step, watchdog e classes frescas (CA-062..CA-080)" :ns 'craft.agents.karlach-locomotion-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
