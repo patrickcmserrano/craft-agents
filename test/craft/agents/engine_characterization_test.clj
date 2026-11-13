@@ -116,14 +116,18 @@
         (is (= st0 (ewd/follow-watchdog-step! nav-state st0 "pace" leader 0)))
         (is (= :follow (:kind (:watchdog @nav-state))))
         (is (nil? (:fired (:watchdog @nav-state)))))
+      ;; o watchdog viaja em `st` (o loop le nav-state e o repassa): reinjeta a cada tick
       (testing "40 ticks parado: replan limpa o caminho, uma vez so"
-        (let [st1 (ewd/follow-watchdog-step! nav-state st0 "pace" leader 40)]
+        (let [st1 (ewd/follow-watchdog-step! nav-state (assoc st0 :watchdog (:watchdog @nav-state))
+                                             "pace" leader 40)]
           (is (= [] (:follow-path st1)))
           (is (= :replan (:fired (:watchdog @nav-state))))
-          (is (= st1 (ewd/follow-watchdog-step! nav-state st1 "pace" leader 41))
-              "mesmo nivel de escalada nao age de novo")))
+          (let [st1w (assoc st1 :watchdog (:watchdog @nav-state))]
+            (is (= st1w (ewd/follow-watchdog-step! nav-state st1w "pace" leader 41))
+                "mesmo nivel de escalada nao age de novo"))))
       (testing "160 ticks parado: teleporta ao lider via MOVE"
-        (let [st2 (ewd/follow-watchdog-step! nav-state st0 "pace" leader 160)]
+        (let [st2 (ewd/follow-watchdog-step! nav-state (assoc st0 :watchdog (:watchdog @nav-state))
+                                             "pace" leader 160)]
           (is (= leader (:pos st2)))
           (is (= [] (:follow-path st2)))
           (is (= leader (:pos @nav-state)))
@@ -238,7 +242,8 @@
   (is (false? (follow/follow-hold? 2.7 :follow-player)))
   (is (false? (follow/follow-hold? 1.0 :tether-snap-recall)))
   (is (= {:action :wait :follow-lost-ticks 1} (follow/follow-lost-decision {})))
-  (is (= {:action :wait :follow-lost-ticks 60} (follow/follow-lost-decision {:follow-lost-ticks 59})))
+  (is (= {:action :wait :follow-lost-ticks 59} (follow/follow-lost-decision {:follow-lost-ticks 58})))
+  (is (= {:action :give-up :follow-lost-ticks 0} (follow/follow-lost-decision {:follow-lost-ticks 59})))
   (is (= {:action :give-up :follow-lost-ticks 0} (follow/follow-lost-decision {:follow-lost-ticks 60}))))
 
 ;; ----------------------------------------------------------------------------
