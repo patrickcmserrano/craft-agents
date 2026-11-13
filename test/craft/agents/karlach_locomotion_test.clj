@@ -147,3 +147,21 @@
 (deftest ca-064-follow-speed-test
   (is (= 0.28 (loco/follow-speed 10.0)))
   (is (= 0.22 (loco/follow-speed 3.0))))
+
+(deftest ca-065-agent-pos-from-players-test
+  (let [players [{:name "Steve" :x 1.0 :y 65.0 :z 2.0}
+                 {:name "karlach" :x -596.5 :y 67.0 :z -592.5}]]
+    (testing "acha Karlach sem diferenciar maiusculas"
+      (is (= [-596.5 67.0 -592.5] (loco/agent-pos-from-players players "Karlach"))))
+    (testing "ausente => nil"
+      (is (nil? (loco/agent-pos-from-players players "Astarion")))
+      (is (nil? (loco/agent-pos-from-players [] "Karlach")))
+      (is (nil? (loco/agent-pos-from-players nil "Karlach"))))))
+
+(deftest ca-065-reconcile-pos-test
+  (testing "divergencia 0,5 com limiar 0,75 mantem a estimativa"
+    (is (= [0.0 65.0 0.0] (loco/reconcile-pos [0.0 65.0 0.0] [0.5 65.0 0.0] 0.75))))
+  (testing "divergencia so vertical de 2,0 (enterrada) adota a real"
+    (is (= [0.0 63.0 0.0] (loco/reconcile-pos [0.0 65.0 0.0] [0.0 63.0 0.0] 0.75))))
+  (testing "real nil mantem"
+    (is (= [0.0 65.0 0.0] (loco/reconcile-pos [0.0 65.0 0.0] nil 0.75)))))
