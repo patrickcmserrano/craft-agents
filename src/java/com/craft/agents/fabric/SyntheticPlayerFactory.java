@@ -509,8 +509,49 @@ public final class SyntheticPlayerFactory {
                                             .invoke(player, vx, 0.0, vz);
                                 }
                             } catch (Throwable ignored) {}
+                        } else if (((java.util.Set<?>) player.getClass().getMethod("method_5752").invoke(player)).contains("craft_glide")) {
+                            // Voo de elytra espelhando o lider: tag "craft_glide" (sem captura/lambda nova: hot-swap)
+                            try {
+                                player.getClass().getMethod("method_23669").invoke(player); // startFallFlying
+                                Class<?> poseCls = Class.forName("net.minecraft.class_4050", true, cl);
+                                Object flyPose = poseCls.getField("field_18077").get(null); // FALL_FLYING
+                                player.getClass().getMethod("method_18380", poseCls).invoke(player, flyPose);
+                            } catch (Throwable t) {
+                                System.out.println("[craft-agents] Aviso: glide falhou: " + t);
+                            }
+                            // Asa visivel: player sintetico nao tica a rede, entao o sync de equipamento
+                            // nunca sai. Broadcast manual do EntityEquipmentUpdateS2CPacket (peito).
+                            try {
+                                Class<?> slotCls = Class.forName("net.minecraft.class_1304", true, cl);
+                                Object chest = slotCls.getField("field_6174").get(null); // CHEST
+                                Object stack = player.getClass().getMethod("method_6118", slotCls).invoke(player, chest);
+                                Object pair = Class.forName("com.mojang.datafixers.util.Pair", true, cl).getMethod("of", Object.class, Object.class)
+                                        .invoke(null, chest, stack);
+                                int eid = (Integer) player.getClass().getMethod("method_5628").invoke(player); // getId
+                                Class<?> pktCls = Class.forName("net.minecraft.class_2744", true, cl);
+                                Object pkt = pktCls.getConstructor(int.class, List.class)
+                                        .newInstance(eid, java.util.Collections.singletonList(pair));
+                                Object gw = player.getClass().getMethod("method_51469").invoke(player);
+                                Object cm = gw.getClass().getMethod("method_14178").invoke(gw);
+                                Class<?> entCls = Class.forName("net.minecraft.class_1297", true, cl);
+                                Class<?> packetIf = Class.forName("net.minecraft.class_2596", true, cl);
+                                for (Method m : cm.getClass().getMethods()) {
+                                    Class<?>[] pt = m.getParameterTypes();
+                                    if ("method_18754".equals(m.getName()) && pt.length == 2
+                                            && pt[0] == entCls && pt[1] == packetIf) {
+                                        m.invoke(cm, player, pkt);
+                                        break;
+                                    }
+                                }
+                            } catch (Throwable t) {
+                                System.out.println("[craft-agents] Aviso: sync da elytra falhou: " + t);
+                            }
                         } else {
                             try {
+                                try {
+                                    if ((Boolean) player.getClass().getMethod("method_6128").invoke(player)) // isFallFlying
+                                        player.getClass().getMethod("method_23670").invoke(player);          // stopFallFlying
+                                } catch (Throwable ignored) {}
                                 player.getClass().getMethod("method_5796", boolean.class).invoke(player, false);
                                 // O reset para STANDING estava gated em `!sneak`: com
                                 // sneak=true a pose SWIMMING ficava grudada para sempre
@@ -631,8 +672,10 @@ public final class SyntheticPlayerFactory {
                         pSprint = (Boolean) p.getClass().getMethod("method_5624").invoke(p); // isSprinting
                         pSneak = (Boolean) p.getClass().getMethod("method_5715").invoke(p);  // isSneaking
                     } catch (Throwable ignored) {}
+                    boolean pGlide = false;
+                    try { pGlide = (Boolean) p.getClass().getMethod("method_6128").invoke(p); } catch (Throwable ignored) {} // isFallFlying
                     sb.append(pName).append(",").append(px).append(",").append(py).append(",").append(pz)
-                      .append(",").append(pSprint).append(",").append(pSneak);
+                      .append(",").append(pSprint).append(",").append(pSneak).append(",").append(pGlide);
                     first = false;
                 }
                 return sb.toString();

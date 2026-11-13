@@ -132,12 +132,40 @@
 (defn parse-player-entry
   "Entrada de PLAYERS `nome,x,y,z[,sprint,sneak]` -> mapa (flags ausentes = false)."
   [entry]
-  (let [[pname sx sy sz sprint sneak] (.split ^String entry ",")]
+  (let [[pname sx sy sz sprint sneak glide] (.split ^String entry ",")]
     (when (and pname sx sy sz)
       {:name pname
        :x (Double/parseDouble sx) :y (Double/parseDouble sy) :z (Double/parseDouble sz)
        :sprinting? (= "true" sprint)
-       :sneaking? (= "true" sneak)})))
+       :sneaking? (= "true" sneak)
+       :gliding? (= "true" glide)})))
+
+(defn glide-phase
+  ":fly (lider voando), :land (ela no ar, lider pousou, ainda longe),
+   :touchdown (ela no ar e ja perto: encerra o voo) ou :ground."
+  [leader karlach-gliding? dist3]
+  (cond
+    (:gliding? leader)                         :fly
+    (and karlach-gliding? (> (double dist3) 2.5)) :land
+    karlach-gliding?                           :touchdown
+    :else                                      :ground))
+
+(defn flight-step
+  "Passo de voo livre em 3D rumo ao rastro do lider (`trail` m antes dele).
+   Passo proporcional ao vao, limitado a `max-step` por tick. Devolve {:pos :yaw :pitch}."
+  [{:keys [pos leader trail max-step]}]
+  (let [[kx ky kz] (map double pos)
+        [lx ly lz] (map double leader)
+        dx (- lx kx) dy (- ly ky) dz (- lz kz)
+        d  (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz)))
+        gap (- d (double trail))
+        yaw (float (* (/ 180.0 Math/PI) (Math/atan2 (- dx) dz)))
+        pitch (float (- (* (/ 180.0 Math/PI) (Math/atan2 dy (Math/sqrt (+ (* dx dx) (* dz dz)))))))]
+    (if (<= gap 0.0)
+      {:pos pos :yaw yaw :pitch pitch}
+      (let [step (min gap (double max-step) (max 0.8 (* 0.4 gap)))
+            k (/ step d)]
+        {:pos [(+ kx (* k dx)) (+ ky (* k dy)) (+ kz (* k dz))] :yaw yaw :pitch pitch}))))
 
 (defn mirror-gait
   "Marcha da Karlach espelhando o lider: {:sprint :sneak :speed}.

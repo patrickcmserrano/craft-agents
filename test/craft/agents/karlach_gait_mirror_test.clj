@@ -22,7 +22,7 @@
     (let [g (loco/mirror-gait {:sneaking? true} 12.0)]
       (is (false? (:sneak g))) (is (pos? (:speed g)))))
   (testing "parsing de PLAYERS com flags e sem flags (compat)"
-    (is (= {:name "pace" :x 1.0 :y 2.0 :z 3.0 :sprinting? true :sneaking? false}
+    (is (= {:name "pace" :x 1.0 :y 2.0 :z 3.0 :sprinting? true :sneaking? false :gliding? false}
            (loco/parse-player-entry "pace,1.0,2.0,3.0,true,false")))
-    (is (= {:name "pace" :x 1.0 :y 2.0 :z 3.0 :sprinting? false :sneaking? false}
+    (is (= {:name "pace" :x 1.0 :y 2.0 :z 3.0 :sprinting? false :sneaking? false :gliding? false}
            (loco/parse-player-entry "pace,1.0,2.0,3.0")))))

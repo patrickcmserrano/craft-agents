@@ -641,6 +641,34 @@
                                        (swap! nav-state assoc :in-vehicle? true)))
                                    (catch Throwable _ nil)))
 
+                               ;; Voo de elytra espelhando o lider: tem prioridade sobre combate/A*
+                               (let [dist3 (Math/sqrt (+ (* dx dx) (* dz dz) (Math/pow (- (double ty) (double cy)) 2)))
+                                     phase (loco/glide-phase target-p (:gliding? @nav-state) dist3)]
+                                 (case phase
+                                   (:fly :land)
+                                   (let [r (loco/flight-step {:pos (:pos @nav-state) :leader [tx ty tz]
+                                                              :trail (if (= phase :fly) 3.0 1.5) :max-step 2.5})
+                                         [fx fy fz] (:pos r)]
+                                     (when-not (:gliding? @nav-state)
+                                       (send-bridge-cmd! "CMD|item replace entity Karlach armor.chest with minecraft:elytra")
+                                       (send-bridge-cmd! "CMD|tag Karlach add craft_glide"))
+                                     (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
+                                                                fx fy fz (double (:yaw r)) (double (:pitch r))))
+                                     (swap! nav-state assoc :gliding? true :pos [fx fy fz] :yaw (:yaw r) :follow-path []
+                                            :watchdog nil)
+                                     (swap! engine-ctx-atom assoc :tick tick
+                                            :leases {:legs {:owner :elytra-follow} :hands nil :gaze {:owner :elytra-follow}}
+                                            :agents (make-agents-map "🪽 voando com você" [fx fy fz])))
+                                   :touchdown
+                                   (let [[px py pz] (:pos @nav-state)
+                                         gy (or (nav/query-ground-y [px py pz]) py)]
+                                     (send-bridge-cmd! "CMD|tag Karlach remove craft_glide")
+                                     (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
+                                                                px (double gy) pz (double (:yaw st 0.0))))
+                                     (swap! nav-state assoc :gliding? false :pos [px (double gy) pz] :follow-path []))
+                                   nil))
+
+                               (when-not (:gliding? @nav-state)
                                ;; Varredura tática e preempção de combate reativo (CA-049)
                                (let [hostiles (if (zero? (mod tick 4))
                                                 (try (let [h (scan-nearby-hostiles "Karlach" 14.0)]
@@ -759,7 +787,7 @@
                                                                                    (str "⚡ retornando ao líder (tether snap)")
                                                                                    (if (= (:mode st) :bodyguard) (str "🛡️ guarda-costas de " (:name target-p)) (str "escoltando " (:name target-p))))
                                                                                  (:pos @nav-state))
-                                                     :picard  picard-card})))))
+                                                     :picard  picard-card}))))))
                              ;; Debounce para evitar cancelamento por oscilação momentânea do socket
                              (let [lost-cnt (inc (:follow-lost-ticks st 0))]
                                (if (>= lost-cnt 60)
