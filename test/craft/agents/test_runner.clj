@@ -57,7 +57,8 @@
    {:epic 23 :title "CA-084 — Caracterizacao do engine.clj e sub-namespaces" :ns 'craft.agents.engine-characterization-test}
    {:epic 24 :title "CA-085 — Caracterizacao do goals.clj e sub-namespaces" :ns 'craft.agents.goals-characterization-test}
    {:epic 25 :title "CA-086 — Registro de agentes com schema Malli" :ns 'craft.agents.npc.registry-test}
-   {:epic 26 :title "CA-087 — Fala unificada (npc.speech)" :ns 'craft.agents.npc-speech-test}])
+   {:epic 26 :title "CA-087 — Fala unificada (npc.speech)" :ns 'craft.agents.npc-speech-test}
+   {:epic 27 :title "CA-088 — Spawn e loadout guiados pelo registro" :ns 'craft.agents.npc-spawn-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
