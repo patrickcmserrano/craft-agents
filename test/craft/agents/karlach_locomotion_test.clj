@@ -4,6 +4,7 @@
             [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.backend.fabric.watchdog :as wd]
             [craft.agents.fixtures.world-fixture :as wf])
   (:import [com.craft.agents.api CollisionType PathNodeStep$StepAction PathResult$Status]
            [com.craft.agents.nav GoalBlock GoalNear GroundSnap MovementCapabilities PackedPos PathSolver3D]))
@@ -165,3 +166,64 @@
     (is (= [0.0 63.0 0.0] (loco/reconcile-pos [0.0 65.0 0.0] [0.0 63.0 0.0] 0.75))))
   (testing "real nil mantem"
     (is (= [0.0 65.0 0.0] (loco/reconcile-pos [0.0 65.0 0.0] nil 0.75)))))
+
+;; ---------------------------------------------------------------- CA-066
+
+(def ^:private follow-cfg {:replan 40 :unstick 60 :teleport 160})
+(def ^:private patrol-cfg {:replan 400 :unstick 400 :teleport ##Inf})
+
+(defn- run-still
+  "Arma em tick 0 e fica parado em `pos`; devolve {tick veredito} para `ticks`."
+  [goal pos cfg ticks]
+  (let [w0 (wd/progress (wd/arm goal 0) pos 0)]
+    (into {} (map (fn [t] [t (wd/verdict w0 t cfg)])) ticks)))
+
+(deftest ca-066-arm-test
+  (is (= {:goal [5.0 65.0 5.0] :best-dist ##Inf :last-progress-tick 7}
+         (select-keys (wd/arm [5.0 65.0 5.0] 7) [:goal :best-dist :last-progress-tick]))))
+
+(deftest ca-066-continuous-approach-test
+  (testing "aproximacao de 0,28/tick por 200 ticks => sempre :ok"
+    (loop [t 0 w (wd/arm [100.0 65.0 0.0] 0) pos-x 0.0]
+      (when (< t 200)
+        (let [w' (wd/progress w [pos-x 65.0 0.0] t)]
+          (is (= :ok (wd/verdict w' t follow-cfg)) (str "tick " t))
+          (recur (inc t) w' (+ pos-x 0.28)))))))
+
+(deftest ca-066-stuck-escalation-test
+  (let [v (run-still [10.0 65.0 0.0] [0.0 65.0 0.0] follow-cfg [39 40 59 60 159 160])]
+    (is (= :ok (v 39)))
+    (is (= :replan (v 40)))
+    (is (= :replan (v 59)))
+    (is (= :unstick (v 60)))
+    (is (= :unstick (v 159)))
+    (is (= :teleport (v 160)))))
+
+(deftest ca-066-near-counts-as-progress-test
+  (loop [t 0 w (wd/arm [2.0 65.0 0.0] 0)]
+    (when (<= t 300)
+      (let [w' (wd/progress w [0.0 65.0 0.0] t)]
+        (is (= :ok (wd/verdict w' t follow-cfg)) (str "tick " t))
+        (recur (inc t) w')))))
+
+(deftest ca-066-oscillation-keeps-clock-test
+  (let [w0 (wd/progress (wd/arm [10.0 65.0 0.0] 0) [0.0 65.0 0.0] 0)
+        ;; vai e volta 0,3 — nunca 0,5 abaixo do melhor
+        w1 (reduce (fn [w t] (wd/progress w [(if (even? t) 0.0 0.3) 65.0 0.0] t))
+                   w0 (range 1 40))]
+    (is (= :ok (wd/verdict w1 39 follow-cfg)))
+    (is (= :replan (wd/verdict (wd/progress w1 [0.3 65.0 0.0] 40) 40 follow-cfg)))))
+
+(deftest ca-066-retarget-keeps-clock-test
+  (let [w0 (wd/progress (wd/arm [10.0 65.0 0.0] 0) [0.0 65.0 0.0] 0)
+        w1 (wd/retarget w0 [12.0 65.0 0.0])]
+    (is (= [12.0 65.0 0.0] (:goal w1)))
+    (is (= (:last-progress-tick w0) (:last-progress-tick w1)))
+    (is (= :ok (wd/verdict w1 39 follow-cfg)))
+    (is (= :replan (wd/verdict (wd/progress w1 [0.0 65.0 0.0] 40) 40 follow-cfg)))))
+
+(deftest ca-066-patrol-cfg-test
+  (let [v (run-still [10.0 65.0 0.0] [0.0 65.0 0.0] patrol-cfg [399 400 5000])]
+    (is (= :ok (v 399)))
+    (is (= :replan (v 400)))
+    (is (not= :teleport (v 5000)))))
