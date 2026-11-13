@@ -1,6 +1,6 @@
 # 12 — Backlog: paridade Mineflayer → Server-Native (locomoção e corpo)
 
-> **Status:** Sprint `karlach-nav-01` concluída e em `main` (`f12b328`, 2026-11-12) · Sprint `karlach-nav-02` planejada — nenhuma tarefa iniciada
+> **Status:** Sprint `karlach-nav-01` concluída e em `main` (`f12b328`, 2026-11-12) · Sprint `karlach-nav-02` concluída e implantada (`main` em `bfbea8f`, 2026-11-12 ~22:22; verificação ao vivo na CA-082)
 > **Criado em:** 2026-11-12
 > **Origem:** diagnóstico ao vivo da Karlach server-native, documentado em [`11-mineflayer-vs-server-native.md`](11-mineflayer-vs-server-native.md) (evidências M1–M6).
 > **Objetivo da sprint:** a Karlach segue o jogador sem se enterrar e, se travar, sai sozinha em poucos segundos.
@@ -226,6 +226,16 @@ Checklist, depois do merge da CA-080 em `main`:
 4. `PATH|-181.5,62.0,171.5|-176.5,65.0,175.5|1.5` (partida enterrada) → `OK|…` com o primeiro passo em pé.
 5. Follow por 5 min em terreno acidentado: nenhuma posição enterrada (`BLOCK` nos pés = ar); distância ao jogador ≤ 6 m andando e ≤ 10 m correndo; linhas `[karlach-watchdog]` raras.
 6. Registrar os resultados neste documento (status da sprint 2) e fazer o push de `main` para `origin` (estava 33+ commits à frente em 2026-11-12).
+
+**Resultado (2026-11-12, ~22:22, com jogadores online — só o engine foi reiniciado, o servidor Minecraft não):**
+
+| Item | Resultado |
+|---|---|
+| 2 | `systemctl --user restart craft-agents` + `make attach`: `SyntheticPlayerFactory hot-redefined com sucesso`; `FreshNavClassLoader` no Knot. O erro "attempted to add a method" no `PathSolver3D` do Knot continua aparecendo e é esperado: os ops não usam mais essa cópia. |
+| 3 | `GROUND\|-182\|62\|171` → `OK\|65`; `GROUND\|-182\|69\|171` → `OK\|65`; `GROUND\|-182\|65\|171` → `OK\|65`. ✅ |
+| 4 | `PATH` de `-181.5,62.0,171.5` (enterrada) → `OK\|-182,65,171,JUMP_UP;-181,65,171,WALK;…` (antes: `ERR\|NO_PATH`). ✅ |
+| 5 | **Pendente:** depende de um jogador pedir follow e andar em terreno acidentado. |
+| 6 | Este registro + push de `main`. ✅ |
 
 ### CA-083
 **Picard: passo `:walk` da ponte com `locomotion/walk-step`** — P2 · camada 3
