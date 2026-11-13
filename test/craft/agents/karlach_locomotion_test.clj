@@ -227,3 +227,29 @@
     (is (= :ok (v 399)))
     (is (= :replan (v 400)))
     (is (not= :teleport (v 5000)))))
+
+(defn- walk-run [pos target speed max-ticks]
+  (loop [t 0 pos pos ys []]
+    (let [r (loco/walk-step {:pos pos :target target :speed speed :yaw 0.0})]
+      (if (or (:arrived? r) (>= t max-ticks))
+        {:final r :ys (conj ys (second (:pos r))) :ticks t}
+        (recur (inc t) (:pos r) (conj ys (second (:pos r))))))))
+
+(deftest ca-067-walk-step-holds-y-when-target-below-test
+  (let [{:keys [final ys]} (walk-run [0.5 66.0 0.5] [3.5 64.0 0.5] 0.245 100)]
+    (is (:arrived? final))
+    (is (= [3.5 64.0 0.5] (:pos final)))
+    (is (every? #(= 66.0 %) (butlast ys)) "y so desce na chegada")))
+
+(deftest ca-067-walk-step-climbs-on-first-tick-test
+  (let [r (loco/walk-step {:pos [0.5 65.0 0.5] :target [3.5 66.0 0.5] :speed 0.245 :yaw 0.0})]
+    (is (= 66.0 (second (:pos r))))
+    (is (false? (:arrived? r)))
+    (is (< (first (:pos r)) 3.5))
+    (is (= -90.0 (:yaw r)))))
+
+(deftest ca-067-walk-step-arrives-within-radius-test
+  (let [r (loco/walk-step {:pos [3.4 65.0 0.5] :target [3.5 64.0 0.5] :speed 0.245 :yaw 12.0})]
+    (is (true? (:arrived? r)))
+    (is (= [3.5 64.0 0.5] (:pos r)))
+    (is (= 12.0 (:yaw r)))))
