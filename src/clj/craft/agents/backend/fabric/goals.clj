@@ -213,7 +213,7 @@
         target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
         tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))]
     (when target-p
-      (transport/send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (actions/teleport-agent-to! "Karlach" [(:x target-p) (:y target-p) (:z target-p)])
       (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
       (transport/send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 35 normal")
       (swap! nav-state assoc
@@ -241,7 +241,7 @@
                     0.0)]
     ;; Teleporte apenas de emergencia se estiver muito distante (> 48m / outro bioma)
     (when (and target-p (> dist-to-p 48.0))
-      (transport/send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (actions/teleport-agent-to! "Karlach" [(:x target-p) (:y target-p) (:z target-p)])
       (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
       (transport/send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
     (swap! nav-state assoc
@@ -271,7 +271,7 @@
                     0.0)]
     ;; Teleporte apenas de emergencia se estiver muito distante (> 48m / outro bioma)
     (when (and target-p (> dist-to-p 48.0))
-      (transport/send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (actions/teleport-agent-to! "Karlach" [(:x target-p) (:y target-p) (:z target-p)])
       (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
       (transport/send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
     (transport/send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_axe")
@@ -307,7 +307,7 @@
                                        (Math/pow (- (:z target-p) cz) 2)))
                          0.0)]
     (when (and target-p (> dist-to-player 48.0))
-      (transport/send-bridge-cmd! (str "CMD|tp Karlach " target))
+      (actions/teleport-agent-to! "Karlach" [(:x target-p) (:y target-p) (:z target-p)])
       (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
       (transport/send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
       (swap! nav-state assoc :pos tgt-pos :follow-path [] :steps [])))

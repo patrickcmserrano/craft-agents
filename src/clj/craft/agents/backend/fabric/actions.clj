@@ -16,6 +16,15 @@
     (transport/send-bridge-cmd! (str "CMD|" json-cmd))
     (transport/send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:block.campfire.crackle master @a[distance=..24] ~ ~ ~ 0.9 1.2")))
 
+(defn teleport-agent-to!
+  "Teleporta um agente sintetico pelo op MOVE da bridge. NAO use /tp vanilla:
+   o ServerPlayerEntity sintetico nunca confirma o teleporte, o servidor loga
+   'Teleported' mas a posicao nao muda (loop infinito no follow > 48 m)."
+  [agent-name [x y z]]
+  (transport/send-bridge-cmd!
+   (uformat "MOVE|%s|%.3f|%.3f|%.3f|0.0|0.0|false|false"
+            agent-name (double x) (double y) (double z))))
+
 (defn load-skin-meta [skin-filename]
   (let [f (io/file (str "/home/pace/dev/minecraft/server/skins/" skin-filename))]
     (if (.exists f)

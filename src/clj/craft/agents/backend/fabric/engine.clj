@@ -214,8 +214,8 @@
 
 (defn teleport-karlach-to-leader!
   "Teleporta a Karlach ao lider (tp + som + particula) e ancora :pos nele."
-  [nav-state leader-name [tx ty tz]]
-  (send-bridge-cmd! (uformat "CMD|tp Karlach %s" leader-name))
+  [nav-state _leader-name [tx ty tz]]
+  (actions/teleport-agent-to! "Karlach" [tx ty tz])
   (send-bridge-cmd! "CMD|execute at Karlach run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0")
   (send-bridge-cmd! "CMD|execute at Karlach run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal")
   (swap! nav-state assoc :pos [tx ty tz] :follow-path []))
@@ -837,7 +837,7 @@
                                  ;; Teleporte de resgate apenas em distancia extrema (> 48m / outro bioma)
                                  (> dist-to-player 48.0)
                                  (do
-                                   (send-bridge-cmd! (uformat "CMD|tp Karlach %s" (:name target-p)))
+                                   (actions/teleport-agent-to! "Karlach" [tx ty tz])
                                    (karlach-say! "Você avançou muito na mina, soldado! Acompanhando seus passos!")
                                    (swap! nav-state assoc :mode :bodyguard :pos [tx ty tz] :active-mining nil))
 
