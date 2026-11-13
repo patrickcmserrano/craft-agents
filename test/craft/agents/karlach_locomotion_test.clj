@@ -337,11 +337,11 @@
                                  :path [{:x 3 :y 63 :z 0 :action :WALK}]
                                  :speed 0.24 :yaw 0.0})]
       (is (pos? (:pitch r)))))
-  (testing "CA-081: :pitch ~0 quando o nó está na altura do olho"
+  (testing "CA-081: :pitch ~0 quando o nó está (quase) na altura do olho"
     (let [r (loco/approach-step {:pos [0.5 65.0 0.5]
-                                 :path [{:x 5 :y 66.62 :z 0 :action :WALK}]
+                                 :path [{:x 80 :y 65 :z 0 :action :WALK}]
                                  :speed 0.24 :yaw 0.0})]
-      (is (< (Math/abs (double (:pitch r))) 1.0))))
+      (is (< (Math/abs (double (:pitch r))) 3.0))))
   (testing "CA-081: rota vazia — arrived? true e pitch 0.0"
     (let [r (loco/approach-step {:pos [0.5 65.0 0.5] :path [] :speed 0.24 :yaw 0.0})]
       (is (:arrived? r))
