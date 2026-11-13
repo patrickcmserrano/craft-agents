@@ -5,7 +5,10 @@
 ;; tarefa parte da branch da anterior, a primeira de sprint/karlach-nav-01.
 ;; Deploy e verificações ao vivo (doc 11 §8) ficam fora: dependem do servidor.
 {:sprint       "karlach-nav-01"
- :repo         "/home/pace/dev/minecraft/craft-agents"
+ ;; :repo e a worktree base da sprint, nao o checkout principal: o checkout
+ ;; principal roda o craft-agents.service (branch feat/witch-attack-spells) e
+ ;; nao tem o doc 12. `git worktree add` funciona a partir de qualquer worktree.
+ :repo         "/home/pace/dev/worktrees/craft-agents-nav-01"
  :project      "craft-agents"
  :spec-doc     "docs/12-backlog-paridade-mineflayer.md"
  :pending-doc  "docs/plans/sprint-karlach-nav-01-pendencias.md"
