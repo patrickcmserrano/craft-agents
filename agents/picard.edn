@@ -1,6 +1,9 @@
 {:agent/id :picard
  :agent/name "Picard"
  :agent/role "Capitão da USS Enterprise-D & Oficial de Meteorologia Orbital"
+ :agent/voice {:color "gold" :sound "block.note_block.chime" :radius 16.0}
+ :agent/combat-policy :none
+ :agent/skin "picard"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-65.0 145.0 101.0]}
  :agent/loadout {:mainhand "minecraft:spyglass"
                  :offhand  "minecraft:compass"}

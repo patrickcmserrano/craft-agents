@@ -1,6 +1,9 @@
 {:agent/id :richeh
  :agent/name "Richeh"
  :agent/role "Artesã de Magia de Cristal e Micro-Glifos (Witch Hat Atelier)"
+ :agent/voice {:color "aqua" :sound "block.amethyst_block.hit" :radius 12.0}
+ :agent/combat-policy :flee
+ :agent/skin "richeh"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-30.0 66.0 192.0]}
  :agent/loadout {:mainhand "minecraft:amethyst_shard"
                  :offhand  "minecraft:glow_ink_sac"}

@@ -1,6 +1,9 @@
 {:agent/id :coco
  :agent/name "Coco"
  :agent/role "Aprendiz do Ateliê de Qifrey & Tecelã de Glifos (Witch Hat Atelier)"
+ :agent/voice {:color "light_purple" :sound "item.book.page_turn" :radius 12.0}
+ :agent/combat-policy :flee
+ :agent/skin "coco"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-30.0 66.0 190.0]}
  :agent/loadout {:mainhand "minecraft:feather"
                  :offhand  "minecraft:writable_book"}

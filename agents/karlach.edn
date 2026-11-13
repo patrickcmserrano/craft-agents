@@ -1,6 +1,9 @@
 {:agent/id :karlach
  :agent/name "Karlach"
  :agent/role "Guardiã do Santuário"
+ :agent/voice {:color "red" :sound "block.campfire.crackle" :radius 16.0}
+ :agent/combat-policy :fight
+ :agent/skin "karlach"
  :agent/spawn {:dimension "minecraft:overworld" :pos [-175.0 65.0 180.0]}
  :agent/loadout {:mainhand "minecraft:apple"}
  :agent/quarters {:id :karlach-bedroom
