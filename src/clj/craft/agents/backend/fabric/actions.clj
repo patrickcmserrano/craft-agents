@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.transport :as transport :refer [uformat]]
+            [craft.agents.npc.registry :as registry]
             [craft.agents.npc.spawn :as spawn]
             [craft.agents.npc.speech :as speech]))
 
@@ -346,12 +347,8 @@
    (let [resp (transport/send-bridge-cmd! (str "SET_VITALS|" player-name "|20.0|20|5.0"))]
      {:fed? (and resp (str/starts-with? resp "OK")) :player player-name :resp resp})))
 
-(def ^:private all-agent-names
-  "Os quatro agentes server-native spawnados pelo boot do craft-agents."
-  ["Karlach" "Picard" "Coco" "Richeh"])
-
 (defn feed-hungry-agents!
-  "Alimenta qualquer agente cuja barra de fome tenha caido abaixo de `threshold`.
+  "Alimenta qualquer agente do registro (CA-093) cuja barra de fome tenha caido abaixo de `threshold`.
 
   Existe porque o boot so da `resistance` a todos e nunca alimenta ninguem: medido
   em 2026-11-10, o Picard chegou a hp=1 food=0 e nada o socorria (a funcao de
@@ -366,4 +363,4 @@
               (when (and alive? (some? food) (< food threshold))
                 (auto-eat-food! nm)
                 nm)))
-          all-agent-names))))
+          (registry/agent-names)))))

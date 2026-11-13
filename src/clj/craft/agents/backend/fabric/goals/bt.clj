@@ -5,9 +5,11 @@
    sao registrados pela fachada goals.clj."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [craft.agents.backend.fabric.engine.combat :as combat]
             [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.npc.registry :as registry]
             [craft.agents.skills.actions :as skill-actions]))
 
 (declare execute-tree-node!)
@@ -88,6 +90,25 @@
   (execute-goal! (merge {:goal/type goal-type :goal/speaker speaker} extra) ctx)
   {:status :success :action-id result-id})
 
+(defn- evade-towards-ally!
+  "Acao `:evade-towards-ally` (CA-093): decide por `combat-decision` (politica :flee) e, se ha
+   fuga, delega a meta :follow-player rumo ao aliado mais proximo (`goal!`). Aliados: `:ally-ids`
+   da acao ou o `:flee-target` dos traits; posicoes vem de `[:agents id :pos]` do engine-ctx.
+   Sem hostil ou sem posicao de aliado conhecida devolve :failure (o selector segue adiante)."
+  [action-args engine-ctx-atom nav-state agent goal!]
+  (let [ctx       @engine-ctx-atom
+        allies    (into {} (keep (fn [[id a]] (when-let [p (:pos a)] [id (vec p)]))) (:agents ctx))
+        decision  (combat/combat-decision
+                   (assoc agent :agent/combat-policy :flee)
+                   {:bot-pos  (:pos @nav-state)
+                    :hostiles (get-in ctx [:perception :hostiles] [])
+                    :allies   allies
+                    :ally-ids (:ally-ids action-args)})
+        ally-name (some-> (:ally-id decision) registry/agent-by-id :agent/name)]
+    (if (and (= :evade-towards-ally (:action decision)) ally-name)
+      (goal! :follow-player :evade-towards-ally {:goal/target ally-name})
+      {:status :failure :action :evade-towards-ally})))
+
 (defn- execute-action-node
   "Executa um nó :action: macro (arquivo skills/ ou :composite-skills), meta embutida,
    som/fala ou acao modular de skills.actions."
@@ -119,6 +140,7 @@
           :drop-inventory      (goal! :drop-inventory :drop-inventory {})
           :teleport-to-player  (goal! :teleport-to-player :teleport-to-player {})
           :move-to-quarters    (goal! :weather-shelter :move-to-quarters {})
+          :evade-towards-ally  (evade-towards-ally! action-args engine-ctx-atom nav-state agent goal!)
 
           :say-message
           (do (dispatch/say! ctx (or (:text action-args) "Comando concluído com sucesso, soldado!"))

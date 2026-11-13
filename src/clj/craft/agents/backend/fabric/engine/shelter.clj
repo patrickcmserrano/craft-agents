@@ -8,21 +8,32 @@
                                                         query-minecraft-weather]]))
 
 (defn rain-shelter-decision
-  "Decide o que a Karlach faz diante do clima no tick atual (CA-060).
-   Entrada: {:raining? bool-or-nil :thundering? bool-or-nil :mode kw :sheltering? bool}
+  "Decide o que um agente faz diante do clima no tick atual (CA-060, CA-093).
+   Entrada: {:raining? bool-or-nil :thundering? bool-or-nil :mode kw :sheltering? bool
+             :agent spec-opcional}
    Saida:
-     :shelter -> chovendo/trovejando e ainda na rua: aborta a patrulha e vai pro quarto
-     :wait    -> chovendo/trovejando e ja no quarto: permanece abrigada
-     :resume  -> tempo abriu com abrigo ativo: conclui o descanso e retoma a ronda
-     :none    -> nada a fazer (ceu limpo ou clima desconhecido)
-   Fail-safe: leitura de clima ausente (ponte caida) NUNCA trava a Karlach no
-   quarto — vale como ceu limpo, exceto para liberar quem ja estava abrigada."
-  [{:keys [raining? thundering? mode sheltering?]}]
-  (let [wet (or (true? raining?) (true? thundering?))]
+     :shelter -> chovendo/trovejando e ainda na rua: aborta o que fazia e vai pro quarto
+     :wait    -> chovendo/trovejando e ja no quarto: permanece abrigado
+     :resume  -> tempo abriu com abrigo ativo: conclui o descanso e retoma a rotina
+     :none    -> nada a fazer (ceu limpo, clima desconhecido ou agente sem quarto)
+   Com `:agent`, quem decide e o `:agent/quarters`: sem quarters o agente nunca se abriga e
+   continua o que fazia; com quarters se abriga em qualquer modo, exceto acompanhando ou
+   guardando o lider e minerando. Sem `:agent` vale o contrato legado da Karlach (so abriga
+   em :sanctuary-patrol).
+   Fail-safe: leitura de clima ausente (ponte caida) NUNCA trava o agente no quarto —
+   vale como ceu limpo, exceto para liberar quem ja estava abrigado."
+  [{:keys [raining? thundering? mode sheltering? agent]}]
+  (let [wet        (or (true? raining?) (true? thundering?))
+        legacy?    (nil? agent)
+        has-home?  (or legacy? (some? (:agent/quarters agent)))
+        can-leave? (if legacy?
+                     (= mode :sanctuary-patrol)
+                     (not (contains? #{:follow :bodyguard :mining} mode)))]
     (cond
+      (not has-home?)               {:action :none    :speak? false}
       (and sheltering? (not wet))   {:action :resume  :speak? true}
       (and sheltering? wet)         {:action :wait    :speak? false}
-      (and wet (= mode :sanctuary-patrol)) {:action :shelter :speak? true}
+      (and wet can-leave?)          {:action :shelter :speak? true}
       :else                         {:action :none    :speak? false})))
 
 (defn weather-transition

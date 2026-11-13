@@ -88,3 +88,35 @@
         {:action :follow-player
          :target-pos leader-pos
          :clear-follow-path? false}))))
+
+(def ^:private flee-threat-radius-m
+  "Raio (m) em que um hostil ja conta como ameaca para quem foge."
+  10.0)
+
+(defn- flee-ally-ids
+  "Aliados candidatos: `:ally-ids` da percepcao ou, na falta, o `:flee-target` dos traits."
+  [agent ally-ids]
+  (vec (or (seq ally-ids)
+           (some-> (get-in agent [:agent/traits :flee-target]) vector))))
+
+(defn combat-decision
+  "Decisao pura de combate por `:agent/combat-policy` do agente (CA-093).
+   `perception`: {:bot-pos :leader-pos :hostiles :in-vehicle? :allies {id [x y z]} :ally-ids [id]}.
+     :fight -> `evaluate-combat-preemption` (mesmo mapa de decisao)
+     :flee  -> {:action :evade-towards-ally :ally-id id :target-pos [x y z]} rumo ao aliado
+               mais proximo com posicao conhecida, se ha hostil a <= 10 m; senao {:action :none}
+     :none (ou ausente) -> {:action :none}"
+  [agent {:keys [bot-pos leader-pos hostiles in-vehicle? allies ally-ids]}]
+  (case (:agent/combat-policy agent)
+    :fight (evaluate-combat-preemption bot-pos leader-pos hostiles in-vehicle?)
+    :flee  (let [threat? (some #(<= (double (:distance %)) flee-threat-radius-m) hostiles)
+                 origin  (or bot-pos [0.0 64.0 0.0])
+                 nearest (when threat?
+                           (->> (flee-ally-ids agent ally-ids)
+                                (keep (fn [id] (when-let [pos (get allies id)] [id pos])))
+                                (sort-by (fn [[_ pos]] (dist3 origin pos)))
+                                first))]
+             (if-let [[id pos] nearest]
+               {:action :evade-towards-ally :ally-id id :target-pos pos}
+               {:action :none}))
+    {:action :none}))

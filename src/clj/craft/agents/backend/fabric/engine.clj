@@ -30,6 +30,7 @@
 (def battle-cry-cooldown-ticks combat/battle-cry-cooldown-ticks)
 (def battle-cry-ready? combat/battle-cry-ready?)
 (def evaluate-combat-preemption combat/evaluate-combat-preemption)
+(def combat-decision combat/combat-decision)
 (def rain-shelter-decision shelter/rain-shelter-decision)
 (def weather-transition shelter/weather-transition)
 (def shelter-route-steps shelter/shelter-route-steps)
