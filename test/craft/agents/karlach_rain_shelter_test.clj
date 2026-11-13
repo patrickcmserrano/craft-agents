@@ -191,9 +191,18 @@
     ;; O trajeto vindo de [-179.5 65.0 171.5] passa pelo portao do santuario
     ;; (gerando :wait de abertura e tranca) antes de chegar ao quarto.
     ;; O corte tem de ser no :wait do DESCANSO, e nao no primeiro :wait da ida.
+    ;; Hermetico: o A* real vem da ponte do servidor vivo (sem ele, a rota
+    ;; volta sem portao e o teste falhava fora do ar). Rota fixa que cruza o
+    ;; portao do santuario (:TRAVERSE_PORTAL) a caminho do quarto.
     (let [route    (fabric/build-sanctuary-route)
           quarters (some #(when (= (:type %) :quarters) %) route)
-          steps    (fabric/shelter-route-steps quarters [-179.5 65.0 171.5])
+          steps    (with-redefs [fabric/request-path3d
+                                 (fn [_from _to & _]
+                                   [{:x -177 :y 65 :z 175 :action :WALK}
+                                    {:x -173 :y 65 :z 180 :action :TRAVERSE_PORTAL}
+                                    {:x -150 :y 65 :z 186 :action :WALK}
+                                    {:x -131 :y 65 :z 195 :action :WALK}])]
+                     (fabric/shelter-route-steps quarters [-179.5 65.0 171.5]))
           waits    (filter #(= (:op %) :wait) steps)
           descanso (some #(when (and (= (:op %) :wait)
                                      (some-> (:label %) (str/includes? "Descansando")))
