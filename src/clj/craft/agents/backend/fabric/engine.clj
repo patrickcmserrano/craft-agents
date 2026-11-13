@@ -36,6 +36,16 @@
   (:import [java.io RandomAccessFile]
            [java.nio.charset StandardCharsets]))
 
+(defn picard-walk-tick
+  "Passo puro :walk do Picard rumo a `station` (CA-083): usa loco/walk-step com
+   :speed 0.16. Devolve {:pos :yaw :arrived?}."
+  [pst station]
+  (let [[tx ty tz] (:pos station)]
+    (loco/walk-step {:pos (:pos pst)
+                     :target [(double tx) (double ty) (double tz)]
+                     :speed 0.16
+                     :yaw (:yaw pst)})))
+
 (defn evaluate-combat-preemption
   "Avalia preempção de combate reativo, tether anti-kiting de escolta e proteção de embarque (CA-049).
    Retorna mapa de decisão:
@@ -452,10 +462,9 @@
                                station (nth picard-stations st-idx (first picard-stations))
                                [tx ty tz] (:pos station)]
                            (if (= (:phase pst) :walk)
-                             (let [dx (- tx px)
-                                   dz (- tz pz)
-                                   dist (Math/sqrt (+ (* dx dx) (* dz dz)))]
-                               (if (<= dist 0.22)
+                             (let [{[nx ny nz] :pos yaw :yaw arrived? :arrived?}
+                                   (picard-walk-tick (assoc pst :pos [px py pz]) station)]
+                               (if arrived?
                                  (do
                                    (send-bridge-cmd!
                                     (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
@@ -469,15 +478,12 @@
                                           :phase :wait
                                           :wait-left (:wait-ticks station 120)
                                           :status (str "Na estação: " (:name station))))
-                                 (let [speed 0.16
-                                       nx (+ px (* (/ dx dist) speed))
-                                       nz (+ pz (* (/ dz dist) speed))
-                                       yaw (compute-yaw dx dz)]
+                                 (do
                                    (send-bridge-cmd!
                                     (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                                            nx (double ty) nz yaw))
+                                            nx ny nz yaw))
                                    (swap! picard-state assoc
-                                          :pos [nx (double ty) nz]
+                                          :pos [nx ny nz]
                                           :yaw yaw
                                           :status (str "Ponte -> " (:name station))))))
                              ;; Fase :wait na estação da ponte
