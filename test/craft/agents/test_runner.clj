@@ -31,7 +31,8 @@
             [craft.agents.npc-spawn-test]
             [craft.agents.npc-state-test]
             [craft.agents.npc-addressing-test]
-            [craft.agents.npc-goals-test]))
+            [craft.agents.npc-goals-test]
+            [craft.agents.npc-locomotion-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -64,7 +65,8 @@
    {:epic 27 :title "CA-088 — Spawn e loadout guiados pelo registro" :ns 'craft.agents.npc-spawn-test}
    {:epic 28 :title "CA-089 — Estado por agente e Studio generico" :ns 'craft.agents.npc-state-test}
    {:epic 29 :title "CA-090 — Enderecamento por nome de qualquer agente" :ns 'craft.agents.npc-addressing-test}
-   {:epic 30 :title "CA-091 — Despacho de metas por agente" :ns 'craft.agents.npc-goals-test}])
+   {:epic 30 :title "CA-091 — Despacho de metas por agente" :ns 'craft.agents.npc-goals-test}
+   {:epic 31 :title "CA-092 — Locomocao compartilhada (follow por agente)" :ns 'craft.agents.npc-locomotion-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
