@@ -1,0 +1,18 @@
+;; Plano da sprint arch-review-01 para o sprint-runner em modo análise
+;; (/home/pace/dev/scripts/sprint_runner.clj, :mode :analysis): swe + CGE +
+;; small-router, Claude Fable 5.2. Spec em docs/14-analise-arquitetural.md.
+;; Único artefato: o relatório em :report (o gate barra qualquer outro arquivo).
+;; Disparo: bb -cp ~/dev/scripts ~/dev/scripts/sprint_runner.clj run <este plano>
+{:sprint           "arch-review-01"
+ :repo             "/home/pace/dev/worktrees/craft-agents-arch-review-01"
+ :project          "craft-agents"
+ :mode             :analysis
+ :spec-doc         "docs/14-analise-arquitetural.md"
+ :report           "docs/reports/arch-review-01.md"
+ :min-report-bytes 15000
+ :base-branch      "sprint/arch-review-01"
+ :model            "claude-fable-5-2"
+ :timeout-min      180
+ :gate-cmds        []
+ :max-attempts     2
+ :tasks [{:id "CA-097" :profiles ["architecture" "cognition" "backend-fabric" "locomotion"]}]}
