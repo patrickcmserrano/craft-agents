@@ -38,9 +38,9 @@
 
 (defn- run
   "Executa a acao `id` como `agent` com ponte e fala stubadas. Devolve {:res :cmds :said :ctx}."
-  [agent id params & {:keys [pos ticks agents]}]
+  [agent id params & {:keys [pos ticks agents] :or {ticks 0}}]
   (let [cmds (atom []) said (atom [])
-        ectx (atom {:world-time (or ticks 0) :agents (or agents {})})
+        ectx (atom {:world-time ticks :agents (or agents {})})
         st   (atom {:pos (or pos [0.0 65.0 0.0])})
         ctx  {:agent agent :state st :engine-ctx ectx :speaker "Pace"}]
     (body/reset-buffer!)
