@@ -77,8 +77,15 @@
 ;; ----------------------------------------------------------------------------
 
 (def ^:private legacy-facade-allowlist
-  "Arquivo -> motivo. Fachadas legadas Karlach/Picard documentadas; vazio por padrao."
-  {})
+  "Arquivo -> motivo. Fachadas legadas documentadas, fora do caminho generico (BT/EDN)."
+  {"src/clj/craft/agents/backend/fabric/atelier/behavior.clj"
+   "fachada legada do driver de seguir/auto-defesa das bruxas e shims fixados por atelier_test/npc_bt_test"})
+
+(deftest legacy-allowlist-entries-are-annotated-and-exist-test
+  (doseq [[f why] legacy-facade-allowlist]
+    (is (.exists (io/file f)) f)
+    (is (str/includes? (slurp f) "legado") (str f " precisa se declarar legado no docstring"))
+    (is (seq why))))
 
 (def ^:private fabric "src/clj/craft/agents/backend/fabric")
 
