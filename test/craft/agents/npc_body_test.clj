@@ -89,6 +89,27 @@
       (let [[_ cmds] (with-sent flush!)]
         (is (= ["MOVE|Picard|0.000|64.000|0.000|45.0|-5.0|false|false"] cmds))))))
 
+(def ^:private ca-103-migrated-files
+  "Arquivos que emitiam MOVE| direto e agora devem passar por npc.body (CA-103, SUG-01 parte 2a)."
+  ["src/clj/craft/agents/backend/fabric/actions.clj"
+   "src/clj/craft/agents/backend/fabric/engine/karlach_tick.clj"
+   "src/clj/craft/agents/backend/fabric/engine/follow.clj"
+   "src/clj/craft/agents/backend/fabric/engine/watchdog.clj"
+   "src/clj/craft/agents/backend/fabric/engine/patrol.clj"
+   "src/clj/craft/agents/backend/fabric/engine/patrol_ops.clj"
+   "src/clj/craft/agents/backend/fabric/engine/mining.clj"
+   "src/clj/craft/agents/backend/fabric/goals/companion.clj"
+   "src/clj/craft/agents/backend/fabric/goals/work.clj"
+   "src/clj/craft/agents/backend/fabric/sentry.clj"])
+
+(deftest no-direct-move-literal-in-migrated-subsystems-test
+  (doseq [f ca-103-migrated-files]
+    (testing f
+      (is (.exists (java.io.File. ^String f)) "arquivo existe")
+      (when (.exists (java.io.File. ^String f))
+        (is (not (str/includes? (slurp f) "\"MOVE|"))
+            "so craft.agents.npc.body pode conter o literal \"MOVE|")))))
+
 (deftest move-direct-api-test
   (let [move! (resolve-body 'move!)]
     (is (fn? move!))
