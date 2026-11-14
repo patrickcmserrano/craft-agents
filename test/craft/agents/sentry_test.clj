@@ -12,6 +12,7 @@
    1 e 2 no mesmo caso. Por isso a identidade passa a ser o EVENT-ID que nasce
    na fonte da verdade (o tick do servidor), nao o texto."
   (:require [clojure.test :refer [deftest is testing]]
+            [craft.agents.backend.fabric.goals :as goals]
             [craft.agents.backend.fabric.sentry :as sentry]))
 
 (defn- fresh-dedup!
@@ -80,3 +81,43 @@
     (fresh-dedup!)
     (is (false? (sentry/chat-duplicate? {:speaker "pace"   :text "fireball"})))
     (is (false? (sentry/chat-duplicate? {:speaker "lizzie" :text "fireball"})))))
+
+;; ---------------------------------------------------------------------------
+;; CA-099: Roteamento de comandos de chat para o agente endereçado
+;; ---------------------------------------------------------------------------
+
+(deftest handle-player-command-enderecado-propaga-agent-id-test
+  (testing "Comando enderecado a :picard ou :coco constroi e propaga ctx com :agent-id do alvo (nao :karlach)"
+    (doseq [[msg target-id target-name] [["picard me segue" :picard "Picard"]
+                                         ["coco vem" :coco "Coco"]]]
+      (fresh-dedup!)
+      (let [captured  (atom [])
+            ectx      (atom {})
+            nst       (atom {:pos [0.0 65.0 0.0]})
+            pst       (atom {:pos [10.0 65.0 10.0]})
+            cst       (atom {:pos [20.0 65.0 20.0]})
+            rst       (atom {:pos [30.0 65.0 30.0]})
+            route     [{:type :quarters :pos [1.0 65.0 1.0]}]]
+        (with-redefs [goals/execute-goal! (fn [g ctx] (swap! captured conj {:goal g :ctx ctx}))]
+          (sentry/handle-player-command! "pace" msg ectx nst pst route cst rst))
+        (is (= 1 (count @captured)) (str "esperava 1 despacho de meta para " msg))
+        (let [{:keys [goal ctx]} (first @captured)]
+          (is (= target-id (:agent-id ctx)))
+          (is (= target-id (get-in ctx [:agent :agent/id])))
+          (is (= target-name (get-in ctx [:agent :agent/name])))
+          (is (not= :karlach (:agent-id ctx)))
+          (is (some? (or (:nav-state ctx) (:state ctx))))
+          (is (contains? #{:follow-player :teleport-to-player} (:goal/type goal)))))))
+  (testing "Aridade sem coco-state resolve átomo via npc.state/agent-atom"
+    (fresh-dedup!)
+    (let [captured (atom [])
+          ectx     (atom {})
+          nst      (atom {:pos [0.0 65.0 0.0]})
+          pst      (atom {:pos [10.0 65.0 10.0]})
+          route    [{:type :quarters :pos [1.0 65.0 1.0]}]]
+      (with-redefs [goals/execute-goal! (fn [g ctx] (swap! captured conj {:goal g :ctx ctx}))]
+        (sentry/handle-player-command! "pace" "coco vem" ectx nst pst route))
+      (is (= 1 (count @captured)))
+      (let [{:keys [ctx]} (first @captured)]
+        (is (= :coco (:agent-id ctx)))
+        (is (some? (or (:nav-state ctx) (:state ctx))))))))

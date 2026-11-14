@@ -13,6 +13,7 @@
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.npc.registry :as registry]
+            [craft.agents.npc.speech :as speech]
             [craft.agents.npc.state :as npc-state]
             [craft.agents.skills.actions :as skill-actions]
             [craft.agents.skills.composer :as composer]))
@@ -202,3 +203,59 @@
     (with-redefs [transport/send-bridge-cmd! (fn [c] (swap! cmds conj c) "OK")]
       (is (= :success (:status (bt/execute-tree-node! [:action :mount-vehicle] ectx nst [] "Pace" coco)))))
     (is (= ["CMD|execute at Coco run ride Coco mount @e[type=boat,distance=..6,sort=nearest,limit=1]"] @cmds))))
+
+;; ---------------------------------------------------------------------------
+;; CA-099: Despacho de metas usando :agent-id e :agent do contexto
+;; ---------------------------------------------------------------------------
+
+(deftest execute-goal-contexto-agente-enderecado-test
+  (testing "execute-goal! propaga :agent-id e :agent recebidos no ctx e fala via npc.speech/say! sem falar como Karlach"
+    (doseq [[id nm] [[:picard "Picard"] [:coco "Coco"]]]
+      (doseq [goal-type [:follow-player :teleport-to-player :stand-up]]
+        (testing (str nm " " goal-type)
+          (let [cmds         (atom [])
+                speech-calls (atom [])
+                karlach-said (atom [])
+                ectx         (atom {})
+                spec         (registry/agent-by-id id)
+                st           (npc-state/agent-atom ectx id {:pos [0.0 65.0 0.0]})
+                ctx          {:agent-id    id
+                              :agent       spec
+                              :nav-state   st
+                              :state       st
+                              :engine-ctx  ectx
+                              :sanctuary-route [{:type :quarters :pos [1.0 65.0 1.0]}]}
+                goal         (case goal-type
+                               :follow-player      {:goal/type :follow-player :goal/target "Pace" :goal/voice-line "Seguindo"}
+                               :teleport-to-player {:goal/type :teleport-to-player :goal/target "Pace" :goal/voice-line "Cheguei"}
+                               :stand-up           {:goal/type :stand-up :goal/speaker "Pace"})]
+            (with-redefs [transport/send-bridge-cmd!   (fn [c] (swap! cmds conj c) "OK")
+                          actions/query-online-players (fn [] players)
+                          speech/say!                  (fn [spk msg] (swap! speech-calls conj [spk msg]) "OK")
+                          actions/karlach-say!         (fn [msg] (swap! karlach-said conj msg) "OK")]
+              (dispatch/execute-goal! goal ctx))
+            (is (empty? @karlach-said) (str nm " nao deve chamar actions/karlach-say! para " goal-type))
+            (is (seq @speech-calls) (str nm " deve falar via speech/say! para " goal-type))
+            (is (every? #(= id (first %)) @speech-calls) (str "fala deve ser enderecada como " id))
+            (is (not-any? #(str/includes? % "Karlach") @cmds) (str "nenhum comando para Karlach em " goal-type))))))))
+
+(deftest execute-goal-compatibilidade-ctx-sem-state-ou-spec-test
+  (testing "execute-goal! aceita :nav-state em vez de :state e resolve :agent a partir de :agent-id"
+    (doseq [[id nm] [[:picard "Picard"] [:coco "Coco"]]]
+      (let [cmds         (atom [])
+            speech-calls (atom [])
+            karlach-said (atom [])
+            ectx         (atom {})
+            st           (atom {:pos [0.0 65.0 0.0] :mode :idle})
+            ctx          {:agent-id   id
+                          :nav-state  st
+                          :engine-ctx ectx}
+            goal         {:goal/type :follow-player :goal/target "Pace" :goal/voice-line "A caminho"}]
+        (with-redefs [transport/send-bridge-cmd!   (fn [c] (swap! cmds conj c) "OK")
+                      actions/query-online-players (fn [] players)
+                      speech/say!                  (fn [spk msg] (swap! speech-calls conj [spk msg]) "OK")
+                      actions/karlach-say!         (fn [msg] (swap! karlach-said conj msg) "OK")]
+          (dispatch/execute-goal! goal ctx))
+        (is (= :follow (:mode @st)))
+        (is (empty? @karlach-said))
+        (is (= [[id "A caminho"]] @speech-calls))))))
