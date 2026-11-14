@@ -182,3 +182,71 @@
       (leases/clean-expired-leases! arbiter (+ (System/currentTimeMillis) 200))
       (is (nil? (get (leases/query-shared-resources arbiter (+ (System/currentTimeMillis) 200)) :feed-pandas))
           "Lease expirado deve ser reavido automaticamente"))))
+
+(defn- resolve-lease-fn [sym]
+  (some-> (ns-resolve 'craft.agents.leases sym) deref))
+
+(deftest ca-101-per-agent-leases-with-ttl-ticks-and-isolation-test
+  (testing "CA-101: Leases por agente com :ttl-ticks isolam :karlach e :coco no mesmo canal :legs e expiram apos N ticks"
+    (let [acquire-agent-leases! (resolve-lease-fn 'acquire-agent-leases!)
+          active-agent-leases   (resolve-lease-fn 'active-agent-leases)
+          tick-expire-leases!   (resolve-lease-fn 'tick-expire-leases!)]
+      (is (fn? acquire-agent-leases!) "leases/acquire-agent-leases! deve existir")
+      (is (fn? active-agent-leases) "leases/active-agent-leases deve existir")
+      (is (fn? tick-expire-leases!) "leases/tick-expire-leases! deve existir")
+      (when (and (fn? acquire-agent-leases!) (fn? active-agent-leases) (fn? tick-expire-leases!))
+        (let [lmgr            (leases/create-lease-manager)
+              coco-preempted? (atom false)]
+          ;; 1. Karlach (prio 100) e Coco (prio 10) adquirem :legs simultaneamente sem colisao
+          (let [k-res (acquire-agent-leases! lmgr :karlach {:channels #{:legs}
+                                                            :owner-id :combat
+                                                            :priority 100
+                                                            :ttl-ticks 3})
+                c-res (acquire-agent-leases! lmgr :coco {:channels #{:legs}
+                                                         :owner-id :atelier-walk
+                                                         :priority 10
+                                                         :ttl-ticks 2
+                                                         :on-preempt #(reset! coco-preempted? true)})]
+            (is (true? (:granted? k-res)) "Karlach deve adquirir :legs")
+            (is (true? (:granted? c-res)) "Coco deve adquirir :legs sem colidir com Karlach")
+            (is (= :combat (get-in (active-agent-leases lmgr :karlach) [:legs :owner-id])))
+            (is (= :atelier-walk (get-in (active-agent-leases lmgr :coco) [:legs :owner-id]))))
+
+          ;; 2. No mesmo agente (:coco), prioridade menor falha e maior preempta (sem afetar :karlach)
+          (is (false? (:granted? (acquire-agent-leases! lmgr :coco {:channels #{:legs}
+                                                                    :owner-id :idle-wander
+                                                                    :priority 5
+                                                                    :ttl-ticks 2}))))
+          (is (true? (:granted? (leases/acquire-leases! lmgr :coco {:channels #{:legs}
+                                                                    :owner-id :evade-hostile
+                                                                    :priority 50
+                                                                    :ttl-ticks 2}))))
+          (is (true? @coco-preempted?) "Preempcao em :coco deve acionar on-preempt de :coco")
+          (is (= :evade-hostile (get-in (active-agent-leases lmgr :coco) [:legs :owner-id])))
+          (is (= :combat (get-in (active-agent-leases lmgr :karlach) [:legs :owner-id]))
+              "Preempcao em :coco nao altera lease de :karlach")
+
+          ;; 3. Expiracao por :ttl-ticks libera automaticamente o canal apos N ticks
+          ;; Tick 1: ambos continuam ativos (karlach resta 2, coco resta 1)
+          (tick-expire-leases! lmgr)
+          (is (= :combat (get-in (active-agent-leases lmgr :karlach) [:legs :owner-id])))
+          (is (= :evade-hostile (get-in (active-agent-leases lmgr :coco) [:legs :owner-id])))
+
+          ;; Tick 2: lease de :coco (ttl 2) expira; :karlach (ttl 3) continua ativo
+          (tick-expire-leases! lmgr)
+          (is (nil? (get-in (active-agent-leases lmgr :coco) [:legs :owner-id]))
+              "Canal :legs de :coco deve expirar apos 2 ticks")
+          (is (= :combat (get-in (active-agent-leases lmgr :karlach) [:legs :owner-id]))
+              "Canal :legs de :karlach (ttl 3) ainda deve estar ativo no tick 2")
+          ;; Coco pode adquirir :legs novamente com prioridade baixa (1) pois o canal foi liberado por TTL
+          (is (true? (:granted? (acquire-agent-leases! lmgr :coco {:channels #{:legs}
+                                                                   :owner-id :idle-stroll
+                                                                   :priority 1
+                                                                   :ttl-ticks 5}))))
+
+          ;; Tick 3: lease de :karlach (ttl 3) expira automaticamente
+          (tick-expire-leases! lmgr)
+          (is (nil? (get-in (active-agent-leases lmgr :karlach) [:legs :owner-id]))
+              "Canal :legs de :karlach deve expirar apos 3 ticks")
+          (is (= :idle-stroll (get-in (active-agent-leases lmgr :coco) [:legs :owner-id]))
+              "Lease renovado de :coco (ttl 5) permanece ativo"))))))
