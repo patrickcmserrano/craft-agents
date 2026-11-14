@@ -12,6 +12,7 @@
             [craft.agents.cognition.grounding :as grounding]
             [craft.agents.cognition.intent :as intent]
             [craft.agents.npc.addressing :as addressing]
+            [craft.agents.npc.body :as body]
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.state :as npc-state]))
 
@@ -311,7 +312,8 @@
            (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
            (record-cognitive-event! engine-ctx-atom :motor "Picard Bridge" "Retornando à ponte")
            (swap! picard-state assoc :mode :bridge-command :follow-target nil :pos [-65.0 145.0 101.0] :phase :walk)
-           (transport/send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
+           (body/move! {:agent :picard :agent-name "Picard" :x -65.0 :y 145.0 :z 101.0
+                        :yaw 0.0 :pitch 0.0 :priority :player-goal})
            (picard/picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))))
 
 (defonce ^:private log-file-pos (atom 0))

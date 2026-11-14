@@ -18,8 +18,9 @@
                                                            open-portal-at-coord! patrol-route
                                                            sanctuary-route set-double-gate!]]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
-            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]
-            [craft.agents.cognition.critic :as critic]))
+            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd!]]
+            [craft.agents.cognition.critic :as critic]
+            [craft.agents.npc.body :as body]))
 
 (defn- corner-pause?
   "true se a proxima perna :walk dobra mais de 30 graus em relacao a atual: o
@@ -120,9 +121,8 @@
       ;; 3a. Chegou: crava no alvo e passa ao proximo passo
       (= :arrive (:action d))
       (do
-        (send-bridge-cmd!
-         (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                  (double tx) (double ty) (double tz) (double (:yaw st))))
+        (body/move! {:agent :karlach :agent-name "Karlach" :x tx :y ty :z tz
+                     :yaw (:yaw st) :pitch 0.0 :priority :bt})
         (swap! nav-state #(-> %
                               (assoc :pos [(double tx) (double ty) (double tz)])
                               (assoc :steps (if (:corner-pause? d)
@@ -135,9 +135,8 @@
                                      :speed (:speed d) :yaw (:yaw st)})
             [nx ny' nz] (:pos stepped)
             yaw (:yaw stepped)]
-        (send-bridge-cmd!
-         (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                  nx (double ny') nz yaw))
+        (body/move! {:agent :karlach :agent-name "Karlach" :x nx :y ny' :z nz
+                     :yaw yaw :pitch 0.0 :priority :bt})
         (swap! nav-state assoc :pos [nx (double ny') nz] :yaw yaw)
         (swap! engine-ctx-atom assoc
                :tick tick
@@ -212,9 +211,8 @@
                   dist (Math/sqrt (+ (* dx dx) (* dz dz)))]
               (when (< dist 12.0)
                 (let [gyaw (compute-yaw dx dz)]
-                  (send-bridge-cmd!
-                   (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                           cx cy cz gyaw))))))))
+                  (body/move! {:agent :karlach :agent-name "Karlach" :x cx :y cy :z cz
+                               :yaw gyaw :pitch 0.0 :priority :idle})))))))
       (if (<= rem-ticks 0)
         (swap! nav-state #(-> %
                               (assoc :wait-left 0)

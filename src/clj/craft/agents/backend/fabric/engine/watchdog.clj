@@ -5,8 +5,9 @@
   (:require [clojure.string :as str]
             [craft.agents.backend.fabric.actions :as actions]
             [craft.agents.backend.fabric.navigation :as nav]
-            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]
-            [craft.agents.backend.fabric.watchdog :as wd]))
+            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd!]]
+            [craft.agents.backend.fabric.watchdog :as wd]
+            [craft.agents.npc.body :as body]))
 
 (defn teleport-agent-to-leader!
   "Teleporta o agente `agent-name` ao lider (MOVE + som + particula) e ancora :pos nele (CA-092)."
@@ -52,9 +53,8 @@
           (let [gy (nav/query-ground-y [cx cy cz])]
             (swap! nav-state assoc :watchdog w4 :follow-path [])
             (if (and gy (> (Math/abs (- (double gy) (double cy))) 1.0e-6))
-              (do (send-bridge-cmd!
-                   (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                            agent-name cx gy cz (double (:yaw st 0.0))))
+              (do (body/move! {:agent-name agent-name :x cx :y gy :z cz
+                               :yaw (:yaw st 0.0) :pitch 0.0 :priority :survival})
                   (swap! nav-state assoc :pos [cx gy cz])
                   (assoc st :pos [cx gy cz] :follow-path []))
               (assoc st :follow-path [])))

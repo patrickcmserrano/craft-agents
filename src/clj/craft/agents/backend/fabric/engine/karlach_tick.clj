@@ -12,6 +12,7 @@
             [craft.agents.backend.fabric.sanctuary :refer [sanctuary-route]]
             [craft.agents.backend.fabric.sentry :refer [proactive-sentry-scan!]]
             [craft.agents.backend.fabric.transport :as transport :refer [send-bridge-cmd! uformat]]
+            [craft.agents.npc.body :as body]
             [craft.agents.npc.perception-tick :as perception-tick]))
 
 ;; Decisoes puras do tick da Karlach (definidas em follow/patrol).
@@ -54,8 +55,8 @@
   [{:keys [nav-state engine-ctx-atom tick make-agents-map]} st]
   (let [[cx cy cz] (:pos st)
         nyaw (float (mod (+ (:yaw st) 32.0) 360.0))]
-    (send-bridge-cmd!
-     (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz nyaw))
+    (body/move! {:agent :karlach :agent-name "Karlach" :x cx :y cy :z cz :yaw nyaw :pitch 0.0
+                 :priority :player-goal})
     (when (zero? (mod tick 5))
       (send-bridge-cmd! "SWING|Karlach")
       (send-bridge-cmd!

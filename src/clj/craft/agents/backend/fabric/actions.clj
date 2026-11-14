@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.transport :as transport :refer [uformat]]
+            [craft.agents.npc.body :as body]
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.spawn :as spawn]
             [craft.agents.npc.speech :as speech]))
@@ -14,13 +15,12 @@
   (speech/say! :karlach msg))
 
 (defn teleport-agent-to!
-  "Teleporta um agente sintetico pelo op MOVE da bridge. NAO use /tp vanilla:
+  "Teleporta um agente sintetico pelo op MOVE da bridge (via `npc.body/move!`). NAO use /tp vanilla:
    o ServerPlayerEntity sintetico nunca confirma o teleporte, o servidor loga
    'Teleported' mas a posicao nao muda (loop infinito no follow > 48 m)."
   [agent-name [x y z]]
-  (transport/send-bridge-cmd!
-   (uformat "MOVE|%s|%.3f|%.3f|%.3f|0.0|0.0|false|false"
-            agent-name (double x) (double y) (double z))))
+  (body/move! {:agent-name agent-name :x x :y y :z z :yaw 0.0 :pitch 0.0
+               :priority :player-goal}))
 
 (defn load-skin-meta [skin-filename]
   (let [f (io/file (str "/home/pace/dev/minecraft/server/skins/" skin-filename))]

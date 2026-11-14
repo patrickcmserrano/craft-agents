@@ -7,7 +7,8 @@
             [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
-            [craft.agents.backend.fabric.transport :as transport :refer [uformat]]))
+            [craft.agents.backend.fabric.transport :as transport :refer [uformat]]
+            [craft.agents.npc.body :as body]))
 
 (defmethod execute-goal! :mining-cooperation
   [{:goal/keys [target] target-filter :goal/filter} {engine-ctx-atom :engine-ctx :as ctx}]
@@ -57,11 +58,13 @@
             (when (> total-d 2.2)
               (let [approach-x (+ (double bx) (if (> kx bx) 1.2 -1.2))
                     approach-z (+ (double bz) (if (> kz bz) 1.2 -1.2))]
-                (transport/send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" nm approach-x ky approach-z yaw pitch))
+                (body/move! {:agent (dispatch/agent-id ctx) :agent-name nm :x approach-x :y ky :z approach-z
+                             :yaw yaw :pitch pitch :priority :player-goal})
                 (when nav-state
                   (swap! nav-state assoc :pos [approach-x ky approach-z] :yaw yaw :pitch pitch))))
             (let [[cur-x cur-y cur-z] (or (when nav-state (:pos @nav-state)) [0.0 65.0 0.0])]
-              (transport/send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" nm cur-x cur-y cur-z yaw pitch)))
+              (body/move! {:agent (dispatch/agent-id ctx) :agent-name nm :x cur-x :y cur-y :z cur-z
+                           :yaw yaw :pitch pitch :priority :player-goal}))
             (transport/send-bridge-cmd! (str "SWING|" nm))
             (let [mine-res (actions/mine-block! nm bx by bz)]
               (if (:success? mine-res)

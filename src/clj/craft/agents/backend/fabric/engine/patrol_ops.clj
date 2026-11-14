@@ -8,8 +8,9 @@
             [craft.agents.backend.fabric.sanctuary :refer [compute-enclosure-funnel
                                                            sanctuary-enclosures-by-id]]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
-            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]
-            [craft.agents.cognition.critic :as critic]))
+            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd!]]
+            [craft.agents.cognition.critic :as critic]
+            [craft.agents.npc.body :as body]))
 
 (defn attach-lead!
   "Op :attach-lead: aproxima do animal se longe e lassa com a guia."
@@ -36,7 +37,8 @@
           (when mob-info
             (let [[mx _ mz] (:pos mob-info)
                   look-yaw (compute-yaw (- mx cx) (- mz cz))]
-              (send-bridge-cmd! (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz look-yaw))))
+              (body/move! {:agent :karlach :agent-name "Karlach" :x cx :y cy :z cz
+                           :yaw look-yaw :pitch 0.0 :priority :bt})))
           (let [leash-res (send-bridge-cmd! (str "LEASH|Karlach|" norm-sp))]
             (if (clojure.string/starts-with? (or leash-res "") "ERR|TOO_FAR")
               (let [close-steps (generate-walk-steps [cx cy cz] (or (:pos mob-info) [cx cy cz]) (str "Fechando distancia de " norm-sp) {:radius 1.0})]

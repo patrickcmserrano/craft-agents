@@ -6,7 +6,8 @@
             [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
-            [craft.agents.backend.fabric.transport :as transport :refer [uformat]]))
+            [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.npc.body :as body]))
 
 (defn- emergency-teleport!
   "Teleporte de emergencia do agente `nm` ate `target-p`, com som e particulas."
@@ -118,7 +119,8 @@
             dx (- px cx)
             dz (- pz cz)
             look-yaw (nav/compute-yaw dx dz)]
-        (transport/send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nm cx cy cz look-yaw))
+        (body/move! {:agent (dispatch/agent-id ctx) :agent-name nm :x cx :y cy :z cz
+                     :yaw look-yaw :pitch 0.0 :priority :player-goal})
         (when nav-state
           (swap! nav-state assoc :yaw look-yaw))
         (record-cognitive-event! engine-ctx-atom :grounding "Percepção Espacial (Joint Attention)"

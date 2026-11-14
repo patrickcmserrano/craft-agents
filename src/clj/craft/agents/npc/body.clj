@@ -74,6 +74,16 @@
       (str base "|" jump "|" use "|" attack)
       base)))
 
+(defn format-move
+  "Linha wire de um passo unico {:agent|:agent-name :x :y :z :yaw :pitch :sprint :sneak :jump
+   :use :attack}, SEM enviar (pura; CA-103). Callers puros (ex.: `follow-tick`) devolvem isto
+   como comando em vez de conhecer o prefixo do protocolo."
+  [{:keys [agent agent-name x y z] :as m}]
+  (->wire (or agent-name (agent-name-of agent))
+          (compose {:legs  (assoc (select-keys m [:yaw :pitch :sprint :sneak :jump])
+                                  :target [x y z])
+                    :hands (select-keys m [:use :attack])})))
+
 ;; ---------------------------------------------------------------- efeitos
 
 (defonce ^:private buffer (atom {}))
@@ -114,7 +124,7 @@
   "API direta: {:agent :x :y :z :yaw :pitch :jump :sprint :sneak :use :attack} (+ :agent-name).
    Com :lease-mgr, adquire :legs/:gaze de :agent para :owner (:priority, :ttl-ticks) e nao envia
    se negado. Retorna {:sent? bool :cmd linha-ou-nil}."
-  [{:keys [agent agent-name x y z lease-mgr owner priority ttl-ticks] :as m}]
+  [{:keys [agent lease-mgr owner priority ttl-ticks] :as m}]
   (let [granted? (or (nil? lease-mgr)
                      (:granted? (leases/acquire-leases!
                                  lease-mgr agent
@@ -122,10 +132,7 @@
                                           :priority (priority-of priority)}
                                    ttl-ticks (assoc :ttl-ticks ttl-ticks)))))]
     (if granted?
-      (let [cmd (->wire (or agent-name (agent-name-of agent))
-                        (compose {:legs (assoc (select-keys m [:yaw :pitch :sprint :sneak :jump])
-                                               :target [x y z])
-                                  :hands (select-keys m [:use :attack])}))]
+      (let [cmd (format-move m)]
         (transport/send-bridge-cmd! cmd)
         {:sent? true :cmd cmd})
       {:sent? false :cmd nil})))

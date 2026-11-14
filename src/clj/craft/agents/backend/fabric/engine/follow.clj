@@ -20,6 +20,7 @@
              :refer [compute-yaw request-path3d]]
             [craft.agents.backend.fabric.sanctuary :refer [close-portal-at-coord! open-portal-at-coord!]]
             [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]
+            [craft.agents.npc.body :as body]
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.state :as npc-state]
             [craft.agents.npc.speech :as speech]))
@@ -56,8 +57,8 @@
 
 (defn follow-tick
   "Passo puro de locomocao do follow (CA-092). Entrada: {:agent-name :pos :leader :path
-   :speed :sprint :sneak :hold? (default: dist <= 2.6m)}. Saida: {:commands [\"MOVE|<nome>|...\"]
-   :pos :yaw :path :holding?}. Colado no lider: so gira e espelha o agachar; senao avanca
+   :speed :sprint :sneak :hold? (default: dist <= 2.6m)}. Saida: {:commands [<linha MOVE de
+   `npc.body/format-move`>] :pos :yaw :path :holding?}. Colado no lider: so gira e espelha o agachar; senao avanca
    `path` (NUNCA atravessa paredes: sem caminho, gira e espera)."
   [{:keys [agent-name pos leader path speed sprint sneak hold?]}]
   (let [[cx cy cz] pos
@@ -66,17 +67,17 @@
         dz (- tz cz)
         dist (Math/sqrt (+ (* dx dx) (* dz dz)))
         yaw (compute-yaw dx dz)
-        sn (str (boolean sneak))
+        sn (boolean sneak)
         hold (if (some? hold?) hold? (follow-hold? dist nil))
-        stand (fn [] {:commands [(uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|%s"
-                                          agent-name (double cx) (double cy) (double cz) yaw sn)]
+        stand (fn [] {:commands [(body/format-move {:agent-name agent-name :x cx :y cy :z cz
+                                                    :yaw yaw :pitch 0.0 :sprint false :sneak sn})]
                       :pos [cx cy cz] :yaw yaw :path [] :holding? hold})]
     (if (or hold (empty? path))
       (stand)
       (let [r (loco/advance-path {:pos [cx cy cz] :path path :speed speed :yaw yaw})
             [sx sy sz] (:pos r)]
-        {:commands [(uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|%s|%s"
-                             agent-name sx sy sz (:yaw r) (str (boolean sprint)) sn)]
+        {:commands [(body/format-move {:agent-name agent-name :x sx :y sy :z sz
+                                       :yaw (:yaw r) :pitch 0.0 :sprint (boolean sprint) :sneak sn})]
          :pos (:pos r) :yaw (:yaw r) :path (:path r) :holding? false}))))
 
 (defn boat-transition
@@ -141,8 +142,8 @@
         (when-not (:gliding? @nav-state)
           (send-bridge-cmd! (str "CMD|item replace entity " agent-name " armor.chest with minecraft:elytra"))
           (send-bridge-cmd! (str "CMD|tag " agent-name " add craft_glide")))
-        (send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
-                                   agent-name fx fy fz (double (:yaw r)) (double (:pitch r))))
+        (body/move! {:agent (:agent-id env) :agent-name agent-name :x fx :y fy :z fz
+                     :yaw (:yaw r) :pitch (:pitch r) :sprint true :priority :player-goal})
         (swap! nav-state assoc :gliding? true :pos [fx fy fz] :yaw (:yaw r) :follow-path []
                :watchdog nil)
         (publish! env {:legs {:owner :elytra-follow} :hands nil :gaze {:owner :elytra-follow}}
@@ -152,8 +153,8 @@
       (let [[px py pz] (:pos @nav-state)
             gy (or (nav/query-ground-y [px py pz]) py)]
         (send-bridge-cmd! (str "CMD|tag " agent-name " remove craft_glide"))
-        (send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                                   agent-name px (double gy) pz (double (:yaw st 0.0))))
+        (body/move! {:agent (:agent-id env) :agent-name agent-name :x px :y gy :z pz
+                     :yaw (:yaw st 0.0) :pitch 0.0 :priority :player-goal})
         (swap! nav-state assoc :gliding? false :pos [px (double gy) pz] :follow-path []))
       nil)))
 
@@ -180,7 +181,8 @@
               hdx        (- (double mx) (double cx))
               hdz        (- (double mz) (double cz))
               hyaw       (compute-yaw hdx hdz)]
-          (send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" agent-name cx cy cz hyaw))
+          (body/move! {:agent (:agent-id env) :agent-name agent-name :x cx :y cy :z cz
+                       :yaw hyaw :pitch 0.0 :priority :combat})
           (when (strike-ready? (:last-strike-tick @nav-state) tick)
             (swap! nav-state assoc :last-strike-tick tick)
             (when target-id (attack-hostile-target! agent-name target-id))
@@ -208,14 +210,15 @@
             (let [r (loco/advance-path {:pos [cx cy cz] :path active-path
                                         :speed 0.28 :yaw yaw})
                   [step-x step-y step-z] (:pos r)]
-              (send-bridge-cmd!
-               (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|true|false" agent-name step-x step-y step-z (:yaw r)))
+              (body/move! {:agent (:agent-id env) :agent-name agent-name
+                           :x step-x :y step-y :z step-z :yaw (:yaw r) :pitch 0.0
+                           :sprint true :priority :combat})
               (swap! nav-state assoc :pos (:pos r) :yaw (:yaw r) :follow-path (:path r) :follow-last-target [mx my mz]))
             (let [hdx (- (double mx) (double cx))
                   hdz (- (double mz) (double cz))
                   hyaw (compute-yaw hdx hdz)]
-              (send-bridge-cmd!
-               (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" agent-name cx cy cz hyaw))
+              (body/move! {:agent (:agent-id env) :agent-name agent-name :x cx :y cy :z cz
+                           :yaw hyaw :pitch 0.0 :priority :combat})
               (swap! nav-state assoc :yaw hyaw)))
           (publish! env {:legs {:owner :combat-intercept} :hands nil :gaze {:owner :combat-intercept}}
                     (when (karlach? env) (make-agents-map "🏹 interceptando hostil" (:pos @nav-state)))
@@ -223,8 +226,8 @@
 
         :remain-mounted-passive
         (do
-          (send-bridge-cmd!
-           (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" agent-name cx cy cz yaw))
+          (body/move! {:agent (:agent-id env) :agent-name agent-name :x cx :y cy :z cz
+                       :yaw yaw :pitch 0.0 :priority :player-goal})
           (publish! env {:legs nil :hands nil :gaze {:owner :passenger-look}}
                     (when (karlach? env) (make-agents-map "⛵ navegando embarcada com você" (:pos @nav-state)))
                     "⛵ navegando embarcada com você" (:pos @nav-state)))

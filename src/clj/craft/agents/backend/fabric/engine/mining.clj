@@ -7,7 +7,8 @@
                      locate-nearby-ores mine-block! ore-pt-names query-online-players]]
             [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.navigation :refer [compute-pitch compute-yaw request-path3d]]
-            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]))
+            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]
+            [craft.agents.npc.body :as body]))
 
 (defn tick-mining!
   "Um tick do modo :mining. `st` e o snapshot de nav-state; `tick` vem de `env`."
@@ -70,9 +71,9 @@
                              nyaw :yaw npitch :pitch rpath :path}
                             (loco/approach-step {:pos [cx cy cz] :path active-path
                                                  :speed 0.24 :yaw (:yaw st)})]
-                        (send-bridge-cmd!
-                         (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|true|false"
-                                 step-x step-y step-z nyaw npitch))
+                        (body/move! {:agent :karlach :agent-name "Karlach"
+                                     :x step-x :y step-y :z step-z :yaw nyaw :pitch npitch
+                                     :sprint true :priority :bt})
                         (swap! nav-state #(-> %
                                               (assoc :pos [step-x step-y step-z] :yaw nyaw :pitch npitch)
                                               (assoc-in [:active-mining :path] rpath))))
@@ -84,9 +85,8 @@
                   ;; Posicionada com firmeza ao lado do bloco: martela a picareta!
                   (let [cur-ticks (inc (:ticks am 0))
                         max-ticks (:max-ticks am 14)]
-                    (send-bridge-cmd!
-                     (uformat "MOVE|Karlach|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
-                             cx cy cz yaw pitch))
+                    (body/move! {:agent :karlach :agent-name "Karlach" :x cx :y cy :z cz
+                                 :yaw yaw :pitch pitch :priority :bt})
                     ;; Garante a picareta de netherite visível na mão principal durante toda a animação
                     (when (or (= cur-ticks 1) (zero? (mod cur-ticks 3)))
                       (send-bridge-cmd! "CMD|item replace entity Karlach weapon.mainhand with minecraft:netherite_pickaxe")
