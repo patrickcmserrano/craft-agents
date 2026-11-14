@@ -153,19 +153,25 @@
           (require 'craft.agents.cognition.semantic-router :reload)
           (require 'craft.agents.cognition.intent :reload)
           (require 'craft.agents.backend.fabric.goals :reload)
-          (let [loaded-routes (router/load-persisted-routes! "agents/routes")]
+          (let [reg-result    (registry/reload!)
+                loaded-agents (:agents reg-result)
+                loaded-routes (router/load-persisted-routes! "agents/routes")]
             (when (instance? clojure.lang.IAtom engine-ctx)
               (swap! engine-ctx update :events (fnil conj [])
                      {:timestamp (System/currentTimeMillis)
                       :type :rsi
                       :source "JVM Hot-Reload"
-                      :text (str "Capacidades recarregadas dinamicamente via POST /api/reload (" (count loaded-routes) " rotas ativas).")}))
-            (println (format "[craft-agents] ✅ Hot-Reload concluído com sucesso. %d rotas recarregadas." (count loaded-routes)))
+                      :text (str "Capacidades recarregadas dinamicamente via POST /api/reload ("
+                                 (count loaded-routes) " rotas ativas, "
+                                 (count loaded-agents) " agentes).")}))
+            (println (format "[craft-agents] ✅ Hot-Reload concluído com sucesso. %d rotas recarregadas, %d agentes."
+                             (count loaded-routes) (count loaded-agents)))
             {:status 200
              :headers {"Content-Type" "application/json; charset=utf-8"}
              :body (json/write-str {:status "ok"
                                     :reloaded true
-                                    :routes-loaded (count loaded-routes)})})
+                                    :routes-loaded (count loaded-routes)
+                                    :agents-loaded (count loaded-agents)})})
           (catch Throwable t
             (println (format "[craft-agents] ❌ Erro durante Hot-Reload: %s" (.getMessage t)))
             {:status 500

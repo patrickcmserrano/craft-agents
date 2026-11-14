@@ -13,10 +13,11 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [craft.agents.schemas :as schemas]
             [malli.core :as m]
             [malli.error :as me]))
 
-(def default-dir "agents")
+(def default-dir (or (System/getenv "CRAFT_AGENTS_DIR") "agents"))
 
 (def Voice
   [:map
@@ -36,7 +37,7 @@
    [:agent/quarters {:optional true} :map]
    [:agent/dialogues {:optional true} :map]
    [:agent/traits {:optional true} :map]
-   [:bt/root {:optional true} vector?]
+   [:bt/root {:optional true} schemas/BTNode]
    [:agent/voice {:optional true} Voice]
    [:agent/combat-policy {:optional true} [:enum :fight :flee :none]]
    [:agent/capabilities {:optional true} [:set :keyword]]

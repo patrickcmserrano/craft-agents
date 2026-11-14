@@ -59,7 +59,8 @@
                  (every? valid-bt-node? args))
 
             (:action :guard :condition)
-            (and (keyword? (first args))
+            (and (<= 1 (count args) 2)
+                 (keyword? (first args))
                  (or (nil? (second args))
                      (map? (second args))))
 
@@ -68,7 +69,7 @@
                  (= 1 (count (rest args)))
                  (valid-bt-node? (second args)))
 
-            :inverter
+            (:inverter :invert)
             (and (= 1 (count args))
                  (valid-bt-node? (first args)))
 
