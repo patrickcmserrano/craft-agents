@@ -1,0 +1,22 @@
+;; Plano da sprint atelier-core-01 ("Coco e Richeh no NPC Core")
+;; Specs em docs/16-backlog-atelier-core-01.md.
+;; Encadeada apos feat/CA-105 (guardada em :waiting-base ate body-01 terminar CA-105).
+{:sprint       "atelier-core-01"
+ :repo         "/home/pace/dev/worktrees/craft-agents-body-01"
+ :project      "craft-agents"
+ :spec-doc     "docs/16-backlog-atelier-core-01.md"
+ :pending-doc  "docs/plans/sprint-atelier-core-01-pendencias.md"
+ :base-branch  "feat/CA-105"
+ :model        "claude-sonnet-5-5"
+ :effort       "medium"
+ :timeout-min  60
+ :gate-cmds    ["make test"]
+ :max-attempts 2
+ :tasks [{:id "CA-106" :profile "cognition"      :effort "high"}
+         {:id "CA-107" :profile "cognition"      :effort "medium"}
+         {:id "CA-108" :profile "architecture"   :effort "medium"}
+         {:id "CA-109" :profile "cognition"      :effort "medium"}
+         {:id "CA-110" :profile "cognition"      :effort "medium"}
+         {:id "CA-111" :profile "backend-fabric" :effort "high"}
+         {:id "CA-112" :profile "architecture"   :effort "low"}
+         {:id "CA-113" :profile "architecture"   :effort "low"}]}

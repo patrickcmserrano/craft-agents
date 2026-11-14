@@ -1,0 +1,25 @@
+;; Plano da sprint body-01 ("Um dono por atuador e um tick mensuravel")
+;; Specs em docs/15-backlog-body-01.md.
+;; Aproveitamento noturno multi-provider:
+;;   - CA-098..099 -> AGY Flash (gemini-3.8-flash-high)
+;;   - CA-100..101 -> AGY Argon (gemini-4-argon-high)
+;;   - CA-102..105 -> Claude Sonnet 5.5 (dispara assim que a janela de 5h abrir)
+{:sprint       "body-01"
+ :repo         "/home/pace/dev/worktrees/craft-agents-body-01"
+ :project      "craft-agents"
+ :spec-doc     "docs/15-backlog-body-01.md"
+ :pending-doc  "docs/plans/sprint-body-01-pendencias.md"
+ :base-branch  "sprint/body-01"
+ :model        "claude-sonnet-5-5"
+ :effort       "medium"
+ :timeout-min  60
+ :gate-cmds    ["make test"]
+ :max-attempts 2
+ :tasks [{:id "CA-098" :profile "architecture"   :harness :agy    :model "gemini-3.8-flash-high" :effort "high"}
+         {:id "CA-099" :profile "cognition"      :harness :agy    :model "gemini-3.8-flash-high" :effort "high"}
+         {:id "CA-100" :profile "backend-fabric" :harness :agy    :model "gemini-4-argon-high"   :effort "high"}
+         {:id "CA-101" :profile "architecture"   :harness :agy    :model "gemini-4-argon-high"   :effort "high"}
+         {:id "CA-102" :profile "architecture"   :harness :claude :model "claude-sonnet-5-5"     :effort "medium"}
+         {:id "CA-103" :profile "backend-fabric" :harness :claude :model "claude-sonnet-5-5"     :effort "high"}
+         {:id "CA-104" :profile "backend-fabric" :harness :claude :model "claude-sonnet-5-5"     :effort "high"}
+         {:id "CA-105" :profile "architecture"   :harness :claude :model "claude-sonnet-5-5"     :effort "low"}]}
