@@ -5,8 +5,10 @@
    Dois agentes ficticios (Alpha, Beta) provam que o comportamento segue apenas o `.edn`.
    CA-111 (SUG-06 parte 2): Coco e Richeh rodam rotina, dupla, pontos do atelie e reacoes so pela
    `:bt/root` dos `.edn` via `bt-tick/tick-agent!`, com emissao unica pelo `npc.body`."
-  (:require [clojure.string :as str]
+  (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [craft.agents.backend.fabric :as fabric]
             [craft.agents.backend.fabric.actions :as actions]
             [craft.agents.backend.fabric.atelier :as atelier]
             [craft.agents.backend.fabric.engine.atelier-tick :as atelier-tick]
@@ -19,6 +21,7 @@
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.routine :as routine]
             [craft.agents.npc.state :as npc-state]
+            [craft.agents.studio.server :as studio]
             [malli.core :as m]))
 
 (def alpha
@@ -543,3 +546,48 @@
         (is (= 1234 (:world-time @(:engine-ctx-atom e))))
         (is (contains? @(:engine-ctx-atom e) :celestial))
         (is (keyword? (get-in @(:engine-ctx-atom e) [:celestial :phenomenon])))))))
+
+;; ----------------------------------------------------------------------------
+;; CA-113: fechamento integrado — Studio /api/state + BT unificada + Coco/Richeh declarativos
+;; ----------------------------------------------------------------------------
+
+(defn- studio-state
+  "GET /api/state do Studio sobre `ectx`, com a ponte do jogo stubada. Devolve o JSON (chaves keyword)."
+  [ectx]
+  (with-redefs [fabric/query-online-players (fn [] [])
+                fabric/query-minecraft-weather (fn [] {:clock "12:00" :phase "Dia" :sky "Ceu Limpo"})
+                fabric/inspect-inventory (fn [_] {:slots-used 0 :items {}})]
+    (let [resp ((studio/create-app-handler ectx) {:uri "/api/state" :request-method :get})]
+      (is (= 200 (:status resp)))
+      (json/read-str (:body resp) :key-fn keyword))))
+
+(deftest studio-state-exposes-routine-and-bt-memory-end-to-end-test
+  (let [ectx (bt-ctx :coco [0.0 66.0 0.0] :world-time 6000
+                     :agents {:richeh {:pos [-30.0 66.0 192.0]}})]
+    (is (= :running (:status (:res (bt-step! ectx :coco)))) "Coco caminha ate o bloco :sketch")
+    (bt-step! ectx :richeh :tick 8)
+    (let [state (studio-state ectx)
+          coco  (get-in state [:agents :coco])]
+      (testing "o cartao da Coco resume a rotina declarada no .edn"
+        (is (= "sketch" (get-in coco [:routine :activity])))
+        (is (= 12 (get-in coco [:routine :hour]))))
+      (testing "memoria da BT serializavel (caminhos viram texto) e contador de ticks"
+        (is (map? (:bt-memory coco)))
+        (is (seq (:bt-memory coco)) "a BT deixou memoria de no em andamento")
+        (is (pos? (:bt-tick coco))))
+      (testing "Richeh tambem tem cartao com rotina; campos legados preservados"
+        (is (some? (get-in state [:agents :richeh :routine])))
+        (is (contains? coco :leases))
+        (is (contains? coco :cooldowns))
+        (is (contains? state :tick))))))
+
+(deftest studio-state-survives-agents-without-routine-test
+  (let [ectx  (atom {:agents {:karlach {:pos [0.0 65.0 0.0]}}})
+        state (studio-state ectx)]
+    (is (contains? (:agents state) :karlach))
+    (is (nil? (get-in state [:agents :karlach :routine])) "sem hora do mundo: fail-closed")))
+
+(deftest fail-closed-guards-hold-without-perception-test
+  (is (false? (bta/guard-holds? :in-quiet-corner? {} {})))
+  (is (false? (bta/guard-holds? :at-place? {:place :lab :radius 1.0} {})))
+  (is (false? (bta/guard-holds? :routine-activity? {:activity :study} {}))))
