@@ -41,7 +41,8 @@
             [craft.agents.npc-body-test]
             [craft.agents.npc-body-guard-test]
             [craft.agents.npc-body-integration-test]
-            [craft.agents.npc-routine-test]))
+            [craft.agents.npc-routine-test]
+            [craft.agents.npc-persona-structural-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -84,7 +85,8 @@
    {:epic 37 :title "CA-102 — Arbitro unico de atuadores corporais (npc.body)" :ns 'craft.agents.npc-body-test}
    {:epic 38 :title "CA-104 — Guarda global contra \"MOVE| fora de npc.body e BT sob arbitragem unica" :ns 'craft.agents.npc-body-guard-test}
    {:epic 39 :title "CA-105 — Integracao multi-agente da sprint body-01 (corpo, percepcao, estado, chat)" :ns 'craft.agents.npc-body-integration-test}
-   {:epic 40 :title "CA-110 — Primitivas genericas de rotina, lugares e interacao social" :ns 'craft.agents.npc-routine-test}])
+   {:epic 40 :title "CA-110 — Primitivas genericas de rotina, lugares e interacao social" :ns 'craft.agents.npc-routine-test}
+   {:epic 41 :title "CA-112 — Distincao de persona e proibicao de nomes de personagens no nucleo" :ns 'craft.agents.npc-persona-structural-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
