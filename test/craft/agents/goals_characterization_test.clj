@@ -397,10 +397,14 @@
                                               {:perception {:hostiles [{:distance 3.0}]}}))))
     (is (= {:status :success} (:res (run-node [:guard :ally-distance-exceeds? {:min-dist 5.0}]
                                               {:perception {:ally {:distance 9.0}}}))))
-    (is (= {:status :success} (:res (run-node [:guard :within-mount-range?]))))
+    ;; CA-108: fail-closed — sem snapshot de distancia ao lider o guard falha
+    (is (= {:status :failure} (:res (run-node [:guard :within-mount-range?]))))
+    (is (= {:status :success} (:res (run-node [:guard :within-mount-range?]
+                                              {:perception {:leader {:distance 2.0}}}))))
     (is (= {:status :failure} (:res (run-node [:guard :has-active-directive?]))))
     (is (= {:status :success} (:res (run-node [:guard :has-active-directive?] {:directive :x}))))
-    (is (= {:status :success} (:res (run-node [:guard :condicao-desconhecida]))))))
+    ;; CA-108: condicao desconhecida falha fechado (antes sucedia)
+    (is (= {:status :failure} (:res (run-node [:guard :condicao-desconhecida]))))))
 
 (deftest bt-action-test
   (testing "acoes embutidas"
