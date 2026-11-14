@@ -1,6 +1,7 @@
 (ns craft.agents.epic5-cognition-mcp-studio-test
   "Testes comportamentais do Epico 5: Semantic Scene Digest, Gatekeeper Malli de Skills, Servidor MCP, Cognicao Assincrona e Studio (CA-036 a CA-042)."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [craft.agents.backend.fabric :as fabric]
@@ -9,6 +10,7 @@
             [craft.agents.cognition :as cognition]
             [craft.agents.fixtures.world-fixture :as wf]
             [craft.agents.mcp.server :as mcp]
+            [craft.agents.npc.registry :as registry]
             [craft.agents.perception :as perception]
             [craft.agents.schemas :as schemas]
             [craft.agents.skills.actions :as actions]
@@ -209,6 +211,22 @@
       (is (= 200 (:status resp)))
       (is (str/includes? (:body resp) "\"reloaded\":true"))
       (is (pos? (count (:events @ctx-atom))) "Evento de reload deve ser registrado no blackboard do studio"))))
+
+(deftest ca-098-studio-reload-invokes-registry-reload-test
+  (testing "CA-098: POST /api/reload invoca registry/reload! e inclui contagem de agentes recarregados na resposta"
+    (let [reloaded? (atom false)
+          ctx-atom  (atom {:events []})
+          handler   (studio/create-app-handler ctx-atom)]
+      (with-redefs [registry/reload! (fn []
+                                       (reset! reloaded? true)
+                                       {:agents {:karlach {} :coco {}}
+                                        :errors []})]
+        (let [resp (handler {:uri "/api/reload" :request-method :post})
+              data (json/read-str (:body resp) :key-fn keyword)]
+          (is (= 200 (:status resp)))
+          (is (true? @reloaded?) "POST /api/reload deve invocar registry/reload!")
+          (is (true? (:reloaded data)))
+          (is (= 2 (:agents-loaded data))))))))
 
 
 (deftest ca-046-dynamic-terrain-portal-perception-test

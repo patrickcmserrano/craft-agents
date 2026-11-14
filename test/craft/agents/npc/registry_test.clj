@@ -85,3 +85,44 @@
     (is (some? (reg/agent-by-name "alfa")))
     (reg/reload! "agents")
     (is (nil? (reg/agent-by-name "alfa")))))
+
+(deftest schema-valida-bt-root-estrutural
+  (reg/reload! "agents")
+  (let [base {:agent/id :x :agent/name "X"
+              :agent/spawn {:dimension "minecraft:overworld" :pos [0.0 64.0 0.0]}}
+        valid-trees [;; Todas as árvores declaradas em agents/*.edn
+                     (:bt/root (reg/agent-by-id :antigravity))
+                     (:bt/root (reg/agent-by-id :coco))
+                     (:bt/root (reg/agent-by-id :karlach))
+                     (:bt/root (reg/agent-by-id :picard))
+                     (:bt/root (reg/agent-by-id :richeh))
+                     ;; Formas suportadas por goals.bt/execute-tree-node!
+                     [:selector [:action :a]]
+                     [:sequence [:action :a]]
+                     [:fallback [:action :a]]
+                     [:parallel [:action :a] [:action :b]]
+                     [:action :a]
+                     [:action :a {:foo "bar"}]
+                     [:condition :cond-x]
+                     [:guard :guard-y {:radius 10.0}]
+                     [:cooldown {:ms 1000} [:action :a]]
+                     [:repeat {:times 3} [:action :a]]
+                     [:invert [:action :a]]
+                     [:inverter [:action :a]]]
+        invalid-trees [[]
+                       [123]
+                       [:op-inexistente-xyz {:x 1}]
+                       [:action]
+                       [:sequence]
+                       [:cooldown {:ms 100}]
+                       [:invert]]]
+    (doseq [tree valid-trees]
+      (is (some? tree) "Árvore de agente existente não pode ser nil")
+      (is (m/validate reg/AgentSpec (assoc base :bt/root tree))
+          (str "Deveria aceitar árvore válida: " (pr-str tree))))
+    (doseq [bad invalid-trees]
+      (is (not (m/validate reg/AgentSpec (assoc base :bt/root bad)))
+          (str "Deveria rejeitar árvore malformada: " (pr-str bad))))))
+
+(deftest default-dir-respeita-env-ou-fallback
+  (is (= (or (System/getenv "CRAFT_AGENTS_DIR") "agents") reg/default-dir)))
