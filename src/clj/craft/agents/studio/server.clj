@@ -35,22 +35,51 @@
                      (file-seq skills-dir))))
       [])))
 
-(defn studio-snapshot
-  "Estado por agente para o Studio (CA-089): `:agents` (`:pos`/`:mode` de cada agente
-   do registro, mesclados sobre o que o engine publicou em `(:agents ctx)`) e
-   `:inventory` (`id -> inventario`), ambos a partir do registro de agentes."
+(defn build-agent-cards
+  "Monta dinamicamente os cartoes de todos os agentes a partir de `registry/all-agents`,
+   `(:agent-states ctx)` e `(:agents ctx)`, incluindo `:cooldowns`, `:events` e `:leases`
+   por agente sem quebrar os cartoes legados (CA-089, CA-101)."
   [engine-ctx]
-  (let [ctx (if (instance? clojure.lang.IDeref engine-ctx) @engine-ctx engine-ctx)
-        specs (registry/all-agents)
-        published (:agents ctx {})
-        ids (distinct (concat (map :agent/id specs) (keys published)))
-        agent-view (fn [id]
-                     (let [st (or (get-in ctx [:agent-states id])
-                                  (npc-state/default-state id))
-                           st (if (instance? clojure.lang.IDeref st) @st st)
-                           pub (get published id)]
-                       (merge (select-keys st [:pos :mode]) pub)))]
-    {:agents (into {} (map (juxt identity agent-view)) ids)
+  (let [ctx          (if (instance? clojure.lang.IDeref engine-ctx) @engine-ctx engine-ctx)
+        specs        (registry/all-agents)
+        specs-by-id  (into {} (map (juxt :agent/id identity)) specs)
+        agent-states (:agent-states ctx {})
+        published    (:agents ctx {})
+        ids          (distinct (concat (map :agent/id specs)
+                                       (keys agent-states)
+                                       (keys published)))]
+    (into {}
+          (map (fn [id]
+                 (let [spec   (or (get specs-by-id id) (registry/agent-by-id id))
+                       base   (npc-state/default-state id)
+                       raw-st (get agent-states id)
+                       st-map (when raw-st
+                                (if (instance? clojure.lang.IDeref raw-st) @raw-st raw-st))
+                       st     (merge base st-map)
+                       pub    (get published id)
+                       card   (merge (select-keys st [:pos :mode :status :task :skills :last-learned
+                                                      :cooldowns :events :leases])
+                                     (when spec {:name (:agent/name spec)})
+                                     pub
+                                     {:cooldowns (or (not-empty (:cooldowns pub))
+                                                     (:cooldowns st)
+                                                     {})
+                                      :events    (or (not-empty (:events pub))
+                                                     (:events st)
+                                                     [])
+                                      :leases    (merge npc-state/default-leases
+                                                        (:leases st)
+                                                        (:leases pub))})]
+                   [id card])))
+          ids)))
+
+(defn studio-snapshot
+  "Estado por agente para o Studio (CA-089, CA-101): `:agents` (`:pos`/`:mode` e sub-estados
+   de cada agente do registro e de `:agent-states`, mesclados sobre o que o engine publicou
+   em `(:agents ctx)`) e `:inventory` (`id -> inventario`), ambos a partir do registro de agentes."
+  [engine-ctx]
+  (let [specs (registry/all-agents)]
+    {:agents (build-agent-cards engine-ctx)
      :inventory (into {}
                       (map (fn [spec]
                              [(:agent/id spec)
@@ -224,12 +253,15 @@
 
 (defn -main [& args]
   (let [port (or (some-> (first args) parse-long) 8095)
+        initial-agents (into {}
+                             (map (fn [spec]
+                                    [(:agent/id spec)
+                                     {:status "starting"
+                                      :pos    (get-in spec [:agent/spawn :pos])}]))
+                             (registry/all-agents))
         live-ctx (atom {:tick 0
                         :leases {:legs nil :hands nil :gaze nil}
-                        :agents {:karlach {:status "starting" :pos [-175.0 65.0 180.0]}
-                                 :picard  {:status "starting" :pos [-65.0 145.0 101.0]}
-                                 :coco    {:status "starting" :pos [-30.0 66.0 190.0]}
-                                 :richeh  {:status "starting" :pos [-30.0 66.0 192.0]}}
+                        :agents initial-agents
                         :events []})]
     (router/load-persisted-routes! "agents/routes")
     (fabric/start-live-karlach-loop! live-ctx)
