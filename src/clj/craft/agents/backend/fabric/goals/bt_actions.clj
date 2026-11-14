@@ -1,19 +1,19 @@
 (ns craft.agents.backend.fabric.goals.bt-actions
-  "Guards fail-closed e registro unico de acoes de Behavior Tree (CA-094, CA-108).
-   Guards: `eval-guard` (multimethod por condicao) e `guard-holds?` (fachada pura fail-closed).
-   Acoes: `registered-actions` e o mapa `{action-key {:run :channels :params :doc}}`
-   (`register-action!`); `:run` e `(fn [params ctx])` e `:channels` sao os canais do arbitro
-   `npc.body` (:legs :hands :gaze). `bt-action` segue como ponto de extensao: o `:default` consulta
-   o registro e, depois, as acoes modulares de skills.actions. goals.bt reexporta tudo."
+  "Guards fail-closed (`eval-guard`, `guard-holds?`) e registro unico de acoes de BT (CA-094,
+   CA-108, CA-110): `registered-actions` = `{action-key {:run :channels :params :doc}}`
+   (`register-action!`; `:run` e `(fn [params ctx])`, `:channels` do arbitro `npc.body`).
+   `bt-action`: o `:default` consulta o registro e, depois, skills.actions. goals.bt reexporta."
   (:require [clojure.string :as str]
             [craft.agents.backend.fabric.actions :as actions]
             [craft.agents.backend.fabric.engine.combat :as combat]
             [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
+            [craft.agents.backend.fabric.goals.routine-actions :as routine-actions]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.npc.body :as body]
             [craft.agents.npc.registry :as registry]
+            [craft.agents.npc.routine :as routine]
             [craft.agents.skills.actions :as skill-actions]
             [malli.core :as m]))
 
@@ -21,9 +21,7 @@
 ;; Guards: multimethod fail-closed
 ;; ----------------------------------------------------------------------------
 
-(defn- dist3 [[ax ay az] [bx by bz]]
-  (let [dx (- (double bx) (double ax)) dy (- (double by) (double ay)) dz (- (double bz) (double az))]
-    (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz)))))
+(def ^:private dist3 routine/distance)
 
 (defmulti eval-guard
   "Avalia a condicao `guard-id` (CA-108): `(eval-guard guard-id params world)`, sem efeito colateral.
@@ -133,6 +131,10 @@
     (boolean (and (sequential? players)
                   (<= (count (filter #(<= (:distance %) radius) players)) max-n)))))
 
+(defn- world-agent [w] (or (:agent w) (some-> (:agent-id w) registry/agent-by-id))) ; CA-110
+(add-guard! [:routine-activity?] (fn [_ {:keys [activity]} w] (routine/activity-now? (world-agent w) activity (:world-time w))))
+(add-guard! [:at-place?] (fn [_ {:keys [place radius] :or {radius 2.0}} w] (routine/at-place? (world-agent w) place (:self-pos w) radius)))
+
 (defn guard-world
   "Mundo (puro) dos guards a partir do engine-ctx, do estado e do agente."
   [engine-ctx-atom nav-state agent-id]
@@ -143,6 +145,7 @@
            :agent-id agent-id
            :self-pos (or (get-in ctx [:agents agent-id :pos]) (:pos nav))
            :now-ms (or (:now-ms ctx) (System/currentTimeMillis))
+           :agent (registry/agent-by-id agent-id)
            :preferred-blocks (get-in (registry/agent-by-id agent-id) [:agent/traits :preferred-blocks]))))
 
 (defn stamp-cooldowns!
@@ -197,8 +200,7 @@
   [] @action-registry)
 
 (defn known-action-ids
-  "Ids de acao executaveis: registro, defmethods de `bt-action` e acoes modulares de skills.actions
-   (insumo de `registry/unknown-actions`)."
+  "Ids executaveis: registro, defmethods de `bt-action` e skills.actions (insumo de `unknown-actions`)."
   []
   (-> (set (keys @action-registry))
       (into (keys (methods bt-action)))
@@ -206,8 +208,7 @@
       (disj :default)))
 
 (defn- note-unimplemented!
-  "Evento cognitivo \"ação não implementada\", uma vez por id de acao."
-  [engine-ctx-atom action-id agent]
+  "Evento cognitivo \"ação não implementada\", uma vez por id de acao." [engine-ctx-atom action-id agent]
   (when engine-ctx-atom
     (let [[old _] (swap-vals! engine-ctx-atom update :bt-unimplemented (fnil conj #{}) action-id)]
       (when-not (contains? (:bt-unimplemented old) action-id)
@@ -395,5 +396,5 @@
          :care-for-enclosure       "cuida do recinto (hoje no tick do santuario)."
          :escort-player            "escolta o jogador (hoje no tick de escolta)."}))
 
-(doseq [[id spec] (merge pending-actions builtin-actions)]
+(doseq [[id spec] (merge pending-actions builtin-actions routine-actions/actions)]
   (register-action! id spec))
