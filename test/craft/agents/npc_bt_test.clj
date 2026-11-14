@@ -274,3 +274,176 @@
       (step! {:agent :coco :source :atelier :x 1.0 :y 64.0 :z 2.0 :yaw 10.0 :pitch 0.0}))
     (is (= ["MOVE|Coco|1.000|64.000|2.000|10.0|0.0|false|false"] @cmds)
         "fora de tick aberto (testes isolados) o passo sai direto, no mesmo formato")))
+
+;; ----------------------------------------------------------------------------
+;; CA-106: interpretador unico com :running, memoria por no e :cooldown/:repeat reais
+;; ----------------------------------------------------------------------------
+
+(def ^:private probe-script (atom {}))
+(def ^:private probe-calls (atom []))
+
+(defmethod bt/bt-action :bt-probe
+  ;; Acao de teste: cada chamada consome o proximo status do roteiro de `:id` (esgotado = :success).
+  [_ {:keys [id]} _ctx]
+  (swap! probe-calls conj id)
+  (let [[status & more] (get @probe-script id)]
+    (swap! probe-script assoc id (vec more))
+    {:status (or status :success) :action-id :bt-probe}))
+
+(defn- probe-reset! [script]
+  (reset! probe-script script)
+  (reset! probe-calls []))
+
+(defn- probe [id] [:action :bt-probe {:id id}])
+
+(defn- bt-rig
+  "Rig de BT: engine-ctx compartilhavel e o atomo de estado de `agent-id`."
+  ([agent-id] (bt-rig (atom {}) agent-id))
+  ([ectx agent-id]
+   {:ectx ectx :agent-id agent-id
+    :st (npc-state/agent-atom ectx agent-id {:pos [0.0 65.0 0.0]})}))
+
+(defn- bt-tick!
+  "Um tick da raiz `node` para o agente do rig. Devolve o :status do no raiz."
+  [{:keys [ectx st agent-id]} node]
+  (:status (bt/execute-tree-node! node ectx st [] "Pace" (registry/agent-by-id agent-id))))
+
+(defn- take-calls!
+  "Devolve e zera as chamadas registradas pela acao de teste."
+  []
+  (let [c @probe-calls] (reset! probe-calls []) c))
+
+(deftest sequence-resumes-from-running-child-test
+  (let [rig  (bt-rig :coco)
+        tree [:sequence (probe :a) (probe :b) (probe :c)]]
+    (probe-reset! {:a [:success] :b [:running :running :success] :c [:success]})
+    (testing "o 2o filho devolve :running: a sequencia propaga :running"
+      (is (= :running (bt-tick! rig tree)))
+      (is (= [:a :b] (take-calls!)))
+      (is (seq (:bt-memory @(:st rig))) "a memoria do no vive no estado do agente"))
+    (testing "tick seguinte retoma do 2o filho, sem re-executar o 1o"
+      (is (= :running (bt-tick! rig tree)))
+      (is (= [:b] (take-calls!))))
+    (testing "ao concluir com :success avanca para o 3o filho e a sequencia termina"
+      (is (= :success (bt-tick! rig tree)))
+      (is (= [:b :c] (take-calls!)))
+      (is (empty? (:bt-memory @(:st rig))) "memoria limpa ao concluir"))
+    (testing "depois de concluida, a proxima passagem recomeca do 1o filho"
+      (bt-tick! rig tree)
+      (is (= :a (first (take-calls!)))))))
+
+(deftest sequence-restarts-after-running-child-fails-test
+  (let [rig  (bt-rig :coco)
+        tree [:sequence (probe :a) (probe :b) (probe :c)]]
+    (probe-reset! {:b [:running :failure]})
+    (is (= :running (bt-tick! rig tree)))
+    (take-calls!)
+    (is (= :failure (bt-tick! rig tree)) "o filho que concluiu em :failure falha a sequencia")
+    (is (= [:b] (take-calls!)) "sem re-executar o 1o filho enquanto o 2o estava :running")
+    (is (empty? (:bt-memory @(:st rig))))
+    (is (= :success (bt-tick! rig tree)))
+    (is (= [:a :b :c] (take-calls!)) "apos a falha recomeca do 1o filho")))
+
+(deftest selector-resumes-from-running-child-test
+  (let [rig  (bt-rig :coco)
+        tree [:selector (probe :a) (probe :b)]]
+    (probe-reset! {:a [:failure :failure :failure] :b [:running :success]})
+    (is (= :running (bt-tick! rig tree)))
+    (is (= [:a :b] (take-calls!)))
+    (is (= :success (bt-tick! rig tree)))
+    (is (= [:b] (take-calls!)) "o seletor retoma do filho :running sem reavaliar o 1o")
+    (is (empty? (:bt-memory @(:st rig))))))
+
+(deftest bt-memory-is-isolated-per-agent-test
+  (let [ectx (atom {})
+        coco (bt-rig ectx :coco)
+        pic  (bt-rig ectx :picard)
+        tree [:sequence (probe :a) (probe :b)]]
+    (probe-reset! {:b [:running]})
+    (is (= :running (bt-tick! coco tree)))
+    (take-calls!)
+    (is (empty? (:bt-memory @(:st pic))) "a memoria da Coco nao vaza para o Picard")
+    (is (= :success (bt-tick! pic tree)) "o Picard comeca do 1o filho")
+    (is (= [:a :b] (take-calls!)))))
+
+(deftest cooldown-blocks-child-for-n-ticks-test
+  (let [rig  (bt-rig :coco)
+        tree [:cooldown {:ticks 3} (probe :x)]]
+    (probe-reset! {})
+    (is (= :success (bt-tick! rig tree)) "tick 1 executa o filho")
+    (is (= [:x] (take-calls!)))
+    (testing "durante N=3 ticks o filho nao reexecuta e o no falha"
+      (dotimes [_ 3]
+        (is (= :failure (bt-tick! rig tree))))
+      (is (empty? (take-calls!))))
+    (testing "passados N ticks o filho volta a executar"
+      (is (= :success (bt-tick! rig tree)))
+      (is (= [:x] (take-calls!))))))
+
+(deftest cooldown-is-keyed-by-agent-and-node-path-test
+  (let [ectx (atom {})
+        coco (bt-rig ectx :coco)
+        pic  (bt-rig ectx :picard)
+        tree [:parallel
+              [:cooldown {:ticks 2} (probe :x)]
+              [:cooldown {:ticks 2} (probe :y)]]]
+    (probe-reset! {})
+    (is (= :success (bt-tick! coco tree)))
+    (is (= [:x :y] (take-calls!)))
+    (testing "outro agente tem o proprio cooldown para os mesmos caminhos"
+      (bt-tick! pic tree)
+      (is (= [:x :y] (take-calls!))))
+    (testing "os dois nos da Coco seguem bloqueados no tick seguinte"
+      (is (= :failure (bt-tick! coco tree)))
+      (is (empty? (take-calls!))))
+    (testing "um cooldown em outro caminho nao e afetado pelo bloqueio vizinho"
+      (let [only-y [:selector
+                    [:cooldown {:ticks 5} (probe :x)]
+                    (probe :y)]
+            r      (bt-rig :karlach)]
+        (probe-reset! {})
+        (is (= :success (bt-tick! r only-y)))
+        (is (= [:x] (take-calls!)))
+        (is (= :success (bt-tick! r only-y)) "o :x bloqueado cai no irmao :y")
+        (is (= [:y] (take-calls!)))))))
+
+(deftest repeat-runs-child-k-times-returning-running-test
+  (let [rig  (bt-rig :coco)
+        tree [:repeat {:times 3} (probe :r)]]
+    (probe-reset! {})
+    (is (= :running (bt-tick! rig tree)) "1a repeticao concluida: ainda :running")
+    (is (= :running (bt-tick! rig tree)) "2a repeticao concluida: ainda :running")
+    (is (= :success (bt-tick! rig tree)) "3a repeticao concluida: :success")
+    (is (= [:r :r :r] (take-calls!)))
+    (is (empty? (:bt-memory @(:st rig))))
+    (testing "ao concluir, a contagem reinicia"
+      (is (= :running (bt-tick! rig tree)))
+      (is (= [:r] (take-calls!))))))
+
+(deftest repeat-propagates-running-child-and-stops-on-failure-test
+  (let [rig  (bt-rig :coco)
+        tree [:repeat {:times 2} (probe :r)]]
+    (testing "filho :running nao conta como sucesso"
+      (probe-reset! {:r [:running :success :success]})
+      (is (= :running (bt-tick! rig tree)))
+      (is (= :running (bt-tick! rig tree)) "1o sucesso do filho")
+      (is (= :success (bt-tick! rig tree)) "2o sucesso do filho")
+      (is (= [:r :r :r] (take-calls!))))
+    (testing "contrato: falha do filho encerra o :repeat em :failure e zera a contagem"
+      (probe-reset! {:r [:success :failure]})
+      (is (= :running (bt-tick! rig tree)))
+      (is (= :failure (bt-tick! rig tree)))
+      (is (empty? (:bt-memory @(:st rig))))
+      (probe-reset! {})
+      (is (= :running (bt-tick! rig tree)) "recomeca do zero apos a falha")
+      (is (= :success (bt-tick! rig tree))))))
+
+(deftest repeat-state-is-keyed-by-agent-test
+  (let [ectx (atom {})
+        coco (bt-rig ectx :coco)
+        pic  (bt-rig ectx :picard)
+        tree [:repeat {:times 2} (probe :r)]]
+    (probe-reset! {})
+    (is (= :running (bt-tick! coco tree)))
+    (is (= :running (bt-tick! pic tree)) "a contagem do Picard nao herda a da Coco")
+    (is (= :success (bt-tick! coco tree)))))
