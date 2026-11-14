@@ -14,7 +14,8 @@
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.state :as npc-state]
-            [craft.agents.skills.actions :as skill-actions]))
+            [craft.agents.skills.actions :as skill-actions]
+            [malli.core :as m]))
 
 (defn- run-node
   "Executa `node` como `agent-id` com a ponte stubada. Devolve {:res :cmds :ctx :nav}."
@@ -122,7 +123,7 @@
 (deftest bt-action-is-an-extensible-multimethod-test
   (is (instance? clojure.lang.MultiFn bt/bt-action))
   (doseq [id [:face-entity :social-gaze]]
-    (is (contains? (methods bt/bt-action) id) (str id))))
+    (is (contains? (bt/registered-actions) id) (str id " vive no registro unico (CA-108)"))))
 
 (deftest face-entity-is-generic-test
   (doseq [[id nm] [[:coco "Coco"] [:picard "Picard"]]]
@@ -602,3 +603,119 @@
         (is (= :failure (:status (tick-tree t ctx3))))
         (is (= :success (:status (tick-tree t ctx3))))
         (is (= [:x :x] (take-calls!)))))))
+
+;; ----------------------------------------------------------------------------
+;; CA-108: registro unico declarativo de acoes {:run :channels :params :doc}
+;; ----------------------------------------------------------------------------
+
+(def ^:private migrated-actions
+  [:face-entity :social-gaze :say-message :play-sound :social-dance :sit-furniture :stand-up
+   :patrol-sanctuary :breed-animals :follow-player :walk-towards-leader :bodyguard
+   :mining-cooperation :drop-inventory :teleport-to-player :move-to-quarters :evade-towards-ally])
+
+(deftest action-registry-declares-every-bt-action-test
+  (let [reg (bt/registered-actions)]
+    (is (map? reg))
+    (doseq [id migrated-actions]
+      (is (contains? reg id) (str id " esta no registro unico")))
+    (doseq [[id spec] reg]
+      (testing (str id)
+        (is (fn? (:run spec)))
+        (is (set? (:channels spec)))
+        (is (every? #{:legs :hands :gaze} (:channels spec)) "canais do arbitro npc.body")
+        (is (some? (m/schema (:params spec))) ":params e um schema Malli valido")
+        (is (and (string? (:doc spec)) (seq (:doc spec))) ":doc nao vazio")))
+    (is (= #{:gaze} (get-in reg [:face-entity :channels])))
+    (is (= #{:gaze} (get-in reg [:social-gaze :channels])))
+    (is (= #{:legs} (get-in reg [:follow-player :channels])))))
+
+(deftest bt-clj-has-no-hidden-parallel-action-case-test
+  (let [src (slurp "src/clj/craft/agents/backend/fabric/goals/bt.clj")]
+    (is (not (str/includes? src "(case action-id")) "acoes vivem so no registro")
+    (is (not (str/includes? src ":teleport-to-player")))
+    (is (not (str/includes? src ":social-dance")))))
+
+(deftest registered-action-runs-from-the-tree-test
+  (let [r (run-node :coco [:action :play-sound {:sound "minecraft:test.registry"}])]
+    (is (= :success (get-in r [:res :status])))
+    (is (some #(str/includes? % "playsound minecraft:test.registry") (:cmds r)))))
+
+(deftest register-action-extends-the-registry-test
+  (bt/register-action! :ca108-extra
+                       {:run (fn [params _ctx] {:status :success :action-id :ca108-extra :got (:v params)})
+                        :channels #{:gaze}
+                        :params [:map [:v {:optional true} :int]]
+                        :doc "acao de teste do registro"})
+  (try
+    (is (contains? (bt/registered-actions) :ca108-extra))
+    (is (contains? (bt/known-action-ids) :ca108-extra))
+    (let [r (run-node :coco [:action :ca108-extra {:v 7}])]
+      (is (= :success (get-in r [:res :status])))
+      (is (= 7 (get-in r [:res :got]))))
+    (finally (bt/unregister-action! :ca108-extra)))
+  (is (not (contains? (bt/registered-actions) :ca108-extra))))
+
+(deftest register-action-rejects-incomplete-spec-test
+  (is (thrown? Exception (bt/register-action! :ca108-bad {:run (fn [_ _] {:status :success})})))
+  (is (not (contains? (bt/registered-actions) :ca108-bad))))
+
+(deftest real-agents-only-reference-known-actions-test
+  (let [known (bt/known-action-ids)]
+    (doseq [a (registry/all-agents)]
+      (is (empty? (registry/unknown-actions a known))
+          (str (:agent/id a) " referencia acao fora do registro")))))
+
+;; ----------------------------------------------------------------------------
+;; CA-108: guards por multimethod eval-guard, fail-closed
+;; ----------------------------------------------------------------------------
+
+(deftest eval-guard-is-an-extensible-multimethod-test
+  (is (instance? clojure.lang.MultiFn bt/eval-guard))
+  (doseq [id [:ally-within-range? :interesting-block-nearby? :cooldown-ready? :hostile-nearby?
+              :has-active-directive? :leader-in-vehicle? :self-in-vehicle? :within-mount-range?
+              :ally-distance-exceeds? :in-quiet-corner?]]
+    (is (contains? (methods bt/eval-guard) id) (str id)))
+  (defmethod bt/eval-guard :ca108-always [_ _ _] true)
+  (try
+    (is (true? (bt/guard-holds? :ca108-always {} {})))
+    (finally (remove-method bt/eval-guard :ca108-always))))
+
+(deftest guards-fail-closed-on-unknown-condition-test
+  (is (false? (bt/guard-holds? :no-such-guard {} {:self-pos [0.0 0.0 0.0]})))
+  (is (false? (bt/guard-holds? :no-such-guard nil nil)))
+  (is (false? (bt/guard-holds? nil {} {})))
+  (is (= (bt/guard-holds? :no-such-guard {} {}) (bt/guard-holds? :no-such-guard {} {})) "deterministico"))
+
+(deftest guards-fail-closed-without-required-snapshot-test
+  (is (false? (bt/guard-holds? :ally-within-range? {} {})) "sem percepcao de aliado")
+  (is (false? (bt/guard-holds? :ally-within-range? {:ally-id :richeh} {})) "sem posicoes")
+  (is (false? (bt/guard-holds? :ally-within-range? {:ally-id :richeh} nil)))
+  (is (false? (bt/guard-holds? :interesting-block-nearby? {} nil)))
+  (is (false? (bt/guard-holds? :hostile-nearby? {:radius 10.0} {})))
+  (is (false? (bt/guard-holds? :has-active-directive? {} {})))
+  (is (false? (bt/guard-holds? :within-mount-range? {} {})) "sem distancia ao lider")
+  (is (false? (bt/guard-holds? :cooldown-ready? {:key :k :seconds 5} {})) "sem relogio no mundo")
+  (is (false? (bt/guard-holds? :cooldown-ready? {:key :k :seconds 5} nil)))
+  (is (false? (bt/guard-holds? :in-quiet-corner? {:max-nearby-players 0 :radius 6.0} {}))
+      "sem snapshot de jogadores nao ha canto quieto")
+  (testing "com snapshot o guard decide"
+    (is (true? (bt/guard-holds? :hostile-nearby? {:radius 10.0}
+                                {:perception {:hostiles [{:distance 4.0}]}})))
+    (is (false? (bt/guard-holds? :hostile-nearby? {:radius 10.0}
+                                 {:perception {:hostiles [{:distance 40.0}]}})))
+    (is (true? (bt/guard-holds? :has-active-directive? {} {:active-directive {:id 1}})))
+    (is (true? (bt/guard-holds? :within-mount-range? {} {:perception {:leader {:distance 2.0}}})))
+    (is (true? (bt/guard-holds? :in-quiet-corner? {:max-nearby-players 0 :radius 6.0}
+                                {:perception {:players []}})))
+    (is (false? (bt/guard-holds? :in-quiet-corner? {:max-nearby-players 0 :radius 6.0}
+                                 {:perception {:players [{:distance 2.0}]}})))))
+
+(deftest guard-with-malformed-snapshot-is-false-not-an-exception-test
+  (is (false? (bt/guard-holds? :interesting-block-nearby? {:radius 5.0}
+                               {:perception {:blocks [{:id "minecraft:lantern"}]}}))))
+
+(deftest unknown-guard-in-tree-fails-the-node-test
+  (is (= :failure (get-in (run-node :coco [:guard :no-such-guard]) [:res :status])))
+  (is (= :failure (get-in (run-node :coco [:condition :no-such-condition {}]) [:res :status])))
+  (is (= :success (get-in (run-node :coco [:inverter [:guard :no-such-guard]]) [:res :status]))
+      "o guard falha fechado; o inversor entao sucede"))

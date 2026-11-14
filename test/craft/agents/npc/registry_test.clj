@@ -126,3 +126,39 @@
 
 (deftest default-dir-respeita-env-ou-fallback
   (is (= (or (System/getenv "CRAFT_AGENTS_DIR") "agents") reg/default-dir)))
+
+;; ----------------------------------------------------------------------------
+;; CA-108: AgentSpec confere as :action de :bt/root contra o registro de acoes
+;; ----------------------------------------------------------------------------
+
+(def ^:private base-agent
+  {:agent/id :x :agent/name "X"
+   :agent/spawn {:dimension "minecraft:overworld" :pos [0.0 64.0 0.0]}})
+
+(deftest unknown-actions-lista-acoes-fora-do-registro
+  (let [spec (assoc base-agent :bt/root
+                    [:selector
+                     [:sequence [:guard :g] [:action :a]]
+                     [:parallel [:action :b {}] [:cooldown {:ms 10} [:action :zzz]]]
+                     [:repeat {:times 2} [:invert [:action :yyy {:k 1}]]]])]
+    (is (= #{:zzz :yyy} (reg/unknown-actions spec #{:a :b})))
+    (is (= #{} (reg/unknown-actions spec #{:a :b :zzz :yyy})))
+    (is (= #{} (reg/unknown-actions base-agent #{})) "sem :bt/root nao ha acao")
+    (is (= #{} (reg/unknown-actions (assoc base-agent :bt/root [:guard :g]) #{}))
+        "guards nao sao acoes")))
+
+(deftest load-agents-valida-acoes-contra-o-registro-quando-informado
+  (let [d (tmp-dir)]
+    (spit (io/file d "ok.edn")
+          (pr-str (assoc base-agent :agent/id :ok :agent/name "Ok" :bt/root [:action :a])))
+    (spit (io/file d "mau.edn")
+          (pr-str (assoc base-agent :agent/id :mau :agent/name "Mau"
+                         :bt/root [:sequence [:action :a] [:action :nao-registrada]])))
+    (let [{:keys [agents errors]} (reg/load-agents (.getPath d) {:known-actions #{:a}})]
+      (is (= [:ok] (keys agents)))
+      (is (= 1 (count errors)))
+      (is (str/includes? (:file (first errors)) "mau.edn"))
+      (is (str/includes? (:message (first errors)) ":nao-registrada")))
+    (let [{:keys [agents errors]} (reg/load-agents (.getPath d))]
+      (is (= [:mau :ok] (vec (sort (keys agents)))) "sem registro informado nada muda")
+      (is (empty? errors)))))
