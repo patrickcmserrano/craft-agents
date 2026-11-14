@@ -147,6 +147,67 @@
     (is (= #{} (reg/unknown-actions (assoc base-agent :bt/root [:guard :g]) #{}))
         "guards nao sao acoes")))
 
+(defn- rejects-all [pairs]
+  (doseq [[k v] pairs]
+    (is (not (m/validate reg/AgentSpec (assoc base-agent k v)))
+        (str "deveria rejeitar " k " " (pr-str v)))))
+
+;; ----------------------------------------------------------------------------
+;; CA-109: persona declarativa (:lines :relations :routine :places) nos EDNs
+;; ----------------------------------------------------------------------------
+
+(deftest schema-valida-persona-declarativa-opcional
+  (is (m/validate reg/AgentSpec base-agent) "persona e opcional")
+  (is (m/validate reg/AgentSpec
+                  (assoc base-agent
+                         :agent/lines {:greeting ["oi" "ola"]}
+                         :agent/relations {:y {:kind :friend :affinity 0.8 :note "amiga"}
+                                           :player {:kind :ally}}
+                         :agent/routine [{:from 6 :to 12 :activity :work :place :bancada}
+                                         {:from 12 :to 14 :activity :rest}]
+                         :agent/places {:bancada {:name "Bancada" :pos [1.0 64.0 2.0]}})))
+  (rejects-all
+   [[:agent/lines {:greeting []}]
+    [:agent/lines {:greeting [1]}]
+    [:agent/lines {"greeting" ["oi"]}]
+    [:agent/relations {:y {:affinity 0.5}}]
+    [:agent/routine [{:from 6 :activity :work}]]
+    [:agent/routine [{:from 6 :to 12 :activity "work"}]]
+    [:agent/places {:p {:name "P" :pos [1 2]}}]
+    [:agent/places {:p {:pos [1 2 3]}}]]))
+
+(deftest todos-os-agentes-declaram-persona-coerente
+  (let [{:keys [agents errors]} (reg/load-agents "agents")]
+    (is (empty? errors))
+    (is (= 5 (count agents)))
+    (doseq [[id spec] agents]
+      (let [{:agent/keys [lines routine places relations]} spec]
+        (is (seq places) (str id " declara :places"))
+        (is (seq routine) (str id " declara :routine"))
+        (is (seq lines) (str id " declara :lines"))
+        (doseq [[topic ls] lines]
+          (is (and (seq ls) (every? (every-pred string? seq) ls))
+              (str id " :lines " topic " nao vazio")))
+        (doseq [{:keys [place from to]} routine]
+          (is (<= 0 from 24) (str id " rotina :from em horas"))
+          (is (<= 0 to 24) (str id " rotina :to em horas"))
+          (when place
+            (is (contains? places place) (str id " rotina referencia lugar inexistente " place))))
+        (doseq [[other _] relations]
+          (is (or (= :player other) (contains? agents other))
+              (str id " relacao com agente desconhecido " other)))))))
+
+(deftest coco-e-richeh-se-relacionam-entre-si-e-com-o-jogador
+  (reg/reload! "agents")
+  (let [coco (reg/agent-by-id :coco) richeh (reg/agent-by-id :richeh)]
+    (is (contains? (:agent/relations coco) :richeh))
+    (is (contains? (:agent/relations coco) :player))
+    (is (contains? (:agent/relations richeh) :coco))
+    (is (contains? (:agent/relations richeh) :player))
+    (is (seq (get-in coco [:agent/lines :near-richeh])))
+    (is (seq (get-in richeh [:agent/lines :near-coco])))
+    (is (seq (get-in coco [:agent/lines :under-threat])))))
+
 (deftest load-agents-valida-acoes-contra-o-registro-quando-informado
   (let [d (tmp-dir)]
     (spit (io/file d "ok.edn")

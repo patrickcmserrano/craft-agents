@@ -7,6 +7,7 @@
             [craft.agents.backend.fabric.atelier.speech :as atelier-speech]
             [craft.agents.backend.fabric.picard :as picard]
             [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.npc.registry :as registry]
             [craft.agents.npc.speech :as speech]))
 
 (defn- capture
@@ -35,6 +36,45 @@
 (deftest say-escapes-quotes-and-backslash
   (let [tell (first (speech/say-cmds :karlach "a\"b\\c"))]
     (is (str/includes? tell "\"text\":\"a\\\"b\\\\c\""))))
+
+;; CA-109: falas sorteadas das :lines declaradas no .edn da persona
+
+(deftest persona-line-sorteia-das-lines-declaradas
+  (registry/reload! "agents")
+  (doseq [id [:coco :richeh :karlach :picard :antigravity]
+          :let [lines (:agent/lines (registry/agent-by-id id))]]
+    (is (seq lines) (str id " declara :lines"))
+    (doseq [[topic ls] lines]
+      (is (some #{(speech/persona-line id topic)} ls)
+          (str id " " topic " sorteia de :lines"))))
+  (testing "rng injetavel e deterministico"
+    (let [ls (get-in (registry/agent-by-id :coco) [:agent/lines :near-richeh])]
+      (is (= (first ls) (speech/persona-line :coco :near-richeh (fn [_] 0))))
+      (is (= (last ls) (speech/persona-line :coco :near-richeh (fn [c] (dec c))))))))
+
+(deftest persona-line-nil-para-agente-ou-topico-inexistente
+  (registry/reload! "agents")
+  (is (nil? (speech/persona-line :ninguem :greeting)))
+  (is (nil? (speech/persona-line :coco :topico-inexistente))))
+
+(deftest persona-line-nao-usa-nomes-hardcoded-no-codigo
+  (let [d (.toFile (java.nio.file.Files/createTempDirectory
+                    "persona" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (spit (java.io.File. d "zed.edn")
+          (pr-str {:agent/id :zed :agent/name "Zed"
+                   :agent/spawn {:dimension "minecraft:overworld" :pos [0.0 64.0 0.0]}
+                   :agent/lines {:saudacao ["so existe aqui"]}}))
+    (registry/reload! (.getPath d))
+    (try
+      (is (= "so existe aqui" (speech/persona-line :zed :saudacao)))
+      (finally (registry/reload! "agents")))))
+
+(deftest persona-say-cmds-fala-a-linha-sorteada
+  (registry/reload! "agents")
+  (let [cmds (speech/persona-say-cmds :richeh :near-coco (fn [_] 0))
+        line (first (get-in (registry/agent-by-id :richeh) [:agent/lines :near-coco]))]
+    (is (= (speech/say-cmds :richeh line) cmds))
+    (is (nil? (speech/persona-say-cmds :richeh :topico-inexistente)))))
 
 (deftest say-unknown-agent-is-nil-and-silent
   (is (nil? (speech/say-cmds :ninguem "oi")))
