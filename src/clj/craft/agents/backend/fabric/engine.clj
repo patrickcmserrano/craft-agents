@@ -23,6 +23,7 @@
             [craft.agents.backend.fabric.sentry :refer [handle-player-command!]]
             [craft.agents.backend.fabric.telemetry :refer [global-command-dispatcher]]
             [craft.agents.backend.fabric.transport :refer [bridge-alive? send-bridge-cmd!]]
+            [craft.agents.npc.body :as body]
             [craft.agents.npc.state :as npc-state]))
 
 ;; Reexportacoes: a API publica de antes da quebra em sub-namespaces (CA-084).
@@ -58,10 +59,16 @@
   ;; (medido: Picard em 2026-11-10). Alimenta os quatro a cada ~10 s.
   (when (zero? (mod tick 100))
     (feed-hungry-agents!))
-  (tick-picard! env)
-  (tick-atelier! env)
-  (bt-tick/tick-bt-agents! env)
-  (tick-karlach! env))
+  ;; CA-104: todos os motoristas corporais do tick pedem intencoes ao arbitro npc.body;
+  ;; o flush! final emite no maximo 1 MOVE por agente (mesmo se um tick lancar).
+  (body/begin-tick!)
+  (try
+    (tick-picard! env)
+    (tick-atelier! env)
+    (bt-tick/tick-bt-agents! env)
+    (tick-karlach! env)
+    (finally
+      (body/flush!))))
 
 (defn- run-loop!
   "Loop de 20Hz Server-Native (BT) da Karlach e do Picard; erros nao derrubam a thread."

@@ -6,7 +6,7 @@
             [craft.agents.backend.fabric.locomotion :as loco]
             [craft.agents.backend.fabric.navigation :refer [compute-yaw]]
             [craft.agents.backend.fabric.picard :refer [picard-stations]]
-            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]))
+            [craft.agents.npc.body :as body]))
 
 (defn picard-walk-tick
   "Passo puro :walk do Picard rumo a `station` (CA-083): usa loco/walk-step com
@@ -40,6 +40,12 @@
 
       :else {:action :hold :yaw yaw})))
 
+(defn- step-picard!
+  "Passo do Picard pelo arbitro npc.body (canal :legs; yaw/pitch no mesmo comando)."
+  [source [x y z] yaw pitch]
+  (body/step! {:agent :picard :agent-name "Picard" :source source
+               :x x :y y :z z :yaw yaw :pitch pitch}))
+
 (defn- tick-follow! [picard-state pst]
   (let [players (query-online-players)
         target-p (first (filter #(= (str/lower-case (:name %))
@@ -50,11 +56,11 @@
             [nx ny nz] pos]
         (case action
           :snap
-          (do (send-bridge-cmd! (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ny nz yaw))
+          (do (step-picard! :player-goal [nx ny nz] yaw 0.0)
               (swap! picard-state assoc :pos pos :yaw yaw
                      :status (str "Missão com " (:name target-p))))
           :approach
-          (do (send-bridge-cmd! (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ny nz yaw))
+          (do (step-picard! :player-goal [nx ny nz] yaw 0.0)
               (swap! picard-state assoc :pos pos :yaw yaw
                      :status (str "Acompanhando " (:name target-p))))
           nil))
@@ -68,10 +74,8 @@
       (let [{[nx ny nz] :pos yaw :yaw arrived? :arrived?} (picard-walk-tick pst station)]
         (if arrived?
           (do
-            (send-bridge-cmd!
-             (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|%.1f|false|false"
-                      (double tx) (double ty) (double tz)
-                      (double (:yaw station 0.0)) (double (:pitch station 0.0))))
+            (step-picard! :idle [(double tx) (double ty) (double tz)]
+                          (double (:yaw station 0.0)) (double (:pitch station 0.0)))
             ;; Picard em serviço silencioso na ponte (fala apenas quando consultado no chat pelo jogador)
             (swap! picard-state assoc
                    :pos [(double tx) (double ty) (double tz)]
@@ -81,7 +85,7 @@
                    :wait-left (:wait-ticks station 120)
                    :status (str "Na estação: " (:name station))))
           (do
-            (send-bridge-cmd! (uformat "MOVE|Picard|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ny nz yaw))
+            (step-picard! :idle [nx ny nz] yaw 0.0)
             (swap! picard-state assoc :pos [nx ny nz] :yaw yaw
                    :status (str "Ponte -> " (:name station))))))
       ;; Fase :wait na estação da ponte

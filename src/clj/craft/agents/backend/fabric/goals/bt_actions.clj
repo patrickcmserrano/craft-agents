@@ -8,6 +8,7 @@
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.telemetry :refer [record-cognitive-event!]]
             [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.npc.body :as body]
             [craft.agents.npc.registry :as registry]
             [craft.agents.skills.actions :as skill-actions]))
 
@@ -112,11 +113,12 @@
   (or (get-in @engine-ctx [:agents (:agent/id agent) :pos]) (:pos @state)))
 
 (defn- face-toward!
-  [agent-name [sx sy sz] [tx _ tz]]
-  (transport/send-bridge-cmd!
-   (transport/uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false"
-                      agent-name (double sx) (double sy) (double sz)
-                      (double (nav/compute-yaw (- (double tx) (double sx)) (- (double tz) (double sz)))))))
+  "Gira `agent` para `tpos` pelo canal :gaze do arbitro npc.body (fonte :bt): nunca toma :legs."
+  [agent [sx sy sz] [tx _ tz]]
+  (body/step! {:agent (:agent/id agent) :agent-name (:agent/name agent)
+               :source :bt :channel :gaze
+               :x (double sx) :y (double sy) :z (double sz) :pitch 0.0
+               :yaw (double (nav/compute-yaw (- (double tx) (double sx)) (- (double tz) (double sz))))}))
 
 (defn- player-pos [p] [(:x p) (:y p) (:z p)])
 
@@ -130,7 +132,7 @@
                           first player-pos))
         spos   (self-pos ctx)]
     (if (and tpos spos)
-      (do (face-toward! (:agent/name agent) spos tpos)
+      (do (face-toward! agent spos tpos)
           {:status :success :action-id :face-entity :facing target})
       {:status :failure :reason :UNKNOWN_TARGET :action-id :face-entity})))
 
@@ -147,5 +149,5 @@
                        (sort-by first)
                        first))]
     (when nearest
-      (face-toward! (:agent/name agent) spos (player-pos (second nearest))))
+      (face-toward! agent spos (player-pos (second nearest))))
     {:status :success :action-id :social-gaze}))

@@ -105,10 +105,24 @@
   (swap! buffer update [agent channel] arbitrate intent)
   nil)
 
-(defn flush!
-  "Compoe e envia no maximo 1 MOVE por agente (ordem estavel por id), limpa o buffer e atualiza
-   `:cmds-per-tick`. Retorna [{:agent id :cmd linha}]."
+(defonce ^:private open-flag (atom false))
+
+(defn begin-tick!
+  "Abre o tick do engine (CA-104): ate o proximo `flush!`, `step!` e `move!` apenas ENFILEIRAM
+   intencoes por canal, para que todos os motoristas do agente (rotina, BT, Karlach) sejam
+   arbitrados e saia no maximo 1 MOVE por agente. Fora de um tick aberto (testes isolados,
+   chamadas avulsas) eles enviam direto, como antes."
   []
+  (reset! open-flag true)
+  nil)
+
+(defn tick-open? [] @open-flag)
+
+(defn flush!
+  "Compoe e envia no maximo 1 MOVE por agente (ordem estavel por id), limpa o buffer, fecha o tick
+   (`begin-tick!`) e atualiza `:cmds-per-tick`. Retorna [{:agent id :cmd linha}]."
+  []
+  (reset! open-flag false)
   (let [snapshot (first (reset-vals! buffer {}))
         by-agent (reduce-kv (fn [m [aid ch] intent] (assoc-in m [aid ch] intent)) {} snapshot)
         sent     (vec (for [[aid chs] (sort-by (comp str key) by-agent)
@@ -120,10 +134,37 @@
     (swap! tick-metrics assoc :cmds-per-tick (count sent))
     sent))
 
+(defn- enqueue-step!
+  "Enfileira o passo `m` ({:agent :x :y :z :yaw :pitch :sprint :sneak :jump :use :attack}, :source
+   keyword/numero) no canal :legs (padrao, define a posicao) ou :gaze (so olhar; a posicao e a
+   conhecida do agente). :use/:attack vao para :hands."
+  [{:keys [agent source channel x y z use attack] :as m}]
+  (let [pos [x y z]]
+    (if (= :gaze channel)
+      (request! (assoc (select-keys m [:yaw :pitch]) :agent agent :channel :gaze :source source :pos pos))
+      (do (request! (assoc (select-keys m [:yaw :pitch :sprint :sneak :jump])
+                           :agent agent :channel :legs :source source :target pos))
+          (when (or use attack)
+            (request! {:agent agent :channel :hands :source source :use use :attack attack}))))
+    nil))
+
+(defn step!
+  "Passo de movimento de um subsistema: {:agent :source :channel(:legs|:gaze) :x :y :z :yaw :pitch ...}
+   (+ :agent-name). Em tick aberto (`begin-tick!`) enfileira no canal para o `flush!` arbitrar;
+   fora dele envia a linha pela funcao `send!` (padrao: ponte). Retorna {:sent? :cmd :queued?}."
+  ([m] (step! transport/send-bridge-cmd! m))
+  ([send! m]
+   (if @open-flag
+     (do (enqueue-step! m) {:sent? false :queued? true :cmd nil})
+     (let [cmd (format-move m)]
+       (send! cmd)
+       {:sent? true :cmd cmd}))))
+
 (defn move!
   "API direta: {:agent :x :y :z :yaw :pitch :jump :sprint :sneak :use :attack} (+ :agent-name).
    Com :lease-mgr, adquire :legs/:gaze de :agent para :owner (:priority, :ttl-ticks) e nao envia
-   se negado. Retorna {:sent? bool :cmd linha-ou-nil}."
+   se negado. Em tick aberto (`begin-tick!`) enfileira em :legs (fonte = :priority) em vez de
+   enviar. Retorna {:sent? bool :cmd linha-ou-nil}."
   [{:keys [agent lease-mgr owner priority ttl-ticks] :as m}]
   (let [granted? (or (nil? lease-mgr)
                      (:granted? (leases/acquire-leases!
@@ -131,8 +172,10 @@
                                  (cond-> {:channels #{:legs :gaze} :owner-id owner
                                           :priority (priority-of priority)}
                                    ttl-ticks (assoc :ttl-ticks ttl-ticks)))))]
-    (if granted?
-      (let [cmd (format-move m)]
-        (transport/send-bridge-cmd! cmd)
-        {:sent? true :cmd cmd})
-      {:sent? false :cmd nil})))
+    (cond
+      (not granted?) {:sent? false :cmd nil}
+      @open-flag     (do (enqueue-step! (assoc m :source (or priority :idle)))
+                         {:sent? true :queued? true :cmd nil})
+      :else          (let [cmd (format-move m)]
+                       (transport/send-bridge-cmd! cmd)
+                       {:sent? true :cmd cmd}))))

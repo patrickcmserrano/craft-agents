@@ -2,8 +2,17 @@
   "Estado e motor de 20 TPS de Coco e Richeh, sinergia da dupla e reacao celeste."
   (:require [clojure.string :as str]
             [craft.agents.backend.fabric.navigation :as nav]
-            [craft.agents.backend.fabric.transport :refer [uformat]]
-            [craft.agents.backend.fabric.atelier.speech :refer [coco-data richeh-data]]))
+            [craft.agents.backend.fabric.atelier.speech :refer [coco-data richeh-data]]
+            [craft.agents.npc.body :as body]))
+
+(defn- move-step!
+  "Passo de Coco/Richeh pelo arbitro npc.body (CA-104). `channel`: :legs (anda, define a posicao) ou
+   :gaze (so gira). Em tick aberto enfileira; fora dele envia a linha por `send-cmd!`."
+  ([send-cmd! agent-id source channel [x y z] yaw]
+   (move-step! send-cmd! agent-id source channel [x y z] yaw 0.0))
+  ([send-cmd! agent-id source channel [x y z] yaw pitch]
+   (body/step! send-cmd! {:agent agent-id :source source :channel channel
+                          :x x :y y :z z :yaw yaw :pitch pitch})))
 
 ;; =============================================================================
 ;; Waypoints e Configuração de Castelo
@@ -78,10 +87,10 @@
               (let [step-d (min 0.20 dist)
                     nx (+ cx (* (/ dx dist) step-d))
                     nz (+ cz (* (/ dz dist) step-d))]
-                (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx cy nz yaw))
+                (move-step! send-cmd! :coco :player-goal :legs [nx cy nz] yaw)
                 (swap! coco-st assoc :pos [nx cy nz] :yaw yaw :status (str "Acompanhando " (:name target-p))))
               (do
-                (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz yaw))
+                (move-step! send-cmd! :coco :player-goal :gaze [cx cy cz] yaw)
                 (swap! coco-st assoc :yaw yaw :status (str "Conversando com " (:name target-p))))))
           (swap! coco-st assoc :mode :patrol)))
 
@@ -99,7 +108,7 @@
             (if (<= dist 0.35)
               ;; Chegou ao waypoint -> inicia sessão de anotações no caderno
               (do
-                (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|0.0|false|false" tx ty tz yaw))
+                (move-step! send-cmd! :coco :atelier :legs [tx ty tz] yaw)
                 (send-cmd! "SWING|Coco")
                 (send-cmd! "CMD|execute at Coco run particle minecraft:enchant ~ ~1.0 ~ 0.3 0.2 0.3 0.05 8 normal")
                 (swap! coco-st assoc
@@ -112,7 +121,7 @@
               (let [step-d (min 0.18 dist)
                     nx (+ cx (* (/ dx dist) step-d))
                     nz (+ cz (* (/ dz dist) step-d))]
-                (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ty nz yaw))
+                (move-step! send-cmd! :coco :atelier :legs [nx ty nz] yaw)
                 (swap! coco-st assoc :pos [nx ty nz] :yaw yaw :status "Explorando os salões"))))
 
           ;; Fase :sketch (Folheando o caderno e estudando)
@@ -127,7 +136,7 @@
               (let [pdx (- (:x nearest) cx)
                     pdz (- (:z nearest) cz)
                     gyaw (nav/compute-yaw pdx pdz)]
-                (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz gyaw))
+                (move-step! send-cmd! :coco :atelier :gaze [cx cy cz] gyaw)
                 (swap! coco-st assoc :yaw gyaw)))
             (if (<= rem 0)
               (swap! coco-st assoc
@@ -160,10 +169,10 @@
               (let [step-d (min 0.20 dist)
                     nx (+ rx (* (/ dx dist) step-d))
                     nz (+ rz (* (/ dz dist) step-d))]
-                (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ry nz yaw))
+                (move-step! send-cmd! :richeh :player-goal :legs [nx ry nz] yaw)
                 (swap! richeh-st assoc :pos [nx ry nz] :yaw yaw :status (str "Seguindo " (:name target-p))))
               (do
-                (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|0.0|false|false" rx ry rz yaw))
+                (move-step! send-cmd! :richeh :player-goal :gaze [rx ry rz] yaw)
                 (swap! richeh-st assoc :yaw yaw :status (str "Vigiando " (:name target-p))))))
           (swap! richeh-st assoc :mode :tether-orbit)))
 
@@ -180,13 +189,13 @@
           (let [step-d (min 0.22 dist)
                 nx (+ rx (* (/ dx dist) step-d))
                 nz (+ rz (* (/ dz dist) step-d))]
-            (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx cy nz yaw))
+            (move-step! send-cmd! :richeh :atelier :legs [nx cy nz] yaw)
             (swap! richeh-st assoc :pos [nx cy nz] :yaw yaw :status "Orbitando Coco"))
 
           ;; Distância ideal (2.0m a 5.5m): Permanece atenta ou inscreve micro-glifos de cristal
           (>= dist 2.0)
           (do
-            (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|0.0|false|false" rx ry rz yaw))
+            (move-step! send-cmd! :richeh :atelier :gaze [rx ry rz] yaw)
             (when (zero? (mod tick 60))
               (send-cmd! "SWING|Richeh")
               (send-cmd! "CMD|execute at Richeh run particle minecraft:glow_squid_ink ~ ~0.2 ~ 0.2 0.05 0.2 0.02 4 normal")
@@ -200,7 +209,7 @@
                 sdist (max 0.01 (Math/sqrt (+ (* side-dx side-dx) (* side-dz side-dz))))
                 nx (+ rx (* (/ side-dx sdist) 0.08))
                 nz (+ rz (* (/ side-dz sdist) 0.08))]
-            (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nx ry nz yaw))
+            (move-step! send-cmd! :richeh :atelier :legs [nx ry nz] yaw)
             (swap! richeh-st assoc :pos [nx ry nz] :yaw yaw :status "Guardando distância")))))))
 
 ;; =============================================================================
@@ -221,8 +230,8 @@
       (swap! coco-st assoc :last-duo-ms now)
       (let [cyaw (nav/compute-yaw dx dz)
             ryaw (nav/compute-yaw (- dx) (- dz))]
-        (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|0.0|false|false" cx cy cz cyaw))
-        (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|0.0|false|false" rx ry rz ryaw))
+        (move-step! send-cmd! :coco :atelier :gaze [cx cy cz] cyaw)
+        (move-step! send-cmd! :richeh :atelier :gaze [rx ry rz] ryaw)
         (send-cmd! "SWING|Coco")
         (send-cmd! "SWING|Richeh")
         (send-cmd! "CMD|execute at Coco run particle minecraft:enchant ~ ~1.2 ~ 0.3 0.2 0.3 0.05 10 normal")
@@ -246,8 +255,8 @@
             [gx gy gz] (get-in celestial-snapshot [:gas-giant :vector] [0.0 0.8 0.6])
             pitch (float (* (Math/asin (- gy)) (/ 180.0 Math/PI)))
             yaw   (float (* (Math/atan2 (- gx) gz) (/ 180.0 Math/PI)))]
-        (send-cmd! (uformat "MOVE|Coco|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" cx cy cz yaw pitch))
-        (send-cmd! (uformat "MOVE|Richeh|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" rx ry rz yaw pitch))
+        (move-step! send-cmd! :coco :atelier :gaze [cx cy cz] yaw pitch)
+        (move-step! send-cmd! :richeh :atelier :gaze [rx ry rz] yaw pitch)
         (send-cmd! "SWING|Coco")
         (send-cmd! "SWING|Richeh")
         (case phenomenon
