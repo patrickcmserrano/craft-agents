@@ -8,3 +8,4 @@
 - [ ] Medir em tick real de 20Hz (`50ms`) os valores de `:tick-ms` e `:cmds-per-tick` no Agent Studio (`/api/state`) com 4-5 agentes ativos simultaneamente.
 - [ ] Validar em servidor vivo o roteamento via chat do jogo (`"picard me segue"`, `"coco vem"`, `"karlach fica"`).
 - [ ] Deploy em produção (`/home/pace/dev/minecraft/craft-agents`: merge + `make attach` / restart `craft-agents.service` após confirmar jogadores ausentes).
+- [ ] (CA-102) Confirmar no bridge real que os campos extras `|jump|use|attack` anexados por `npc.body/->wire` (só quando algum é verdadeiro) são aceitos/ignorados pelo parser do `MOVE`; o formato base de 9 campos segue o wire já usado por `follow.clj`.
