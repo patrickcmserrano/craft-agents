@@ -1,6 +1,7 @@
 (ns craft.agents.backend.fabric.goals.bt
-  "Interpretador de Behavior Tree (CA-048, CA-085, CA-091, CA-106).
-   Um unico interpretador com estado :running, memoria por no em `[:agent-states id :bt-memory]`
+  "Runtime de Behavior Tree (CA-048, CA-085, CA-091, CA-106, CA-107). O interpretador e o nucleo
+   unico `craft.agents.bt.core` (o mesmo de `bt.engine`); aqui ficam as folhas live, a memoria por
+   agente e o :timeout com liberacao de leases. Interpretador com estado :running, memoria por no em `[:agent-states id :bt-memory]`
    (chave: caminho do no) e :cooldown/:repeat multi-tick por `[agent-id node-path]`.
    As acoes que viram metas chamam o multimethod `execute-goal!` de goals.dispatch com o
    agente da arvore (6o argumento de `execute-tree-node!`; sem ele, a Karlach); os defmethod
@@ -11,6 +12,8 @@
             [craft.agents.backend.fabric.goals.bt-actions :as bt-actions]
             [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
             [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.bt.core :as core]
+            [craft.agents.npc.body :as body]
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.state :as npc-state]))
 
@@ -96,156 +99,53 @@
   [agent]
   (or (:agent/id agent) :anonymous))
 
-(defn- node-mem [{:keys [engine-ctx-atom agent]} path]
-  (npc-state/bt-node-memory engine-ctx-atom (mem-id agent) path))
+(defn- agent-mem
+  "Memoria de BT do agente (CA-106) no formato `:mem` do nucleo `bt.core`."
+  [engine-ctx-atom agent]
+  (let [id (mem-id agent)]
+    {:tick    (fn [] (npc-state/bt-tick engine-ctx-atom id))
+     :get     (fn [path] (npc-state/bt-node-memory engine-ctx-atom id path))
+     :set!    (fn [path m] (npc-state/set-bt-node-memory! engine-ctx-atom id path m))
+     :clear!  (fn [path] (npc-state/clear-bt-node-memory! engine-ctx-atom id path))
+     :forget! (fn [path] (npc-state/forget-bt-subtree! engine-ctx-atom id path))}))
 
-(defn- set-node-mem! [{:keys [engine-ctx-atom agent]} path mem]
-  (npc-state/set-bt-node-memory! engine-ctx-atom (mem-id agent) path mem))
+(defn- abort-timed-out!
+  "Timeout de BT (CA-107): libera os pedidos pendentes do :bt e os leases do agente cujos donos sao
+   o proprio :bt ou as acoes da subarvore abortada (`:lease-mgr` do engine-ctx)."
+  [{:keys [engine-ctx-atom agent]} _path child]
+  (body/release-owners! (:lease-mgr (some-> engine-ctx-atom deref))
+                        (mem-id agent)
+                        (into #{:bt} (core/subtree-action-ids child))))
 
-(defn- clear-node-mem! [{:keys [engine-ctx-atom agent]} path]
-  (npc-state/clear-bt-node-memory! engine-ctx-atom (mem-id agent) path))
-
-(defn- forget-subtree! [{:keys [engine-ctx-atom agent]} path]
-  (npc-state/forget-bt-subtree! engine-ctx-atom (mem-id agent) path))
-
-(defn- decorator-args
-  "`[opts child]` de um decorador: `opts` (mapa) e opcional; o filho e o ultimo argumento."
-  [args]
-  (if (map? (first args))
-    [(first args) (second args)]
-    [{} (first args)]))
-
-(declare exec-node)
-
-(defn- exec-sequence
-  "`:sequence` com memoria: um filho :running guarda `{:idx i}` e o proximo tick retoma dele,
-   sem re-executar os anteriores; so conclui (e limpa a memoria) com :success de todos ou falha."
-  [env path children]
-  (let [kids (vec children)]
-    (loop [i        (or (:idx (node-mem env path)) 0)
-           last-res {:status :success}]
-      (if (>= i (count kids))
-        (do (clear-node-mem! env path)
-            (stamp-cooldowns! (:engine-ctx-atom env) kids)
-            last-res)
-        (let [res (exec-node env (conj path i) (kids i))]
-          (case (:status res)
-            :success (recur (inc i) (if (:action-id res) res last-res))
-            :running (do (set-node-mem! env path {:idx i}) res)
-            (do (clear-node-mem! env path) res)))))))
-
-(defn- exec-selector
-  "`:selector`/`:fallback` com memoria: um filho :running guarda `{:idx i}` e o proximo tick
-   retoma dele, sem reavaliar os irmaos anteriores (que ja falharam)."
-  [env path children]
-  (let [kids (vec children)]
-    (loop [i (or (:idx (node-mem env path)) 0)]
-      (if (>= i (count kids))
-        (do (clear-node-mem! env path) {:status :failure})
-        (let [res (exec-node env (conj path i) (kids i))]
-          (case (:status res)
-            :success (do (clear-node-mem! env path) res)
-            :running (do (set-node-mem! env path {:idx i}) res)
-            (recur (inc i))))))))
-
-(defn- exec-parallel
-  "`:parallel`: falha se algum filho falha; :running enquanto algum estiver :running (filhos ja
-   concluidos em :success ficam em `{:done #{idx}}` e nao reexecutam); senao :success."
-  [env path children]
-  (let [kids     (vec children)
-        done     (or (:done (node-mem env path)) #{})
-        results  (into {} (keep (fn [i] (when-not (contains? done i)
-                                          [i (exec-node env (conj path i) (kids i))])))
-                       (range (count kids)))
-        statuses (map :status (vals results))]
-    (cond
-      (some #(= :failure %) statuses)
-      (do (clear-node-mem! env path) (forget-subtree! env path) {:status :failure})
-
-      (some #(= :running %) statuses)
-      (do (set-node-mem! env path {:done (into done (keep (fn [[i r]] (when (= :success (:status r)) i))) results)})
-          {:status :running})
-
-      :else
-      (do (clear-node-mem! env path) {:status :success}))))
-
-(defn- exec-cooldown
-  "`[:cooldown {:ticks N} child]`: depois que o filho conclui (:success ou :failure) ele fica
-   bloqueado nos N ticks de BT seguintes, por `[agent-id node-path]`; bloqueado devolve
-   {:status :failure :reason :cooldown}. Enquanto o filho estiver :running nada e armado."
-  [env path args]
-  (let [[{:keys [ticks] :or {ticks 0}} child] (decorator-args args)
-        now   (npc-state/bt-tick (:engine-ctx-atom env) (mem-id (:agent env)))
-        until (:until (node-mem env path))]
-    (if (and until (< now until))
-      {:status :failure :reason :cooldown}
-      (let [res (exec-node env (conj path 0) child)]
-        (when (not= :running (:status res))
-          (if (pos? ticks)
-            (set-node-mem! env path {:until (+ now (long ticks) 1)})
-            (clear-node-mem! env path)))
-        res))))
-
-(defn- exec-repeat
-  "`[:repeat {:times K} child]`: uma repeticao por tick; devolve :running ate o filho completar
-   K :success e entao :success. Contrato: :failure do filho encerra o :repeat em :failure e
-   zera a contagem (`{:count c}` na memoria do no)."
-  [env path args]
-  (let [[{:keys [times] :or {times 1}} child] (decorator-args args)
-        c (or (:count (node-mem env path)) 0)]
-    (if (<= times 0)
+(defn- goals-leaf
+  "Folhas do runtime live: guards/conditions e acoes (macros, metas, sons, acoes modulares)."
+  [{:keys [engine-ctx-atom nav-state sanctuary-route speaker agent] :as env} path op args]
+  (case op
+    (:guard :condition)
+    (if (eval-condition (first args) args engine-ctx-atom nav-state (:agent/id agent))
       {:status :success}
-      (let [res (exec-node env (conj path 0) child)]
-        (case (:status res)
-          :running res
-          :success (let [c' (inc c)]
-                     (if (>= c' times)
-                       (do (clear-node-mem! env path) {:status :success})
-                       (do (set-node-mem! env path {:count c'}) {:status :running})))
-          (do (clear-node-mem! env path) res))))))
+      {:status :failure})
 
-(defn- exec-node
-  "Interpretador unico (CA-106). `path` (vetor de indices de filhos desde a raiz) e, junto do id do
-   agente, a chave da memoria de BT em `[:agent-states id :bt-memory]`."
-  [{:keys [engine-ctx-atom nav-state sanctuary-route speaker agent] :as env} path node]
-  (if-not (vector? node)
-    {:status :failure :reason :INVALID_NODE}
-    (let [op   (first node)
-          args (rest node)]
-      (case op
-        :sequence             (exec-sequence env path args)
-        (:fallback :selector) (exec-selector env path args)
-        :parallel             (exec-parallel env path args)
-        :cooldown             (exec-cooldown env path args)
-        :repeat               (exec-repeat env path args)
+    :action
+    (execute-action-node (first args) (second args) engine-ctx-atom nav-state sanctuary-route speaker agent
+                         (fn [macro-tree] (core/exec-node env (conj path (first args)) macro-tree)))
 
-        :inverter
-        (let [child-res (exec-node env (conj path 0) (first args))]
-          (case (:status child-res)
-            :success {:status :failure}
-            :failure {:status :success}
-            child-res))
-
-        (:guard :condition)
-        (if (eval-condition (first args) args engine-ctx-atom nav-state (:agent/id agent))
-          {:status :success}
-          {:status :failure})
-
-        :action
-        (execute-action-node (first args) (second args) engine-ctx-atom nav-state sanctuary-route speaker agent
-                             (fn [macro-tree] (exec-node env (conj path (first args)) macro-tree)))
-
-        {:status :success}))))
+    {:status :success}))
 
 (defn execute-tree-node!
-  "Executa a raiz de uma Behavior Tree como um tick do agente (CA-048, CA-106): :sequence,
-   :selector/:fallback (retomam o filho :running), :parallel, :inverter, :cooldown e :repeat
-   (cadencia real multi-tick por `[agent-id node-path]`), guards/conditions e macros com isolamento
-   de leases. Status: :success | :failure | :running. Cada chamada conta um tick de BT do agente."
+  "Executa a raiz de uma Behavior Tree como um tick do agente (CA-048, CA-106, CA-107) sobre o
+   nucleo unico `bt.core`: :sequence, :selector/:fallback (retomam o filho :running), :parallel,
+   :inverter, :cooldown, :repeat e :timeout (cadencia/relogio multi-tick por `[agent-id node-path]`),
+   guards/conditions e macros com isolamento de leases. Status: :success | :failure | :running.
+   Cada chamada conta um tick de BT do agente."
   ([node engine-ctx-atom nav-state sanctuary-route speaker]
    (execute-tree-node! node engine-ctx-atom nav-state sanctuary-route speaker (dispatch/karlach-agent)))
   ([node engine-ctx-atom nav-state sanctuary-route speaker agent]
    (npc-state/advance-bt-tick! engine-ctx-atom (mem-id agent))
-   (exec-node {:engine-ctx-atom engine-ctx-atom :nav-state nav-state :sanctuary-route sanctuary-route
-               :speaker speaker :agent agent}
-              [] node)))
+   (core/exec-node {:engine-ctx-atom engine-ctx-atom :nav-state nav-state :sanctuary-route sanctuary-route
+                    :speaker speaker :agent agent
+                    :mem (agent-mem engine-ctx-atom agent)
+                    :leaf goals-leaf
+                    :on-sequence-done (fn [kids] (stamp-cooldowns! engine-ctx-atom kids))
+                    :on-timeout abort-timed-out!}
+                   [] node)))

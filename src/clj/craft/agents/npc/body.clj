@@ -105,6 +105,18 @@
   (swap! buffer update [agent channel] arbitrate intent)
   nil)
 
+(defn release-owners!
+  "Aborto de acao assincrona (CA-107): descarta os pedidos pendentes de `agent-id` cuja `:source`
+   esta em `owners` e libera, em `lease-mgr` (se houver), os leases do agente detidos por esses
+   donos. Pedidos/leases de outras fontes ou agentes permanecem."
+  [lease-mgr agent-id owners]
+  (swap! buffer (fn [m] (into {} (remove (fn [[[aid _] intent]]
+                                           (and (= aid agent-id) (contains? owners (:source intent)))))
+                              m)))
+  (when lease-mgr
+    (doseq [o owners] (leases/release-agent-leases! lease-mgr agent-id o)))
+  nil)
+
 (defonce ^:private open-flag (atom false))
 
 (defn begin-tick!
