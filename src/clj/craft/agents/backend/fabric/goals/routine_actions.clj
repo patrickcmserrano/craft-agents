@@ -94,6 +94,39 @@
           {:status :success :effect effect :action-id :cast-declared-spell})
       {:status :failure :reason :UNDECLARED_EFFECT :effect effect :action-id :cast-declared-spell})))
 
+(defn- react-celestial!
+  "CA-111: reage a um evento celeste do engine-ctx (`:celestial`): olha o gigante gasoso (:gaze) e
+   fala uma linha `:celestial` de `:agent/lines`. `:phenomena` restringe o que o agente declara."
+  [params ctx]
+  (let [cel  (:celestial @(:engine-ctx ctx))
+        spos (self-pos ctx)
+        fail (fn [reason] {:status :failure :reason reason :action-id :react-celestial})]
+    (cond
+      (not (routine/celestial-event? cel (:phenomena params))) (fail :NO_CELESTIAL_EVENT)
+      (nil? spos) (fail :UNKNOWN_POSITION)
+      :else (let [[gx gy gz] (get-in cel [:gas-giant :vector] [0.0 0.8 0.6])]
+              (step! ctx :gaze spos spos
+                     {:yaw   (double (* (Math/atan2 (- (double gx)) (double gz)) (/ 180.0 Math/PI)))
+                      :pitch (double (* (Math/asin (- (double gy))) (/ 180.0 Math/PI)))})
+              (speak-line! ctx (or (:line params) :celestial))
+              {:status :success :phenomenon (:phenomenon cel) :action-id :react-celestial}))))
+
+(defn- tether-follow-ally!
+  "CA-111: um passo (:legs) rumo ao aliado ate ficar a `:target-dist` dele. Devolve :success a cada
+   tick (nunca :running): a BT reavalia as prioridades (hostil, dupla) antes do proximo passo."
+  [params ctx]
+  (let [agent (:agent ctx)
+        ally  (or (:ally-id params) (routine/companion-id agent))
+        tpos  (get-in @(:engine-ctx ctx) [:agents ally :pos])
+        spos  (self-pos ctx)
+        tdist (double (or (:target-dist params) 3.5))]
+    (cond
+      (not (and tpos spos)) {:status :failure :reason :UNKNOWN_TARGET :ally ally :action-id :tether-follow-ally}
+      (<= (routine/distance spos tpos) tdist) {:status :success :ally ally :action-id :tether-follow-ally}
+      :else (let [goal (routine/step-toward tpos spos tdist)]
+              (step! ctx :legs (routine/step-toward spos goal (or (:speed params) 1.0)) spos nil)
+              {:status :success :moving? true :ally ally :action-id :tether-follow-ally}))))
+
 (def actions
   {:visit-place
    {:run visit-place! :channels #{:legs}
@@ -120,4 +153,15 @@
    :cast-declared-spell
    {:run cast-declared-spell! :channels #{:hands}
     :params [:map [:effect :string] [:seconds {:optional true} pos-int?]]
-    :doc "Lanca um efeito declarado em :agent/effects; :UNDECLARED_EFFECT para o que o agente nao declara."}})
+    :doc "Lanca um efeito declarado em :agent/effects; :UNDECLARED_EFFECT para o que o agente nao declara."}
+
+   :react-celestial
+   {:run react-celestial! :channels #{:gaze}
+    :params [:map [:phenomena {:optional true} [:vector :keyword]] [:line {:optional true} :keyword]]
+    :doc "Olha o gigante gasoso e fala uma linha :celestial de :agent/lines quando ha fenomeno celeste declarado."}
+
+   :tether-follow-ally
+   {:run tether-follow-ally! :channels #{:legs}
+    :params [:map [:ally-id {:optional true} :keyword] [:target-dist {:optional true} number?]
+             [:speed {:optional true} number?]]
+    :doc "Um passo por tick rumo ao aliado (padrao: o companheiro) ate :target-dist; sempre :success."}})

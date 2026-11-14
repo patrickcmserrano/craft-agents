@@ -76,6 +76,16 @@
     (when (seq lines)
       (nth lines (mod (long (if (number? seed) seed 0)) (count lines))))))
 
+(defn celestial-event?
+  "Verdadeiro se o snapshot celeste `celestial` (`{:phenomenon kw ...}`, publicado no engine-ctx)
+   traz um fenomeno nao `:nominal` que o agente declara em `phenomena` (vazio/nil = qualquer um,
+   CA-111). Sem dado celeste: fail-closed (false)."
+  [celestial phenomena]
+  (let [phen (:phenomenon celestial)]
+    (boolean (and phen
+                  (not= :nominal phen)
+                  (or (empty? phenomena) (some #{phen} phenomena))))))
+
 (defn- dist3 [[ax ay az] [bx by bz]]
   (let [dx (- (double bx) (double ax)) dy (- (double by) (double ay)) dz (- (double bz) (double az))]
     (Math/sqrt (+ (* dx dx) (* dy dy) (* dz dz)))))

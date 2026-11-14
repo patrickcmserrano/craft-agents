@@ -46,7 +46,10 @@
                  "Olha aqui: se você diminuir o círculo central assim, o cristal se forma com o dobro da resistência."]
   :under-threat ["Fica atrás de mim, Coco! Minhas lâminas de cristal vão travar o caminho deles!"
                  "Ninguém encosta no nosso ateliê! Cristalizar!"]
-  :inscribing   ["Silêncio. Micro-círculo em andamento."]}
+  :inscribing   ["Silêncio. Micro-círculo em andamento."]
+  :celestial    ["Olha a refração naquelas cortinas de luz no céu, Coco! Se eu alinhar meu cristal agora, o glifo vai brilhar por um mês inteiro! 🔮"
+                 "Um eclipse solar... o ar esfriou num instante. Fica perto de mim, Coco, que eu mantenho o círculo de proteção aceso. 🌑"
+                 "Aquele gigante gasoso no zênite parece uma gema de opala gigante lapidada no escuro... nada mal."]}
  :agent/relations
  {:coco    {:kind :companion :affinity 0.95 :note "tsundere: finge que nao esta seguindo"}
   :karlach {:kind :respect :affinity 0.6}
@@ -74,18 +77,36 @@
    [:guard :hostile-nearby? {:radius 10.0}]
    [:action :ward-companion {:companion-id :coco :stance :defensive-crystal-barrier :priority 85}]]
 
-  ;; 3. Micro-Artesanato (Assinatura da Richeh): Agacha em cantos quietos para desenhar micro-glifos no chão
+  ;; 3. Reação celeste (CA-111): eclipse/aurora — olha o gigante gasoso e comenta (:agent/lines :celestial)
   [:sequence
+   [:guard :celestial-event? {:phenomena [:solar-eclipse :crystal-aurora]}]
+   [:guard :cooldown-ready? {:key :celestial-react :seconds 45}]
+   [:action :react-celestial {:line :celestial :priority 30}]]
+
+  ;; 4. Interação de Dupla (CA-111): perto da Coco, olha para ela e comenta (:agent/lines :near-coco)
+  [:sequence
+   [:guard :ally-within-range? {:ally-id :coco :max-dist 3.5}]
+   [:guard :cooldown-ready? {:key :duo-craft :seconds 45}]
+   [:action :greet-companion {:target :coco :line :near-coco :max-dist 3.5 :priority 50}]]
+
+  ;; 5. Micro-Artesanato (Assinatura da Richeh): no bloco :inscribe da rotina, ao chegar ao canto quieto,
+  ;;    agacha para desenhar micro-glifos no chão
+  [:sequence
+   [:guard :routine-activity? {:activity :inscribe}]
+   [:guard :at-place? {:place :corner :radius 2.0}]
    [:guard :in-quiet-corner? {:max-nearby-players 0 :radius 6.0}]
    [:guard :cooldown-ready? {:key :micro-glyph-craft :seconds 40}]
    [:action :crouch-and-inscribe {:pitch 75.0 :swing-offhand? true :duration-ticks 100 :priority 45}]]
 
-  ;; 4. Órbita Tsundere: Se a Coco se afastar demais (> 8m), aproxima-se discretamente sem grudar (mantém 3.5m)
+  ;; 6. Órbita Tsundere: Se a Coco se afastar demais (> 8m), aproxima-se discretamente sem grudar (mantém 3.5m)
   [:sequence
    [:guard :ally-distance-exceeds? {:ally-id :coco :min-dist 8.0}]
-   [:action :tether-follow-ally {:ally-id :coco :target-dist 3.5 :priority 35}]]
+   [:action :tether-follow-ally {:ally-id :coco :target-dist 3.5 :speed 0.8 :priority 35}]]
 
-  ;; 5. Rotina Base: Patrulha curta e contida + Olhar seletivo (raio menor, mais reservada que a Coco)
-  [:parallel
-   [:action :patrol-waypoints {:waypoints [[-30 66 192] [-28 66 196] [-20 66 192] [-26 66 188]] :priority 20}]
-   [:action :social-gaze {:radius 5.0 :priority 10}]]]}
+  ;; 7. Rotina Base (CA-111): segue o bloco de :agent/routine da hora do mundo, visitando os :agent/places
+  ;;    (ateliê, canto, portão) + olhar seletivo (raio menor, mais reservada que a Coco). :timeout reavalia
+  ;;    as prioridades a cada ~1 s (o seletor retomaria o filho :running sem olhar hostis/dupla).
+  [:timeout {:ticks 5}
+   [:parallel
+    [:action :follow-routine-slot {:speed 0.6}]
+    [:action :social-gaze {:radius 5.0 :priority 10}]]]]}

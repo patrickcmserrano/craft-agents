@@ -1,7 +1,9 @@
 (ns craft.agents.backend.fabric.atelier
   "Comportamento de 20 TPS, navegação e interação canônica do Ateliê (Coco & Richeh) no Castelo dos Touros Negros.
    Fachada: a implementacao vive nos sub-namespaces `atelier.*`; aqui ficam
-   reexportados os nomes publicos para quem consome `atelier/...`."
+   reexportados os nomes publicos para quem consome `atelier/...`.
+   CA-111: o comportamento autonomo (rotina, dupla, reacoes) e da BT dos `.edn`; de `behavior/*`
+   o engine usa apenas o driver de seguir (`step-*-tick!` em `:mode :follow`) e `create-*-state`."
   (:require [craft.agents.backend.fabric.atelier.speech :as speech]
             [craft.agents.backend.fabric.atelier.registry :as registry]
             [craft.agents.backend.fabric.atelier.aim :as aim]

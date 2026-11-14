@@ -46,7 +46,10 @@
                  "Trabalhar no nosso pequeno ateliê com você deixa tudo mais divertido, Richeh! ✨"]
   :under-threat ["Cuidado! Meus círculos de proteção ainda não estão prontos! Karlach, ajuda aqui!"
                  "Preciso fechar o anel do glifo de luz rápido para afastar essas criaturas!"]
-  :sketching    ["Só mais um traço... preciso desenhar isso no caderno! 🖋️"]}
+  :sketching    ["Só mais um traço... preciso desenhar isso no caderno! 🖋️"]
+  :celestial    ["O gigante com anéis cobriu o sol! As sombras do castelo ficaram duplas... preciso desenhar esse anel de eclipse antes que passe! 🪐✨"
+                 "Olha aquela aurora no céu, Richeh! As cortinas de luz parecem traços desenhados com a mais pura tinta de prata e cristal! 🌌"
+                 "Os anéis do planeta estão projetando uma sombra perfeita sobre as nuvens dele... a geometria dos céus é mágica pura! 📖🔭"]}
  :agent/relations
  {:richeh  {:kind :companion :affinity 0.95 :note "dupla de ateliê"}
   :karlach {:kind :protector :affinity 0.8}
@@ -74,20 +77,37 @@
    [:guard :hostile-nearby? {:radius 10.0}]
    [:action :evade-towards-ally {:ally-ids [:karlach :richeh] :safe-dist 4.0 :priority 85}]]
 
-  ;; 3. Interação de Dupla: Quando está perto da Richeh e ociosa, conversa/estuda glifos juntas
+  ;; 3. Reação celeste (CA-111): eclipse/aurora — olha o gigante gasoso e comenta (:agent/lines :celestial)
+  [:sequence
+   [:guard :celestial-event? {:phenomena [:solar-eclipse :crystal-aurora]}]
+   [:guard :cooldown-ready? {:key :celestial-react :seconds 45}]
+   [:action :react-celestial {:line :celestial :priority 30}]]
+
+  ;; 4. Interação de Dupla: Quando está perto da Richeh, olha para ela, comenta (:agent/lines :near-richeh)
+  ;;    e estuda glifos juntas
   [:sequence
    [:guard :ally-within-range? {:ally-id :richeh :max-dist 3.5}]
    [:guard :cooldown-ready? {:key :duo-study :seconds 45}]
-   [:action :face-entity {:target :richeh :priority 50}]
+   [:action :greet-companion {:target :richeh :line :near-richeh :max-dist 3.5 :priority 50}]
    [:action :emote-sketch-notes {:duration-ticks 60 :priority 50}]]
 
-  ;; 4. Estudo Ambiental: Para diante de estantes, lanternas ou tapeçarias para desenhar no caderno
+  ;; 5. Ponto do ateliê (CA-111): no bloco :sketch da rotina, ao chegar à estante, folheia o caderno
+  [:sequence
+   [:guard :routine-activity? {:activity :sketch}]
+   [:guard :at-place? {:place :bookshelf :radius 2.0}]
+   [:guard :cooldown-ready? {:key :sketch-notes :seconds 8}]
+   [:action :emote-sketch-notes {:duration-ticks 60 :priority 40}]]
+
+  ;; 6. Estudo Ambiental: Para diante de estantes, lanternas ou tapeçarias para desenhar no caderno
   [:sequence
    [:guard :interesting-block-nearby? {:radius 5.0}]
    [:guard :cooldown-ready? {:key :inspect-block :seconds 30}]
    [:action :approach-and-sketch {:max-dist 2.2 :duration-ticks 80 :priority 40}]]
 
-  ;; 5. Rotina Base: Patrulha alegre pelo castelo + Olhar social amplo e receptivo
-  [:parallel
-   [:action :patrol-waypoints {:waypoints [[-30 66 190] [-25 66 195] [-18 66 190] [-22 66 185]] :priority 20}]
-   [:action :social-gaze {:radius 10.0 :priority 15}]]]}
+  ;; 7. Rotina Base (CA-111): segue o bloco de :agent/routine da hora do mundo, visitando os :agent/places
+  ;;    (ateliê, estante, salão) + olhar social amplo. :timeout reavalia as prioridades a cada ~1 s
+  ;;    (o seletor retomaria o filho :running sem olhar hostis/dupla).
+  [:timeout {:ticks 5}
+   [:parallel
+    [:action :follow-routine-slot {:speed 0.7}]
+    [:action :social-gaze {:radius 10.0 :priority 15}]]]]}

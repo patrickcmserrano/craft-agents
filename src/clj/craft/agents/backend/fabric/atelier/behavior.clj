@@ -1,5 +1,10 @@
 (ns craft.agents.backend.fabric.atelier.behavior
-  "Estado e motor de 20 TPS de Coco e Richeh, sinergia da dupla e reacao celeste."
+  "Estado das bruxas (Coco e Richeh) e driver de SEGUIR um jogador.
+   CA-111: rotina, dupla, pontos do atelie e reacoes ao ceu agora sao da `:bt/root` dos `.edn`
+   (`bt-tick/tick-agent!`); o engine so chama `step-coco-tick!`/`step-richeh-tick!` em `:mode :follow`.
+   Os demais ramos (patrulha por `castle-waypoints`, orbita, `check-duo-synchrony!`,
+   `check-celestial-reaction!`) ficam apenas como shims legados fixados por testes travados
+   (`atelier_test.clj`, `npc_bt_test.clj`); nenhum caminho do engine os usa."
   (:require [clojure.string :as str]
             [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.atelier.speech :refer [coco-data richeh-data]]
@@ -13,6 +18,30 @@
   ([send-cmd! agent-id source channel [x y z] yaw pitch]
    (body/step! send-cmd! {:agent agent-id :source source :channel channel
                           :x x :y y :z z :yaw yaw :pitch pitch})))
+
+(defn- follow-step!
+  "Ordem do jogador (`:mode :follow`): anda 0.20 bloco/tick rumo a `:follow-target` (fonte
+   :player-goal do `npc.body`, acima da BT) e, a ate 2.4 blocos, so olha para ele. Alvo offline:
+   volta ao modo `fallback`. `labels`: {:moving :near :fallback} do status."
+  [st-atom agent-id send-cmd! online-players {:keys [moving near fallback]}]
+  (let [st          @st-atom
+        [x y z]     (:pos st)
+        target-name (or (:follow-target st) "pace")
+        target-p    (first (filter #(= (str/lower-case (:name %)) (str/lower-case target-name)) online-players))]
+    (if-not target-p
+      (swap! st-atom assoc :mode fallback)
+      (let [dx   (- (:x target-p) x)
+            dz   (- (:z target-p) z)
+            dist (Math/sqrt (+ (* dx dx) (* dz dz)))
+            yaw  (nav/compute-yaw dx dz)]
+        (if (> dist 2.4)
+          (let [step-d (min 0.20 dist)
+                nx     (+ x (* (/ dx dist) step-d))
+                nz     (+ z (* (/ dz dist) step-d))]
+            (move-step! send-cmd! agent-id :player-goal :legs [nx y nz] yaw)
+            (swap! st-atom assoc :pos [nx y nz] :yaw yaw :status (str moving " " (:name target-p))))
+          (do (move-step! send-cmd! agent-id :player-goal :gaze [x y z] yaw)
+              (swap! st-atom assoc :yaw yaw :status (str near " " (:name target-p)))))))))
 
 ;; =============================================================================
 ;; Waypoints e Configuração de Castelo
@@ -76,23 +105,8 @@
     (cond
       ;; 1. Modo Follow (Jogador solicitou acompanhamento)
       (= mode :follow)
-      (let [target-name (or (:follow-target st) "pace")
-            target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case target-name)) online-players))]
-        (if target-p
-          (let [dx (- (:x target-p) cx)
-                dz (- (:z target-p) cz)
-                dist (Math/sqrt (+ (* dx dx) (* dz dz)))
-                yaw (nav/compute-yaw dx dz)]
-            (if (> dist 2.4)
-              (let [step-d (min 0.20 dist)
-                    nx (+ cx (* (/ dx dist) step-d))
-                    nz (+ cz (* (/ dz dist) step-d))]
-                (move-step! send-cmd! :coco :player-goal :legs [nx cy nz] yaw)
-                (swap! coco-st assoc :pos [nx cy nz] :yaw yaw :status (str "Acompanhando " (:name target-p))))
-              (do
-                (move-step! send-cmd! :coco :player-goal :gaze [cx cy cz] yaw)
-                (swap! coco-st assoc :yaw yaw :status (str "Conversando com " (:name target-p))))))
-          (swap! coco-st assoc :mode :patrol)))
+      (follow-step! coco-st :coco send-cmd! online-players
+                    {:moving "Acompanhando" :near "Conversando com" :fallback :patrol})
 
       ;; 2. Modo Patrulha / Estudo no Castelo
       :else
@@ -158,23 +172,8 @@
     (cond
       ;; 1. Modo Follow (Jogador solicitou acompanhamento)
       (= mode :follow)
-      (let [target-name (or (:follow-target st) "pace")
-            target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case target-name)) online-players))]
-        (if target-p
-          (let [dx (- (:x target-p) rx)
-                dz (- (:z target-p) rz)
-                dist (Math/sqrt (+ (* dx dx) (* dz dz)))
-                yaw (nav/compute-yaw dx dz)]
-            (if (> dist 2.4)
-              (let [step-d (min 0.20 dist)
-                    nx (+ rx (* (/ dx dist) step-d))
-                    nz (+ rz (* (/ dz dist) step-d))]
-                (move-step! send-cmd! :richeh :player-goal :legs [nx ry nz] yaw)
-                (swap! richeh-st assoc :pos [nx ry nz] :yaw yaw :status (str "Seguindo " (:name target-p))))
-              (do
-                (move-step! send-cmd! :richeh :player-goal :gaze [rx ry rz] yaw)
-                (swap! richeh-st assoc :yaw yaw :status (str "Vigiando " (:name target-p))))))
-          (swap! richeh-st assoc :mode :tether-orbit)))
+      (follow-step! richeh-st :richeh send-cmd! online-players
+                    {:moving "Seguindo" :near "Vigiando" :fallback :tether-orbit})
 
       ;; 2. Modo Tether Orbit em torno da Coco
       :else

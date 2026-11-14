@@ -64,7 +64,7 @@
                  (or (nil? (second args))
                      (map? (second args))))
 
-            (:cooldown :repeat)
+            (:cooldown :repeat :timeout) ; :timeout: CA-111 (o nucleo bt.core ja o interpreta)
             (and (map? (first args))
                  (= 1 (count (rest args)))
                  (valid-bt-node? (second args)))

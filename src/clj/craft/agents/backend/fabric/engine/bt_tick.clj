@@ -18,6 +18,23 @@
    :gaze, ticks dedicados no :legs; 1 MOVE por agente no `flush!` do tick)."
   #{})
 
+(def position-owned-by-tick
+  "Agentes cuja posicao e integrada por um tick dedicado (Karlach): o `bt-tick` nao a sobrescreve."
+  #{:karlach})
+
+(defn- sync-position!
+  "CA-111: a BT anda por passos curtos a partir da posicao que conhece; sem realimentacao ela
+   recomecaria sempre do spawn. Com o agente online (PLAYERS) publica a posicao REAL no atomo do
+   agente e em `[:agents id :pos]` do engine-ctx, antes de a arvore rodar."
+  [engine-ctx-atom st agent-id snap]
+  (let [self (get-in snap [:by-agent agent-id :self])
+        pos  (:pos self)]
+    (when (and (:online? self) (not (contains? position-owned-by-tick agent-id))
+               (= 3 (count pos)) (every? number? pos))
+      (let [pos (mapv double pos)]
+        (swap! st assoc :pos pos)
+        (swap! engine-ctx-atom assoc-in [:agents agent-id :pos] pos)))))
+
 (defn tick-agent!
   "Um passo da `:bt/root` de `agent` (spec do registro). `env`: :engine-ctx-atom e, opcional,
    :sanctuary-route. Devolve o resultado do no raiz."
@@ -29,7 +46,8 @@
                                                       {:tick (or tick (:tick @engine-ctx-atom) 0)
                                                        :agent-id agent-id}))]
     (when (and engine-ctx-atom snap)
-      (perception-tick/inject-perception! engine-ctx-atom agent-id snap))
+      (perception-tick/inject-perception! engine-ctx-atom agent-id snap)
+      (sync-position! engine-ctx-atom st agent-id snap))
     (perception-tick/with-snapshot-players snap
       #(goals/execute-tree-node! (:bt/root agent) engine-ctx-atom st
                                  (or (:sanctuary-route env) sanctuary-route) nil agent))))

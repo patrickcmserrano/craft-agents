@@ -130,10 +130,10 @@
         max-n   (or (:max-nearby-players params) 0)]
     (boolean (and (sequential? players)
                   (<= (count (filter #(<= (:distance %) radius) players)) max-n)))))
-
 (defn- world-agent [w] (or (:agent w) (some-> (:agent-id w) registry/agent-by-id))) ; CA-110
 (add-guard! [:routine-activity?] (fn [_ {:keys [activity]} w] (routine/activity-now? (world-agent w) activity (:world-time w))))
 (add-guard! [:at-place?] (fn [_ {:keys [place radius] :or {radius 2.0}} w] (routine/at-place? (world-agent w) place (:self-pos w) radius)))
+(add-guard! [:celestial-event?] (fn [_ params w] (routine/celestial-event? (:celestial w) (:phenomena params)))) ; CA-111: [:celestial :phenomenon] do ctx
 
 (defn guard-world
   "Mundo (puro) dos guards a partir do engine-ctx, do estado e do agente."
