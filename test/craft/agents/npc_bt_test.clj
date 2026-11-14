@@ -40,11 +40,11 @@
       (bt-tick/tick-bt-agents! env))
     (let [with-root (set (map :agent/id (filter :bt/root (registry/all-agents))))
           got       (set @ticked)]
-      (is (contains? got :coco) "Coco declara :bt/root e roda a arvore")
+      (is (not (contains? got :coco)) "Coco e conduzida pelo tick do atelie; BT nao pode ser segundo motorista")
       (is (every? with-root got) "so agente com :bt/root e ticado")
       (is (= (apply disj with-root bt-tick/self-driven) got)
-          "todos menos os que ja tem tick dedicado (Karlach, Picard, Richeh)")
-      (is (= #{:karlach :picard :richeh} bt-tick/self-driven))
+          "todos menos os que ja tem tick dedicado (Karlach, Picard, Richeh, Coco)")
+      (is (= #{:karlach :picard :richeh :coco} bt-tick/self-driven))
       (is (= (count @ticked) (count got)) "um passo por agente"))))
 
 (deftest agents-without-bt-root-keep-their-tick-test

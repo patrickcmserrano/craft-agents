@@ -1,7 +1,7 @@
 (ns craft.agents.backend.fabric.engine.bt-tick
   "Tick de Behavior Tree por agente (CA-094): todo agente do registro que declara `:bt/root`
-   ganha um passo de arvore a 5Hz. Agentes sem `:bt/root` mantem o tick atual; Karlach, Picard e
-   Richeh tem tick dedicado (`self-driven`) e nao sao ticados aqui para nao haver dois motoristas."
+   ganha um passo de arvore a 5Hz. Agentes sem `:bt/root` mantem o tick atual; Karlach, Picard, Richeh e
+   Coco tem tick dedicado (`self-driven`) e nao sao ticados aqui para nao haver dois motoristas."
   (:require [craft.agents.backend.fabric.goals :as goals]
             [craft.agents.backend.fabric.sanctuary :refer [sanctuary-route]]
             [craft.agents.npc.registry :as registry]
@@ -12,8 +12,8 @@
   4)
 
 (def self-driven
-  "Agentes com `:bt/root` cujo tick dedicado ja os conduz (tick-karlach!, tick-picard!, passo da Richeh no atelie)."
-  #{:karlach :picard :richeh})
+  "Agentes com `:bt/root` cujo tick dedicado ja os conduz (tick-karlach!, tick-picard!, passos da Richeh e da Coco no atelie)."
+  #{:karlach :picard :richeh :coco})
 
 (defn tick-agent!
   "Um passo da `:bt/root` de `agent` (spec do registro). `env`: :engine-ctx-atom e, opcional,
