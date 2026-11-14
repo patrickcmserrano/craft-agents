@@ -25,6 +25,29 @@
    [:sound :string]
    [:radius number?]])
 
+(def Lines
+  "Falas por evento/topico: `{:topico [\"fala\" ...]}`, cada vetor nao vazio (CA-109)."
+  [:map-of :keyword [:vector {:min 1} [:string {:min 1}]]])
+
+(def Relation
+  [:map
+   [:kind :keyword]
+   [:affinity {:optional true} number?]
+   [:note {:optional true} :string]])
+
+(def RoutineSlot
+  "Faixa de horas do dia [from, to) com uma atividade e, opcionalmente, um lugar de `:places`."
+  [:map
+   [:from number?]
+   [:to number?]
+   [:activity :keyword]
+   [:place {:optional true} :keyword]])
+
+(def Place
+  [:map
+   [:name :string]
+   [:pos [:tuple number? number? number?]]])
+
 (def AgentSpec
   [:map
    [:agent/id :keyword]
@@ -37,6 +60,10 @@
    [:agent/quarters {:optional true} :map]
    [:agent/dialogues {:optional true} :map]
    [:agent/traits {:optional true} :map]
+   [:agent/lines {:optional true} Lines]
+   [:agent/relations {:optional true} [:map-of :keyword Relation]]
+   [:agent/routine {:optional true} [:vector RoutineSlot]]
+   [:agent/places {:optional true} [:map-of :keyword Place]]
    [:bt/root {:optional true} schemas/BTNode]
    [:agent/voice {:optional true} Voice]
    [:agent/combat-policy {:optional true} [:enum :fight :flee :none]]

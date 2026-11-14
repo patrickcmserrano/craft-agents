@@ -38,6 +38,30 @@
    :under-threat ["Fica atrás de mim, Coco! Minhas lâminas de cristal vão travar o caminho deles!"
                   "Ninguém encosta no nosso ateliê! Cristalizar!"]}}
 
+ ;; Persona declarativa (CA-109)
+ :agent/lines
+ {:greeting     ["Pace... não fica bisbilhotando meus pergaminhos, tá?"
+                 "Lizzie, se alguém mexer nas suas coisas, me avisa."]
+  :near-coco    ["Hmph. Seu traço melhorou um pouquinho hoje, Coco... mas só um pouquinho."
+                 "Olha aqui: se você diminuir o círculo central assim, o cristal se forma com o dobro da resistência."]
+  :under-threat ["Fica atrás de mim, Coco! Minhas lâminas de cristal vão travar o caminho deles!"
+                 "Ninguém encosta no nosso ateliê! Cristalizar!"]
+  :inscribing   ["Silêncio. Micro-círculo em andamento."]}
+ :agent/relations
+ {:coco    {:kind :companion :affinity 0.95 :note "tsundere: finge que nao esta seguindo"}
+  :karlach {:kind :respect :affinity 0.6}
+  :player  {:kind :acquaintance :affinity 0.5}}
+ :agent/places
+ {:atelier {:name "Ateliê" :pos [-30.0 66.0 192.0]}
+  :corner  {:name "Canto Quieto entre as Pedras" :pos [-28.0 66.0 196.0]}
+  :gate    {:name "Portão de Carvalho" :pos [-20.0 66.0 192.0]}}
+ :agent/routine
+ [{:from 6  :to 12 :activity :craft   :place :atelier}
+  {:from 12 :to 18 :activity :inscribe :place :corner}
+  {:from 18 :to 22 :activity :guard   :place :gate}
+  {:from 22 :to 24 :activity :rest    :place :atelier}
+  {:from 0  :to 6  :activity :rest    :place :atelier}]
+
  :bt/root
  [:selector
   ;; 1. Diretiva direta via Blackboard / Chat (Prioridade Máxima)

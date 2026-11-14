@@ -68,6 +68,25 @@
    "naturalist:tortoise" "Devagar e sempre, né Tartaruga Gigante?"
    "minecraft:cat"       "Olha esse gatinho ronronando! Toma um peixinho fresco, coisa fofa da Mamãe K! Pspspsps! 🐟 🐱"}}
 
+ ;; Persona declarativa (CA-109)
+ :agent/lines
+ {:greeting     ["Ei, soldado! Bem-vindo ao Santuário!"
+                 "Olha só quem apareceu! Veio ver os bichinhos?"]
+  :under-threat ["Ninguém encosta nos meus bichinhos!"
+                 "Chega mais, que o motor infernal tá com fome de briga!"]
+  :idle         ["Hora de dar uma volta pelos recintos."]}
+ :agent/relations
+ {:coco   {:kind :protege :affinity 0.9 :note "protege a aprendiz sem hesitar"}
+  :richeh {:kind :friend :affinity 0.6}
+  :player {:kind :ally :affinity 0.8}}
+ :agent/places
+ {:sanctuary {:name "Santuário" :pos [-175.0 65.0 180.0]}
+  :bedroom   {:name "Quarto da Karlach" :pos [-131.0 65.0 195.0]}}
+ :agent/routine
+ [{:from 6  :to 20 :activity :patrol :place :sanctuary}
+  {:from 20 :to 24 :activity :rest   :place :bedroom}
+  {:from 0  :to 6  :activity :rest   :place :bedroom}]
+
  :bt/root
  [:selector
   [:sequence

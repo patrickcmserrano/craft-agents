@@ -45,6 +45,22 @@
         (str "CMD|execute at " anchor " run playsound " sound
              " master @a[distance=.." sradius "] ~ ~ ~ " volume " " pitch)]))))
 
+(defn persona-line
+  "Fala sorteada de `:agent/lines` do `.edn` do agente para `topic` (evento/topico), ou `nil`
+   se o agente ou o topico nao existem (CA-109). `pick` (opcional) recebe a contagem e devolve
+   o indice; default `rand-int`."
+  ([agent-id topic] (persona-line agent-id topic rand-int))
+  ([agent-id topic pick]
+   (when-let [ls (seq (get-in (registry/agent-by-id agent-id) [:agent/lines topic]))]
+     (nth ls (pick (count ls))))))
+
+(defn persona-say-cmds
+  "`say-cmds` da fala sorteada por `persona-line`, ou `nil` se nao ha fala."
+  ([agent-id topic] (persona-say-cmds agent-id topic rand-int))
+  ([agent-id topic pick]
+   (when-let [line (persona-line agent-id topic pick)]
+     (say-cmds agent-id line))))
+
 (defn say!
   "Envia os comandos de `say-cmds` pela bridge. Devolve a resposta do ultimo
    envio, ou `nil` se o agente e desconhecido."

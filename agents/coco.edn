@@ -38,6 +38,30 @@
    :under-threat ["Cuidado! Meus círculos de proteção ainda não estão prontos! Karlach, ajuda aqui!"
                   "Preciso fechar o anel do glifo de luz rápido para afastar essas criaturas!"]}}
 
+ ;; Persona declarativa (CA-109)
+ :agent/lines
+ {:greeting     ["Olá, Pace! Hoje descobri um sinal novo, quer ver?"
+                 "Lizzie! Precisa de algum pergaminho de emergência?"]
+  :near-richeh  ["Richeh! Olha só esse novo arranjo de sinais que tentei rascunhar!"
+                 "Trabalhar no nosso pequeno ateliê com você deixa tudo mais divertido, Richeh! ✨"]
+  :under-threat ["Cuidado! Meus círculos de proteção ainda não estão prontos! Karlach, ajuda aqui!"
+                 "Preciso fechar o anel do glifo de luz rápido para afastar essas criaturas!"]
+  :sketching    ["Só mais um traço... preciso desenhar isso no caderno! 🖋️"]}
+ :agent/relations
+ {:richeh  {:kind :companion :affinity 0.95 :note "dupla de ateliê"}
+  :karlach {:kind :protector :affinity 0.8}
+  :player  {:kind :friend :affinity 0.85}}
+ :agent/places
+ {:atelier   {:name "Ateliê" :pos [-30.0 66.0 190.0]}
+  :bookshelf {:name "Estante do Castelo" :pos [-25.0 66.0 195.0]}
+  :hall      {:name "Salão das Lanternas" :pos [-18.0 66.0 190.0]}}
+ :agent/routine
+ [{:from 6  :to 12 :activity :study  :place :atelier}
+  {:from 12 :to 17 :activity :sketch :place :bookshelf}
+  {:from 17 :to 22 :activity :stroll :place :hall}
+  {:from 22 :to 24 :activity :rest   :place :atelier}
+  {:from 0  :to 6  :activity :rest   :place :atelier}]
+
  :bt/root
  [:selector
   ;; 1. Diretiva direta via Blackboard / Chat (Prioridade Máxima)

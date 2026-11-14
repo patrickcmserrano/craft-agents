@@ -44,6 +44,22 @@
     :yaw 0.0 :pitch 20.0
     :wait-ticks 120
     :bark "Curso traçado. À espera das suas ordens, Número Um."}]}
+ ;; Persona declarativa (CA-109)
+ :agent/lines
+ {:greeting     ["Bem-vindo a bordo. Em que posso ajudar, Número Um?"]
+  :weather      ["Consultando sensores meteorológicos orbitais e planetários..."]
+  :under-threat ["Alerta vermelho! Levantar escudos."]}
+ :agent/relations
+ {:player {:kind :first-officer :affinity 0.7}}
+ :agent/places
+ {:command-chair {:name "Cadeira de Comando" :pos [-65.0 145.0 101.0]}
+  :ops           {:name "Estação de Operações" :pos [-67.0 145.0 102.0]}
+  :conn          {:name "Estação de Navegação (Conn)" :pos [-63.0 145.0 102.0]}}
+ :agent/routine
+ [{:from 0 :to 12  :activity :command :place :command-chair}
+  {:from 12 :to 18 :activity :monitor-weather :place :ops}
+  {:from 18 :to 24 :activity :navigate :place :conn}]
+
  :bt/root
  [:selector
   [:sequence

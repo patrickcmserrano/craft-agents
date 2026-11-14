@@ -9,6 +9,17 @@
                  :legs "minecraft:netherite_leggings"
                  :feet "minecraft:netherite_boots"
                  :mainhand "jeg:assault_rifle"}
+ ;; Persona declarativa (CA-109)
+ :agent/lines
+ {:greeting     ["Escolta pronta. Aguardando ordens."]
+  :under-threat ["Contato hostil! Engajando."]}
+ :agent/relations
+ {:player {:kind :escort-leader :affinity 0.5}}
+ :agent/places
+ {:post {:name "Posto de Escolta" :pos [-26.0 68.0 -48.0]}}
+ :agent/routine
+ [{:from 0 :to 24 :activity :escort :place :post}]
+
  :bt/root
  [:selector
   [:sequence
