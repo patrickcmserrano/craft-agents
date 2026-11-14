@@ -10,15 +10,16 @@
             [craft.agents.backend.fabric.transport :as transport :refer [uformat]]))
 
 (defmethod execute-goal! :mining-cooperation
-  [{:goal/keys [target] target-filter :goal/filter} {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
-  (let [nm (dispatch/agent-name ctx)]
+  [{:goal/keys [target] target-filter :goal/filter} {engine-ctx-atom :engine-ctx :as ctx}]
+  (let [nav-state (dispatch/nav-state ctx)
+        nm        (dispatch/agent-name ctx)]
     (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller"
                              (str "Iniciando mineração cooperativa com " target " | Filtro: " (or target-filter "geral")))
     ;; 1. Garante sincronizacao e proximidade imediata com o jogador para mineracao cooperativa
     (let [players (actions/query-online-players)
           target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
-          tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))
-          [cx cy cz] (:pos @nav-state)
+          tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (when nav-state (:pos @nav-state)))
+          [cx cy cz] (or (when nav-state (:pos @nav-state)) [-175.0 65.0 180.0])
           dist-to-player (if target-p
                            (Math/sqrt (+ (Math/pow (- (:x target-p) cx) 2)
                                          (Math/pow (- (:y target-p) cy) 2)
@@ -28,7 +29,8 @@
         (actions/teleport-agent-to! nm [(:x target-p) (:y target-p) (:z target-p)])
         (transport/send-bridge-cmd! (str "CMD|execute at " nm " run playsound minecraft:entity.enderman.teleport master @a ~ ~ ~ 1.0 1.0"))
         (transport/send-bridge-cmd! (str "CMD|execute at " nm " run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 20 normal"))
-        (swap! nav-state assoc :pos tgt-pos :follow-path [] :steps [])))
+        (when nav-state
+          (swap! nav-state assoc :pos tgt-pos :follow-path [] :steps []))))
 
     (transport/send-bridge-cmd! (str "CMD|item replace entity " nm " weapon.mainhand with minecraft:netherite_pickaxe"))
     (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
@@ -43,7 +45,7 @@
                 by (:y look-res)
                 bz (:z look-res)
                 bid (:block-id look-res)
-                [kx ky kz] (:pos @nav-state)
+                [kx ky kz] (or (when nav-state (:pos @nav-state)) [0.0 65.0 0.0])
                 odx (- (+ (double bx) 0.5) kx)
                 ody (- (+ (double by) 0.5) (+ (double ky) 1.62))
                 odz (- (+ (double bz) 0.5) kz)
@@ -56,8 +58,9 @@
               (let [approach-x (+ (double bx) (if (> kx bx) 1.2 -1.2))
                     approach-z (+ (double bz) (if (> kz bz) 1.2 -1.2))]
                 (transport/send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" nm approach-x ky approach-z yaw pitch))
-                (swap! nav-state assoc :pos [approach-x ky approach-z] :yaw yaw :pitch pitch)))
-            (let [[cur-x cur-y cur-z] (:pos @nav-state)]
+                (when nav-state
+                  (swap! nav-state assoc :pos [approach-x ky approach-z] :yaw yaw :pitch pitch))))
+            (let [[cur-x cur-y cur-z] (or (when nav-state (:pos @nav-state)) [0.0 65.0 0.0])]
               (transport/send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|%.1f|false|false" nm cur-x cur-y cur-z yaw pitch)))
             (transport/send-bridge-cmd! (str "SWING|" nm))
             (let [mine-res (actions/mine-block! nm bx by bz)]
@@ -75,25 +78,28 @@
       :else
       (let [ore-name (get ore-pt-names target-filter (if (str/blank? target-filter) "minérios" target-filter))]
         (dispatch/say! ctx (str "Picareta em punho, " target "! Modo de mineração contínua de " ore-name " ativado! Vou extrair todos os veios que encontrar por aqui! 🔥 ⛏️"))
-        (swap! nav-state assoc
-               :mode :mining
-               :mining-filter (or target-filter "")
-               :mining-target (or target "pace")
-               :mining-blocks-broken 0)))
+        (when nav-state
+          (swap! nav-state assoc
+                 :mode :mining
+                 :mining-filter (or target-filter "")
+                 :mining-target (or target "pace")
+                 :mining-blocks-broken 0))))
 
     (when engine-ctx-atom
       (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :task]
              (if target-filter (str "Minerando " (get ore-pt-names target-filter target-filter) " com " target) (str "Minerando com " target))))))
 
 (defmethod execute-goal! :patrol-sanctuary
-  [{:goal/keys [voice-line]} {engine-ctx-atom :engine-ctx nav-state :state sanctuary-route :sanctuary-route :as ctx}]
-  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Retomando patrulha e alimentação de animais no Santuário")
-  (when engine-ctx-atom
-    (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :task] "Patrulha no Santuário"))
-  (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.0")
-  (let [initial-steps (vec (nav/expand-route-microsteps (first sanctuary-route) (:pos @nav-state)))]
-    (swap! nav-state assoc :mode :sanctuary-patrol :follow-target nil :route-idx 0 :steps initial-steps))
-  (dispatch/say! ctx voice-line))
+  [{:goal/keys [voice-line]} {engine-ctx-atom :engine-ctx sanctuary-route :sanctuary-route :as ctx}]
+  (let [nav-state (dispatch/nav-state ctx)]
+    (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Retomando patrulha e alimentação de animais no Santuário")
+    (when engine-ctx-atom
+      (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :task] "Patrulha no Santuário"))
+    (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.0")
+    (when (and nav-state (seq sanctuary-route))
+      (let [initial-steps (vec (nav/expand-route-microsteps (first sanctuary-route) (or (:pos @nav-state) [0.0 65.0 0.0])))]
+        (swap! nav-state assoc :mode :sanctuary-patrol :follow-target nil :route-idx 0 :steps initial-steps)))
+    (dispatch/say! ctx voice-line)))
 
 (defmethod execute-goal! :inventory-inspection
   [{:goal/keys [speaker]} {engine-ctx-atom :engine-ctx :as ctx}]

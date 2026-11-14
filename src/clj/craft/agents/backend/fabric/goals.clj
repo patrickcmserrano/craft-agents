@@ -24,3 +24,5 @@
 (def execute-goal! dispatch/execute-goal!)
 (def execute-karlach-goal! dispatch/execute-karlach-goal!)
 (def execute-tree-node! bt/execute-tree-node!)
+(def karlach-agent dispatch/karlach-agent)
+(def karlach-ctx dispatch/karlach-ctx)

@@ -11,7 +11,9 @@
             [craft.agents.cognition.critic :as critic]
             [craft.agents.cognition.grounding :as grounding]
             [craft.agents.cognition.intent :as intent]
-            [craft.agents.npc.addressing :as addressing]))
+            [craft.agents.npc.addressing :as addressing]
+            [craft.agents.npc.registry :as registry]
+            [craft.agents.npc.state :as npc-state]))
 
 (defonce ^:private global-seen-chat (atom {}))
 
@@ -160,6 +162,32 @@
                   (goals/execute-karlach-goal! goal-spec engine-ctx-atom nav-state sanctuary-route)
                   true)))))))))
 
+(defn agent-goal-ctx
+  "Resolve o agente alvo via `npc.addressing` / `npc.registry` e monta o mapa de contexto
+   compatível com `execute-goal!`, contendo `:agent-id`, `:agent`, `:agent-name`,
+   `:nav-state` e `:state` (`npc.state/agent-atom` quando não for Karlach/Picard com átomo
+   legado, ou mapa compatível)."
+  [agent-id engine-ctx-atom nav-state picard-state coco-state richeh-state sanctuary-route]
+  (let [spec (or (registry/agent-by-id agent-id)
+                 (when (= :karlach agent-id) (goals/karlach-agent)))
+        st   (case agent-id
+               :karlach (or nav-state (when engine-ctx-atom (npc-state/agent-atom engine-ctx-atom :karlach)) (atom {:pos [-175.0 65.0 180.0]}))
+               :picard  (or picard-state (when engine-ctx-atom (npc-state/agent-atom engine-ctx-atom :picard)) (atom {:pos [-65.0 145.0 101.0]}))
+               :coco    (or coco-state (when engine-ctx-atom (npc-state/agent-atom engine-ctx-atom :coco)) (atom {:pos [-160.0 65.0 190.0]}))
+               :richeh  (or richeh-state (when engine-ctx-atom (npc-state/agent-atom engine-ctx-atom :richeh)) (atom {:pos [-160.0 65.0 192.0]}))
+               (if engine-ctx-atom (npc-state/agent-atom engine-ctx-atom agent-id) (atom {})))]
+    {:agent-id agent-id
+     :agent spec
+     :agent-name (or (:agent/name spec) (name agent-id))
+     :state st
+     :nav-state st
+     :engine-ctx engine-ctx-atom
+     :sanctuary-route sanctuary-route}))
+
+(def agent-ctx
+  "Alias para `agent-goal-ctx`."
+  agent-goal-ctx)
+
 (defn handle-player-command!
   "Processa comandos de chat (recebidos via bridge CHAT_POLL, log tailer ou Studio UI)
    e orquestra as reações dos agentes Karlach, Picard, Coco e Richeh.
@@ -184,106 +212,107 @@
                                           (atelier/coco-say! text)
                                           (atelier/richeh-say! text)))))
 
-       ;; 1. Comandos para Karlach (Pipeline Cognitivo Desacoplado: Router -> Grounding -> Multimethod)
-      ;; CA-090: qualquer agente do registro pode ser chamado pelo nome; o intent leva
-      ;; :agent/id. Metas genericas por agente chamado sao a CA-091; ate la so a
-      ;; Karlach executa a meta, os demais apenas registram a rota.
-      (doseq [agent-id (addressing/addressed-agents msg)]
-        (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
-        (let [t0         (System/currentTimeMillis)
-              intent-res (assoc (intent/classify-intent-semantic msg speaker)
-                                :agent/id agent-id)
-              dt         (- (System/currentTimeMillis) t0)]
-          (record-cognitive-event! engine-ctx-atom :router "System 1 Intent Router"
-                                   (str "Agente: " (name agent-id)
-                                        " | Intenção: " (:intent/type intent-res)
-                                        " | Confiança: " (int (* 100 (:intent/confidence intent-res 0.0))) "%"
-                                        " | Latência: " dt "ms"
-                                        " | Slots: " (:intent/slots intent-res)))
-          (when (= :karlach agent-id)
-            (goals/execute-karlach-goal! (grounding/ground-goal intent-res)
-                                         engine-ctx-atom nav-state sanctuary-route))))
+       ;; 1. Comandos para o pipeline cognitivo de metas por agente
+       ;; CA-099: qualquer agente do registro endereçado monta seu ctx e executa via execute-goal!
+       (let [addressed (addressing/addressed-agents msg)]
+         (doseq [agent-id addressed]
+           (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+           (let [t0         (System/currentTimeMillis)
+                 intent-res (assoc (intent/classify-intent-semantic msg speaker)
+                                   :agent/id agent-id)
+                 dt         (- (System/currentTimeMillis) t0)
+                 goal-spec  (grounding/ground-goal intent-res)
+                 ctx        (agent-goal-ctx agent-id engine-ctx-atom nav-state picard-state
+                                            coco-state richeh-state sanctuary-route)]
+             (record-cognitive-event! engine-ctx-atom :router "System 1 Intent Router"
+                                      (str "Agente: " (name agent-id)
+                                           " | Intenção: " (:intent/type intent-res)
+                                           " | Confiança: " (int (* 100 (:intent/confidence intent-res 0.0))) "%"
+                                           " | Latência: " dt "ms"
+                                           " | Slots: " (:intent/slots intent-res)))
+             (goals/execute-goal! goal-spec ctx))))
 
-      ;; 2. Previsão do Tempo e Comandos para o Capitão Picard
-      (cond
-        (or (str/includes? lower "previsao")
-            (str/includes? lower "previsão")
-            (str/includes? lower "meteorologia")
-            (and (or (str/includes? lower "picard")
-                     (str/includes? lower "capitao")
-                     (str/includes? lower "capitão")
-                     (str/includes? lower "qual")
-                     (str/includes? lower "como ta")
-                     (str/includes? lower "como está"))
-                 (or (str/includes? lower "tempo")
-                     (str/includes? lower "clima")
-                     (str/includes? lower "chuva"))))
-        (do
-          (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
-          (record-cognitive-event! engine-ctx-atom :motor "Picard Telemetry" "Consultando sensores meteorológicos orbitais e terrestres")
-          (transport/send-bridge-cmd! "SWING|Picard")
-          (picard/picard-broadcast-weather!)
-          (swap! picard-state assoc :last-weather-ms (System/currentTimeMillis)))
+       ;; 2. Previsão do Tempo e Comandos para o Capitão Picard
+       (cond
+         (or (str/includes? lower "previsao")
+             (str/includes? lower "previsão")
+             (str/includes? lower "meteorologia")
+             (and (or (str/includes? lower "picard")
+                      (str/includes? lower "capitao")
+                      (str/includes? lower "capitão")
+                      (str/includes? lower "qual")
+                      (str/includes? lower "como ta")
+                      (str/includes? lower "como está"))
+                  (or (str/includes? lower "tempo")
+                      (str/includes? lower "clima")
+                      (str/includes? lower "chuva"))))
+         (do
+           (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+           (record-cognitive-event! engine-ctx-atom :motor "Picard Telemetry" "Consultando sensores meteorológicos orbitais e terrestres")
+           (transport/send-bridge-cmd! "SWING|Picard")
+           (picard/picard-broadcast-weather!)
+           (swap! picard-state assoc :last-weather-ms (System/currentTimeMillis)))
 
-        (and (or (str/includes? lower "picard")
-                 (str/includes? lower "capitao")
-                 (str/includes? lower "capitão"))
-             (or (str/includes? lower "limpa")
-                 (str/includes? lower "abrir o sol")
-                 (str/includes? lower "parar chuva")))
-        (do
-          (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
-          (record-cognitive-event! engine-ctx-atom :motor "Picard Weather Matrix" "Comando de dispersão climática executado: weather clear")
-          (transport/send-bridge-cmd! "CMD|weather clear")
-          (picard/picard-say! "Make it so! Acionando matriz de controle climático orbital: Céu limpo estabelecido, Número Um."))
+         (and (or (str/includes? lower "picard")
+                  (str/includes? lower "capitao")
+                  (str/includes? lower "capitão"))
+              (or (str/includes? lower "limpa")
+                  (str/includes? lower "abrir o sol")
+                  (str/includes? lower "parar chuva")))
+         (do
+           (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+           (record-cognitive-event! engine-ctx-atom :motor "Picard Weather Matrix" "Comando de dispersão climática executado: weather clear")
+           (transport/send-bridge-cmd! "CMD|weather clear")
+           (picard/picard-say! "Make it so! Acionando matriz de controle climático orbital: Céu limpo estabelecido, Número Um."))
 
-        (and (or (str/includes? lower "picard")
-                 (str/includes? lower "engage")
-                 (str/includes? lower "engajar"))
-             (or (str/includes? lower "engajar")
-                 (str/includes? lower "engage")
-                 (str/includes? lower "dobra")))
-        (do
-          (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
-          (record-cognitive-event! engine-ctx-atom :motor "Picard Helm" "Acionando Dobra 9")
-          (transport/send-bridge-cmd! "SWING|Picard")
-          (transport/send-bridge-cmd! "CMD|playsound minecraft:block.beacon.power_select master @a -65 145 100 1.0 1.2")
-          (picard/picard-say! "Make it so! Dobra 9 acionada, leme à frente!"))
+         (and (or (str/includes? lower "picard")
+                  (str/includes? lower "engage")
+                  (str/includes? lower "engajar"))
+              (or (str/includes? lower "engajar")
+                  (str/includes? lower "engage")
+                  (str/includes? lower "dobra")))
+         (do
+           (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+           (record-cognitive-event! engine-ctx-atom :motor "Picard Helm" "Acionando Dobra 9")
+           (transport/send-bridge-cmd! "SWING|Picard")
+           (transport/send-bridge-cmd! "CMD|playsound minecraft:block.beacon.power_select master @a -65 145 100 1.0 1.2")
+           (picard/picard-say! "Make it so! Dobra 9 acionada, leme à frente!"))
 
-        (and (or (str/includes? lower "picard")
-                 (str/includes? lower "earl grey"))
-             (or (str/includes? lower "cha")
-                 (str/includes? lower "chá")
-                 (str/includes? lower "tea")
-                 (str/includes? lower "earl grey")))
-        (do
-          (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
-          (picard/picard-say! "Tea. Earl Grey. Hot. Nada como um bom chá para clarear os pensamentos na ponte, Número Um."))
+         (and (or (str/includes? lower "picard")
+                  (str/includes? lower "earl grey"))
+              (or (str/includes? lower "cha")
+                  (str/includes? lower "chá")
+                  (str/includes? lower "tea")
+                  (str/includes? lower "earl grey")))
+         (do
+           (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+           (picard/picard-say! "Tea. Earl Grey. Hot. Nada como um bom chá para clarear os pensamentos na ponte, Número Um."))
 
-        (and (or (str/includes? lower "picard")
-                 (str/includes? lower "capitao")
-                 (str/includes? lower "capitão"))
-             (or (str/includes? lower "vem")
-                 (str/includes? lower "seguir")
-                 (str/includes? lower "acompanhe")))
-        (do
-          (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
-          (record-cognitive-event! engine-ctx-atom :motor "Picard Away Team" (str "Acompanhando " speaker))
-          (swap! picard-state assoc :mode :follow :follow-target speaker)
-          (picard/picard-say! (str "Com prazer, " speaker ". Acompanhando você em missão de superfície.")))
+         (and (not (some #{:picard} (addressing/addressed-agents msg)))
+              (or (str/includes? lower "picard")
+                  (str/includes? lower "capitao")
+                  (str/includes? lower "capitão"))
+              (or (str/includes? lower "vem")
+                  (str/includes? lower "seguir")
+                  (str/includes? lower "acompanhe")))
+         (do
+           (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+           (record-cognitive-event! engine-ctx-atom :motor "Picard Away Team" (str "Acompanhando " speaker))
+           (swap! picard-state assoc :mode :follow :follow-target speaker)
+           (picard/picard-say! (str "Com prazer, " speaker ". Acompanhando você em missão de superfície.")))
 
-        (and (or (str/includes? lower "picard")
-                 (str/includes? lower "capitao")
-                 (str/includes? lower "capitão"))
-             (or (str/includes? lower "ponte")
-                 (str/includes? lower "voltar")
-                 (str/includes? lower "posto")))
-        (do
-          (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
-          (record-cognitive-event! engine-ctx-atom :motor "Picard Bridge" "Retornando à ponte")
-          (swap! picard-state assoc :mode :bridge-command :follow-target nil :pos [-65.0 145.0 101.0] :phase :walk)
-          (transport/send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
-          (picard/picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))))
+         (and (or (str/includes? lower "picard")
+                  (str/includes? lower "capitao")
+                  (str/includes? lower "capitão"))
+              (or (str/includes? lower "ponte")
+                  (str/includes? lower "voltar")
+                  (str/includes? lower "posto")))
+         (do
+           (record-cognitive-event! engine-ctx-atom :stimulus speaker msg)
+           (record-cognitive-event! engine-ctx-atom :motor "Picard Bridge" "Retornando à ponte")
+           (swap! picard-state assoc :mode :bridge-command :follow-target nil :pos [-65.0 145.0 101.0] :phase :walk)
+           (transport/send-bridge-cmd! "MOVE|Picard|-65.0|145.0|101.0|0.0|0.0|false|false")
+           (picard/picard-say! "Entendido. Retornando por teletransporte ao meu posto na ponte da Enterprise-D.")))))))
 
 (defonce ^:private log-file-pos (atom 0))
 (def ^:private server-log-path "/home/pace/dev/minecraft/server/logs/latest.log")

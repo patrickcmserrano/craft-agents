@@ -84,8 +84,9 @@
             (dispatch/say! ctx (str "Soldado, não consegui aprender essa habilidade: " msg ". Tente algo como 'karlach aprenda danca-e-senta: dance e sente no sofa'!"))))))))
 
 (defmethod execute-goal! :execute-dynamic-skill
-  [{:goal/keys [skill-id speaker]} {engine-ctx-atom :engine-ctx nav-state :state sanctuary-route :sanctuary-route :as ctx}]
-  (let [skills-dir (io/file "skills")
+  [{:goal/keys [skill-id speaker]} {engine-ctx-atom :engine-ctx sanctuary-route :sanctuary-route :as ctx}]
+  (let [nav-state  (dispatch/nav-state ctx)
+        skills-dir (io/file "skills")
         skill-file (io/file skills-dir (str (clojure.core/name skill-id) ".edn"))]
     (if (.exists skill-file)
       (let [skill-def  (try (edn/read-string (slurp skill-file)) (catch Throwable _ nil))
@@ -96,5 +97,5 @@
         (dispatch/say! ctx (str "Executando habilidade aprendida '" skill-name "', " (or speaker "soldado") "! 🔥"))
         (transport/send-bridge-cmd! (str "SWING|" (dispatch/agent-name ctx)))
         (transport/send-bridge-cmd! "CMD|playsound minecraft:entity.experience_orb.pickup master @a ~ ~ ~ 1.0 1.2")
-        (bt/execute-tree-node! skill-tree engine-ctx-atom nav-state sanctuary-route speaker (:agent ctx)))
+        (bt/execute-tree-node! skill-tree engine-ctx-atom nav-state sanctuary-route speaker (dispatch/agent-spec ctx)))
       (dispatch/say! ctx (str "Não encontrei os registros da skill " skill-id " no meu córtex, " (or speaker "soldado") "!")))))

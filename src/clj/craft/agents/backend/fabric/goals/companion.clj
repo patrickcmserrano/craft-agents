@@ -16,32 +16,35 @@
   (transport/send-bridge-cmd! (str "CMD|execute at " nm " run particle minecraft:portal ~ ~1 ~ 0.5 0.8 0.5 0.1 " particles " normal")))
 
 (defmethod execute-goal! :teleport-to-player
-  [{:goal/keys [target voice-line]} {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
-  (let [nm (dispatch/agent-name ctx)]
+  [{:goal/keys [target voice-line]} {engine-ctx-atom :engine-ctx :as ctx}]
+  (let [nav-state (dispatch/nav-state ctx)
+        nm        (dispatch/agent-name ctx)]
     (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Teleporte intencional solicitado para " target))
     (let [players (actions/query-online-players)
           target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
-          tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (:pos @nav-state))]
+          tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] (when nav-state (:pos @nav-state)))]
       (when target-p
         (emergency-teleport! nm target-p 35)
-        (swap! nav-state assoc
-               :mode :bodyguard
-               :pos tgt-pos
-               :follow-target target
-               :follow-path []
-               :follow-last-target [0.0 0.0 0.0]
-               :follow-lost-ticks 0
-               :steps []
-               :active-mining nil))
+        (when nav-state
+          (swap! nav-state assoc
+                 :mode :bodyguard
+                 :pos tgt-pos
+                 :follow-target target
+                 :follow-path []
+                 :follow-last-target [0.0 0.0 0.0]
+                 :follow-lost-ticks 0
+                 :steps []
+                 :active-mining nil)))
       (dispatch/say! ctx voice-line))))
 
 (defmethod execute-goal! :follow-player
-  [{:goal/keys [target voice-line]} {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
-  (let [nm (dispatch/agent-name ctx)]
+  [{:goal/keys [target voice-line]} {engine-ctx-atom :engine-ctx :as ctx}]
+  (let [nav-state (dispatch/nav-state ctx)
+        nm        (dispatch/agent-name ctx)]
     (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Seguindo jogador " target))
     (let [players (try (actions/query-online-players) (catch Throwable _ []))
           target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
-          [cx cy cz] (or (:pos @nav-state) [-175.0 65.0 180.0])
+          [cx cy cz] (or (when nav-state (:pos @nav-state)) [-175.0 65.0 180.0])
           tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] [cx cy cz])
           dist-to-p (if target-p
                       (Math/sqrt (+ (Math/pow (- (:x target-p) cx) 2)
@@ -51,26 +54,28 @@
       ;; Teleporte apenas de emergencia se estiver muito distante (> 48m / outro bioma)
       (when (and target-p (> dist-to-p 48.0))
         (emergency-teleport! nm target-p 20))
-      (swap! nav-state assoc
-             :mode :follow
-             :pos (if (> dist-to-p 48.0) tgt-pos [cx cy cz])
-             :follow-target target
-             :follow-path (if (and target-p (<= dist-to-p 48.0))
-                            (or (nav/request-path3d [cx cy cz] tgt-pos 2.2) [])
-                            [])
-             :follow-last-target [0.0 0.0 0.0]
-             :follow-lost-ticks 0
-             :steps [])
+      (when nav-state
+        (swap! nav-state assoc
+               :mode :follow
+               :pos (if (> dist-to-p 48.0) tgt-pos [cx cy cz])
+               :follow-target target
+               :follow-path (if (and target-p (<= dist-to-p 48.0))
+                              (or (nav/request-path3d [cx cy cz] tgt-pos 2.2) [])
+                              [])
+               :follow-last-target [0.0 0.0 0.0]
+               :follow-lost-ticks 0
+               :steps []))
       (when voice-line
         (dispatch/say! ctx voice-line)))))
 
 (defmethod execute-goal! :bodyguard
-  [{:goal/keys [target voice-line]} {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
-  (let [nm (dispatch/agent-name ctx)]
+  [{:goal/keys [target voice-line]} {engine-ctx-atom :engine-ctx :as ctx}]
+  (let [nav-state (dispatch/nav-state ctx)
+        nm        (dispatch/agent-name ctx)]
     (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" (str "Modo Guarda-Costas ativado para " target))
     (let [players (actions/query-online-players)
           target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or target "pace"))) players))
-          [cx cy cz] (:pos @nav-state)
+          [cx cy cz] (or (when nav-state (:pos @nav-state)) [-175.0 65.0 180.0])
           tgt-pos (if target-p [(:x target-p) (:y target-p) (:z target-p)] [cx cy cz])
           dist-to-p (if target-p
                       (Math/sqrt (+ (Math/pow (- (:x target-p) cx) 2)
@@ -84,26 +89,28 @@
       (transport/send-bridge-cmd! (str "CMD|item replace entity " nm " weapon.offhand with minecraft:shield"))
       (transport/send-bridge-cmd! "CMD|playsound minecraft:item.armor.equip_netherite master @a ~ ~ ~ 1.0 1.0")
       (transport/send-bridge-cmd! (str "SWING|" nm))
-      (swap! nav-state assoc
-             :mode :bodyguard
-             :pos (if (> dist-to-p 48.0) tgt-pos [cx cy cz])
-             :follow-target target
-             :follow-path (if (and target-p (<= dist-to-p 48.0))
-                            (or (nav/request-path3d [cx cy cz] tgt-pos 2.2) [])
-                            [])
-             :follow-last-target [0.0 0.0 0.0]
-             :follow-lost-ticks 0
-             :steps []))
+      (when nav-state
+        (swap! nav-state assoc
+               :mode :bodyguard
+               :pos (if (> dist-to-p 48.0) tgt-pos [cx cy cz])
+               :follow-target target
+               :follow-path (if (and target-p (<= dist-to-p 48.0))
+                              (or (nav/request-path3d [cx cy cz] tgt-pos 2.2) [])
+                              [])
+               :follow-last-target [0.0 0.0 0.0]
+               :follow-lost-ticks 0
+               :steps [])))
     (when engine-ctx-atom
       (swap! engine-ctx-atom assoc-in [:agents (dispatch/agent-id ctx) :task] (str "Guarda-Costas de " target)))
     (dispatch/say! ctx voice-line)))
 
 (defmethod execute-goal! :spatial-attention
-  [{:goal/keys [entity speaker]} {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
-  (let [nm (dispatch/agent-name ctx)
-        players (actions/query-online-players)
-        target-p (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or speaker "pace"))) players))
-        [cx cy cz] (:pos @nav-state)]
+  [{:goal/keys [entity speaker]} {engine-ctx-atom :engine-ctx :as ctx}]
+  (let [nav-state (dispatch/nav-state ctx)
+        nm        (dispatch/agent-name ctx)
+        players   (actions/query-online-players)
+        target-p  (first (filter #(= (str/lower-case (:name %)) (str/lower-case (or speaker "pace"))) players))
+        [cx cy cz] (or (when nav-state (:pos @nav-state)) [-175.0 65.0 180.0])]
     (if target-p
       (let [px (:x target-p)
             py (:y target-p)
@@ -112,14 +119,17 @@
             dz (- pz cz)
             look-yaw (nav/compute-yaw dx dz)]
         (transport/send-bridge-cmd! (uformat "MOVE|%s|%.3f|%.3f|%.3f|%.1f|0.0|false|false" nm cx cy cz look-yaw))
-        (swap! nav-state assoc :yaw look-yaw)
+        (when nav-state
+          (swap! nav-state assoc :yaw look-yaw))
         (record-cognitive-event! engine-ctx-atom :grounding "Percepção Espacial (Joint Attention)"
                                  (str "Olhando para " speaker " em [" (int px) " " (int pz) "] identificando " entity))
         (dispatch/say! ctx (str "Tô vendo sim, " speaker "! Um " entity " bem aí perto de você, do lado de fora do muro!")))
       (dispatch/say! ctx (str "Onde, " speaker "? Não tô conseguindo te ver por aqui!")))))
 
 (defmethod execute-goal! :social-dance
-  [{:goal/keys [voice-line]} {engine-ctx-atom :engine-ctx nav-state :state :as ctx}]
-  (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Executando animação de dança infernal")
-  (swap! nav-state assoc :dance-ticks 80)
-  (dispatch/say! ctx voice-line))
+  [{:goal/keys [voice-line]} {engine-ctx-atom :engine-ctx :as ctx}]
+  (let [nav-state (dispatch/nav-state ctx)]
+    (record-cognitive-event! engine-ctx-atom :motor "System 1 Motor Controller" "Executando animação de dança infernal")
+    (when nav-state
+      (swap! nav-state assoc :dance-ticks 80))
+    (dispatch/say! ctx voice-line)))

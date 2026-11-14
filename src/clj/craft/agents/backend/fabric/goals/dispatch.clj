@@ -19,11 +19,37 @@
 (def role-goals
   "Metas de papel: tipo da meta -> capacidade exigida em `:agent/capabilities`."
   {:animal-rescue    :animal-rescue
-   :breed-animals    :breed-animals
-   :patrol-sanctuary :patrol-sanctuary})
+  :breed-animals    :breed-animals
+  :patrol-sanctuary :patrol-sanctuary})
 
-(defn agent-id [ctx] (get-in ctx [:agent :agent/id]))
-(defn agent-name [ctx] (get-in ctx [:agent :agent/name]))
+(def ^:private karlach-fallback
+  {:agent/id :karlach :agent/name "Karlach"
+   :agent/capabilities (set (vals role-goals))})
+
+(defn karlach-agent
+  "Spec da Karlach no registro (com fallback se o registro nao a tem)."
+  []
+  (or (registry/agent-by-id :karlach) karlach-fallback))
+
+(defn agent-id [ctx]
+  (or (:agent-id ctx)
+      (get-in ctx [:agent :agent/id])))
+
+(defn agent-spec [ctx]
+  (or (:agent ctx)
+      (when-let [id (agent-id ctx)]
+        (if (= :karlach id)
+          (karlach-agent)
+          (registry/agent-by-id id)))))
+
+(defn agent-name [ctx]
+  (or (:agent-name ctx)
+      (get-in ctx [:agent :agent/name])
+      (:agent/name (agent-spec ctx))))
+
+(defn nav-state [ctx]
+  (or (:nav-state ctx)
+      (:state ctx)))
 
 (defn say!
   "Fala `msg` como o agente do contexto (voz do registro). A Karlach mantem o caminho
@@ -37,8 +63,9 @@
   "A capacidade que `goal-spec` exige e o agente do `ctx` nao declara, ou `nil`."
   [goal-spec ctx]
   (when-let [cap (get role-goals (:goal/type goal-spec))]
-    (when-not (contains? (get-in ctx [:agent :agent/capabilities]) cap)
-      cap)))
+    (let [spec (agent-spec ctx)]
+      (when-not (contains? (:agent/capabilities spec) cap)
+        cap))))
 
 (defmulti execute-goal!
   "Despacha a meta cognitiva fundamentada para atuacao fisica e telemetria (CA-040, CA-091)."
@@ -64,22 +91,17 @@
 ;; Wrapper legado da Karlach
 ;; ----------------------------------------------------------------------------
 
-(def ^:private karlach-fallback
-  {:agent/id :karlach :agent/name "Karlach"
-   :agent/capabilities (set (vals role-goals))})
-
-(defn karlach-agent
-  "Spec da Karlach no registro (com fallback se o registro nao a tem)."
-  []
-  (or (registry/agent-by-id :karlach) karlach-fallback))
-
 (defn karlach-ctx
   "Contexto de `execute-goal!` para a Karlach."
   [engine-ctx-atom nav-state sanctuary-route]
-  {:agent (karlach-agent)
-   :state nav-state
-   :engine-ctx engine-ctx-atom
-   :sanctuary-route sanctuary-route})
+  (let [spec (karlach-agent)]
+    {:agent spec
+     :agent-id (:agent/id spec)
+     :agent-name (:agent/name spec)
+     :state nav-state
+     :nav-state nav-state
+     :engine-ctx engine-ctx-atom
+     :sanctuary-route sanctuary-route}))
 
 (defmulti execute-karlach-goal!
   "Wrapper: despacha a meta com o contexto da Karlach. A fachada registra um metodo por
