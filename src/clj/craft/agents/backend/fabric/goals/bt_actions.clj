@@ -69,6 +69,72 @@
     (swap! engine-ctx-atom assoc-in [:cooldowns (:key params)]
            (or (:now-ms @engine-ctx-atom) (System/currentTimeMillis)))))
 
+(defn eval-condition
+  "Avalia a condicao `cond-id` de um nó :guard/:condition contra engine-ctx e nav-state."
+  [cond-id args engine-ctx-atom nav-state agent-id]
+  (case cond-id
+    (:leader-in-vehicle? :leader-in-boat?)
+    (boolean (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
+                 (get-in @engine-ctx-atom [:leader :in-vehicle?])
+                 (:leader-in-vehicle? @nav-state)))
+
+    (:self-in-vehicle? :self-in-boat?)
+    (boolean (or (:in-vehicle? @nav-state)
+                 (get-in @engine-ctx-atom [:perception :self :in-vehicle?])
+                 (get-in @engine-ctx-atom [:agents agent-id :in-vehicle?])))
+
+    :not-self-in-vehicle?
+    (not (or (:in-vehicle? @nav-state)
+             (get-in @engine-ctx-atom [:perception :self :in-vehicle?])
+             (get-in @engine-ctx-atom [:agents agent-id :in-vehicle?])))
+
+    :not-leader-in-vehicle?
+    (not (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
+             (get-in @engine-ctx-atom [:leader :in-vehicle?])
+             (:leader-in-vehicle? @nav-state)))
+
+    :self-in-same-vehicle?
+    (let [self-in   (boolean (or (:in-vehicle? @nav-state)
+                                 (get-in @engine-ctx-atom [:perception :self :in-vehicle?])))
+          leader-in (boolean (or (get-in @engine-ctx-atom [:perception :leader :in-vehicle?])
+                                 (:leader-in-vehicle? @nav-state)))
+          self-vid  (or (:vehicle-id @nav-state)
+                        (get-in @engine-ctx-atom [:perception :self :vehicle-id]))
+          lead-vid  (or (get-in @engine-ctx-atom [:perception :leader :vehicle :id])
+                        (get-in @engine-ctx-atom [:perception :leader :vehicle-id]))]
+      (and self-in leader-in (or (= self-vid lead-vid) (and (nil? self-vid) (nil? lead-vid)))))
+
+    :leader-vehicle-has-seat?
+    (let [free-seats (get-in @engine-ctx-atom [:perception :leader :vehicle :free-seats]
+                             (get-in @engine-ctx-atom [:leader :vehicle :free-seats] 1))]
+      (pos? free-seats))
+
+    :within-mount-range?
+    (let [dist (or (get-in @engine-ctx-atom [:perception :leader :distance])
+                   (:leader-distance @nav-state)
+                   2.0)]
+      (<= dist 3.5))
+
+    :has-active-directive?
+    (boolean (or (get-in @engine-ctx-atom [:active-directive])
+                 (get-in @engine-ctx-atom [:directive])))
+
+    :hostile-nearby?
+    (let [radius (or (:radius (second args)) 10.0)]
+      (boolean (some #(<= (:distance %) radius) (get-in @engine-ctx-atom [:perception :hostiles] []))))
+
+    (:ally-within-range? :interesting-block-nearby? :cooldown-ready?)
+    (guard-holds? cond-id (second args) (guard-world engine-ctx-atom nav-state agent-id))
+
+    :ally-distance-exceeds?
+    (let [min-dist (or (:min-dist (second args)) 8.0)
+          cur-dist (or (get-in @engine-ctx-atom [:perception :ally :distance]) 2.5)]
+      (> cur-dist min-dist))
+
+    :in-quiet-corner? true
+
+    true))
+
 ;; ----------------------------------------------------------------------------
 ;; Registro extensivel de acoes de BT
 ;; ----------------------------------------------------------------------------

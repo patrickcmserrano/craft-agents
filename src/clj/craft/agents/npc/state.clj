@@ -5,6 +5,8 @@
    `{:pos <spawn do registro> :mode :idle :path [] :watchdog nil
      :cooldowns {} :events [] :leases {:legs nil :hands nil :gaze nil}}`.
    Um estado inicial opcional e mesclado sobre os defaults, apenas na criacao.
+   Memoria de Behavior Tree (CA-106): `:bt-memory` (`node-path -> memoria`) e `:bt-tick` (contador
+   de ticks de BT) vivem no atomo do agente e nascem sob demanda.
    O mapa vive em `(:agent-states @ctx)`; `ctx` e o atom do engine-ctx."
   (:require [craft.agents.npc.registry :as registry]))
 
@@ -100,6 +102,57 @@
   "Retorna o vetor de eventos isolados do agente `id` (CA-101)."
   [ctx id]
   (vec (or (:events (read-agent-state ctx id)) [])))
+
+;; ----------------------------------------------------------------------------
+;; Memoria de Behavior Tree por agente e caminho de no (CA-106)
+;; ----------------------------------------------------------------------------
+
+(defn bt-tick
+  "Contador de ticks de BT do agente `id` (0 antes do primeiro tick)."
+  [ctx id]
+  (long (or (:bt-tick (read-agent-state ctx id)) 0)))
+
+(defn advance-bt-tick!
+  "Avanca e devolve o contador de ticks de BT do agente `id` (um por avaliacao da raiz)."
+  [ctx id]
+  (:bt-tick (swap! (agent-atom ctx id) update :bt-tick (fnil inc 0))))
+
+(defn bt-memory
+  "Mapa `node-path -> memoria` de BT do agente `id`, em `[:agent-states id :bt-memory]`."
+  [ctx id]
+  (or (:bt-memory (read-agent-state ctx id)) {}))
+
+(defn bt-node-memory
+  "Memoria do no em `node-path` (vetor de indices) do agente `id`; nil se nao houver."
+  [ctx id node-path]
+  (get (bt-memory ctx id) node-path))
+
+(defn set-bt-node-memory!
+  "Grava a memoria do no `node-path` do agente `id`. Devolve `mem`."
+  [ctx id node-path mem]
+  (swap! (agent-atom ctx id) update :bt-memory (fn [m] (assoc (or m {}) node-path mem)))
+  mem)
+
+(defn clear-bt-node-memory!
+  "Remove a memoria do no `node-path` do agente `id`."
+  [ctx id node-path]
+  (swap! (agent-atom ctx id) update :bt-memory (fn [m] (dissoc (or m {}) node-path)))
+  nil)
+
+(defn- path-under?
+  [prefix path]
+  (and (> (count path) (count prefix))
+       (= prefix (subvec (vec path) 0 (count prefix)))))
+
+(defn forget-bt-subtree!
+  "Esquece a memoria *em andamento* dos descendentes de `node-path` (o proprio no nao).
+   Memorias com `:until` (cooldown armado) sobrevivem: cadencia nao e progresso de execucao."
+  [ctx id node-path]
+  (swap! (agent-atom ctx id) update :bt-memory
+         (fn [m] (into {} (remove (fn [[p v]] (and (path-under? node-path p)
+                                                   (not (contains? v :until)))))
+                       m)))
+  nil)
 
 (defn agent-leases
   "Retorna (aridade 2) ou atualiza (aridade 3) o mapa `:leases` isolado do agente `id` em `(:agent-states @ctx)` (CA-101)."
