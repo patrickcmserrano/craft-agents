@@ -8,50 +8,28 @@
    sao registrados pela fachada goals.clj."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [craft.agents.backend.fabric.engine.combat :as combat]
             [craft.agents.backend.fabric.goals.bt-actions :as bt-actions]
-            [craft.agents.backend.fabric.goals.dispatch :as dispatch :refer [execute-goal!]]
-            [craft.agents.backend.fabric.transport :as transport]
+            [craft.agents.backend.fabric.goals.dispatch :as dispatch]
             [craft.agents.bt.core :as core]
             [craft.agents.npc.body :as body]
-            [craft.agents.npc.registry :as registry]
             [craft.agents.npc.state :as npc-state]))
 
-;; Guards puros e registro de acoes (CA-094) vivem em goals.bt-actions; reexportados aqui.
+;; Guards fail-closed (eval-guard) e o registro unico de acoes (CA-094, CA-108) vivem em
+;; goals.bt-actions; reexportados aqui. Nao ha `case` de acoes neste arquivo.
 (def bt-action bt-actions/bt-action)
+(def eval-guard bt-actions/eval-guard)
 (def guard-holds? bt-actions/guard-holds?)
+(def register-action! bt-actions/register-action!)
+(def unregister-action! bt-actions/unregister-action!)
+(def registered-actions bt-actions/registered-actions)
+(def known-action-ids bt-actions/known-action-ids)
 (def ^:private stamp-cooldowns! bt-actions/stamp-cooldowns!)
 
 (def ^:private eval-condition bt-actions/eval-condition)
 
-(defn- goal-action
-  "Acao de BT que delega a uma meta do multimethod. Devolve {:status :success :action-id result-id}."
-  [goal-type result-id extra ctx speaker]
-  (execute-goal! (merge {:goal/type goal-type :goal/speaker speaker} extra) ctx)
-  {:status :success :action-id result-id})
-
-(defn- evade-towards-ally!
-  "Acao `:evade-towards-ally` (CA-093): decide por `combat-decision` (politica :flee) e, se ha
-   fuga, delega a meta :follow-player rumo ao aliado mais proximo (`goal!`). Aliados: `:ally-ids`
-   da acao ou o `:flee-target` dos traits; posicoes vem de `[:agents id :pos]` do engine-ctx.
-   Sem hostil ou sem posicao de aliado conhecida devolve :failure (o selector segue adiante)."
-  [action-args engine-ctx-atom nav-state agent goal!]
-  (let [ctx       @engine-ctx-atom
-        allies    (into {} (keep (fn [[id a]] (when-let [p (:pos a)] [id (vec p)]))) (:agents ctx))
-        decision  (combat/combat-decision
-                   (assoc agent :agent/combat-policy :flee)
-                   {:bot-pos  (:pos @nav-state)
-                    :hostiles (get-in ctx [:perception :hostiles] [])
-                    :allies   allies
-                    :ally-ids (:ally-ids action-args)})
-        ally-name (some-> (:ally-id decision) registry/agent-by-id :agent/name)]
-    (if (and (= :evade-towards-ally (:action decision)) ally-name)
-      (goal! :follow-player :evade-towards-ally {:goal/target ally-name})
-      {:status :failure :action :evade-towards-ally})))
-
 (defn- execute-action-node
-  "Executa um nó :action: macro (arquivo skills/ ou :composite-skills), meta embutida,
-   som/fala ou acao modular de skills.actions."
+  "Executa um nó :action: macro (arquivo skills/ ou :composite-skills) ou, senao, `bt-action`,
+   que resolve pelo registro unico de acoes (goals.bt-actions) e pelas acoes modulares."
   [action-id action-args engine-ctx-atom nav-state sanctuary-route speaker agent run-macro]
   (let [macro-file (io/file (io/file "skills") (str (clojure.core/name action-id) ".edn"))
         macro-def  (when (.exists macro-file)
@@ -59,38 +37,11 @@
         macro-tree (or (:skill/tree macro-def)
                        (get-in @engine-ctx-atom [:composite-skills action-id]))
         ctx        {:agent agent :state nav-state :engine-ctx engine-ctx-atom
-                    :sanctuary-route sanctuary-route}
-        goal!      (fn [goal-type result-id extra]
-                     (goal-action goal-type result-id extra ctx speaker))]
+                    :sanctuary-route sanctuary-route}]
     (if macro-tree
       (run-macro macro-tree)
       (try
-        (case action-id
-          :social-dance        (do (execute-goal! {:goal/type :social-dance :goal/voice-line "Olha o passinho de vitória! 🔥"}
-                                                  ctx)
-                                   {:status :success :action-id :social-dance})
-          :sit-furniture       (goal! :sit-furniture :sit-furniture {})
-          :stand-up            (goal! :stand-up :stand-up {})
-          :patrol-sanctuary    (goal! :patrol-sanctuary :patrol-sanctuary {})
-          :breed-animals       (goal! :breed-animals :breed-animals {})
-          :follow-player       (goal! :follow-player :follow-player {})
-          :walk-towards-leader (goal! :follow-player :walk-towards-leader {})
-          :bodyguard           (goal! :bodyguard :bodyguard {})
-          :mining-cooperation  (goal! :mining-cooperation :mining-cooperation {:goal/filter (:target action-args "diamond")})
-          :drop-inventory      (goal! :drop-inventory :drop-inventory {})
-          :teleport-to-player  (goal! :teleport-to-player :teleport-to-player {})
-          :move-to-quarters    (goal! :weather-shelter :move-to-quarters {})
-          :evade-towards-ally  (evade-towards-ally! action-args engine-ctx-atom nav-state agent goal!)
-
-          :say-message
-          (do (dispatch/say! ctx (or (:text action-args) "Comando concluído com sucesso, soldado!"))
-              {:status :success :action-id :say-message})
-
-          :play-sound
-          (do (transport/send-bridge-cmd! (str "CMD|playsound " (:sound action-args "minecraft:entity.experience_orb.pickup") " master @a ~ ~ ~ 1.0 1.0"))
-              {:status :success :action-id :play-sound})
-
-          (bt-action action-id action-args (assoc ctx :speaker speaker)))
+        (bt-action action-id action-args (assoc ctx :speaker speaker))
         (catch Throwable _
           {:status :failure :action action-id})))))
 

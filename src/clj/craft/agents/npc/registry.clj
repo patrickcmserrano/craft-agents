@@ -55,10 +55,27 @@
       {:error {:file (.getPath f)
                :message (str "EDN ilegivel: " (ex-message e))}})))
 
-(defn- validate-file [^java.io.File f]
+(defn- tree-action-ids
+  "Ids de todos os nos `[:action id ...]` de uma arvore de BT (guards/conditions nao contam)."
+  [node]
+  (when (vector? node)
+    (if (= :action (first node))
+      [(second node)]
+      (mapcat tree-action-ids (rest node)))))
+
+(defn unknown-actions
+  "Conjunto das `:action` referenciadas em `:bt/root` de `spec` que nao estao em `known` (CA-108)."
+  [spec known]
+  (into #{} (remove (set known)) (tree-action-ids (:bt/root spec))))
+
+(defn- validate-file [^java.io.File f known-actions]
   (let [{:keys [spec error]} (read-spec f)]
     (cond
       error {:error error}
+      (and (m/validate AgentSpec spec) known-actions (seq (unknown-actions spec known-actions)))
+      {:error {:file (.getPath f)
+               :message (str "Agente invalido em " (.getName f) ": acao fora do registro de acoes: "
+                             (pr-str (sort (unknown-actions spec known-actions))))}}
       (m/validate AgentSpec spec) {:spec spec}
       :else (let [explain (m/explain AgentSpec spec)]
               {:error {:file (.getPath f)
@@ -68,13 +85,16 @@
                        :explain explain}}))))
 
 (defn load-agents
-  "Carrega os `*.edn` de `dir` (default \"agents\"), sem descer em subdiretorios."
+  "Carrega os `*.edn` de `dir` (default \"agents\"), sem descer em subdiretorios. Com
+   `{:known-actions #{...}}` (CA-108) rejeita o agente cujo `:bt/root` referencia `:action` fora
+   do registro de acoes (ex.: `bt-actions/known-action-ids`); sem a opcao nada muda."
   ([] (load-agents default-dir))
-  ([dir]
+  ([dir] (load-agents dir nil))
+  ([dir {:keys [known-actions]}]
    (let [files (->> (.listFiles (io/file dir))
                     (filter #(and (.isFile ^java.io.File %) (str/ends-with? (.getName ^java.io.File %) ".edn")))
                     (sort-by #(.getName ^java.io.File %)))
-         results (map validate-file files)]
+         results (map #(validate-file % known-actions) files)]
      {:agents (into (sorted-map) (map (juxt :agent/id identity)) (keep :spec results))
       :errors (vec (keep :error results))})))
 
