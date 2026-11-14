@@ -39,7 +39,8 @@
             [craft.agents.npc-docs-test]
             [craft.agents.npc-perception-tick-test]
             [craft.agents.npc-body-test]
-            [craft.agents.npc-body-guard-test]))
+            [craft.agents.npc-body-guard-test]
+            [craft.agents.npc-body-integration-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -80,7 +81,8 @@
    {:epic 35 :title "CA-096 — Invariantes estruturais do NPC Core (tamanho, perfis, cobertura de metas)" :ns 'craft.agents.npc-docs-test}
    {:epic 36 :title "CA-100 — Snapshot unico de percepcao por tick e metricas de tick" :ns 'craft.agents.npc-perception-tick-test}
    {:epic 37 :title "CA-102 — Arbitro unico de atuadores corporais (npc.body)" :ns 'craft.agents.npc-body-test}
-   {:epic 38 :title "CA-104 — Guarda global contra \"MOVE| fora de npc.body e BT sob arbitragem unica" :ns 'craft.agents.npc-body-guard-test}])
+   {:epic 38 :title "CA-104 — Guarda global contra \"MOVE| fora de npc.body e BT sob arbitragem unica" :ns 'craft.agents.npc-body-guard-test}
+   {:epic 39 :title "CA-105 — Integracao multi-agente da sprint body-01 (corpo, percepcao, estado, chat)" :ns 'craft.agents.npc-body-integration-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
