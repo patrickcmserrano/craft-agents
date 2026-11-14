@@ -216,21 +216,22 @@
    a partir de `bt-self-pos`), depois flush!. `pre` roda dentro do tick antes do atelie. Devolve
    {:cmds (todas as linhas enviadas ao transport) :before-flush (linhas antes do flush!)}."
   [coco-st bt-self-pos look-pos pre]
-  (let [begin! (body-fn 'begin-tick!) flush! (body-fn 'flush!) reset! (body-fn 'reset-buffer!)
+  (let [begin! (body-fn 'begin-tick!) flush! (body-fn 'flush!) clear! (body-fn 'reset-buffer!)
         cmds   (atom [])
         ectx   (atom {:agents {:richeh {:pos look-pos}}})
         st     (npc-state/agent-atom ectx :coco {:pos bt-self-pos})
         before (atom nil)]
     (with-redefs [transport/send-bridge-cmd! (fn [c] (swap! cmds conj c) "OK")
                   actions/query-online-players (fn [] [])]
-      (reset!)
+      (clear!)
       (begin!)
-      (pre)
-      (atelier-behavior/step-coco-tick! coco-st transport/send-bridge-cmd! 1 [])
-      (goals/execute-tree-node! [:action :face-entity {:target :richeh}] ectx st [] "Pace"
-                                (registry/agent-by-id :coco))
-      (reset! before @cmds)
-      (flush!))
+      (try
+        (pre)
+        (atelier-behavior/step-coco-tick! coco-st transport/send-bridge-cmd! 1 [])
+        (goals/execute-tree-node! [:action :face-entity {:target :richeh}] ectx st [] "Pace"
+                                  (registry/agent-by-id :coco))
+        (reset! before @cmds)
+        (finally (flush!))))
     {:cmds @cmds :before-flush @before}))
 
 (defn- coco-moves [cmds] (filter #(str/starts-with? % "MOVE|Coco|") cmds))
