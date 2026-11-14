@@ -1,6 +1,7 @@
 # 13 — Backlog: NPC Core (capacidades da Karlach compartilhadas por todos os NPCs)
 
 > **Status:** Sprint `npc-core-01` planejada · agendada para 2026-11-13 01:31 BRT (retomada automática de hora em hora até 12:31)
+> **Continuação:** a sprint `body-01` (`CA-098`..`CA-105`, árbitro único de atuadores `npc.body`, snapshot único de percepção e estado isolado por agente) foi fechada em 2026-11-14. Cobertura automatizada e o que falta validar ao vivo: [`plans/sprint-body-01-pendencias.md`](plans/sprint-body-01-pendencias.md). Contagem atual do `make test` na entrega de `CA-105`: 377 testes, 3643 asserções, 0 failures, 0 errors (a "base verde" abaixo é a de `npc-core-01` e está desatualizada).
 > **Criado em:** 2026-11-12
 > **Base:** branch `sprint/npc-core-01` = `main` (`cf8e657`) + merge de `refactor/atelier-cleanup` (atelier em sub-namespaces com fachada). Base verde: 218 testes / 2388 asserções.
 > **Objetivo da sprint:** o que hoje é "da Karlach" mas é capacidade geral de corpo, sobrevivência, fala, comando e cognição passa a funcionar para qualquer NPC declarado em `agents/*.edn` (Karlach, Picard, Coco, Richeh). Os namespaces gigantes (`engine.clj` com 1395 linhas, `goals.clj` com 773) são quebrados como no refactor do atelier.
