@@ -447,3 +447,158 @@
     (is (= :running (bt-tick! coco tree)))
     (is (= :running (bt-tick! pic tree)) "a contagem do Picard nao herda a da Coco")
     (is (= :success (bt-tick! coco tree)))))
+
+;; ----------------------------------------------------------------------------
+;; CA-107: timeout por ticks em acoes assincronas e nucleo unico com bt/engine
+;; ----------------------------------------------------------------------------
+
+(defn- pending-for [agent-id]
+  (filter (fn [[[aid _ch] _]] (= aid agent-id)) ((body-fn 'pending))))
+
+(deftest timeout-aborts-child-stuck-running-after-n-ticks-test
+  (let [rig  (bt-rig :coco)
+        tree [:timeout {:ticks 3} (probe :slow)]]
+    (probe-reset! {:slow (vec (repeat 20 :running))})
+    (testing "durante N ticks o filho segue :running"
+      (dotimes [_ 3] (is (= :running (bt-tick! rig tree)))))
+    (is (= [:slow :slow :slow] (take-calls!)))
+    (testing "no tick N+1 o no aborta o filho preso e devolve :failure sem reexecuta-lo"
+      (is (= :failure (bt-tick! rig tree)))
+      (is (empty? (take-calls!)))
+      (is (empty? (:bt-memory @(:st rig))) "memoria do timeout e do filho descartada"))
+    (testing "depois do aborto a arvore recomeca do zero"
+      (is (= :running (bt-tick! rig tree)))
+      (is (= [:slow] (take-calls!))))))
+
+(deftest timeout-reports-reason-and-lets-fast-child-through-test
+  (let [rig (bt-rig :coco)]
+    (probe-reset! {:ok [:running :success]})
+    (is (= :running (bt-tick! rig [:timeout {:ticks 5} (probe :ok)])))
+    (is (= :success (bt-tick! rig [:timeout {:ticks 5} (probe :ok)])) "filho que conclui a tempo passa")
+    (is (empty? (:bt-memory @(:st rig))))
+    (probe-reset! {:slow (vec (repeat 5 :running))})
+    (let [tree [:timeout {:ticks 1} (probe :slow)]
+          _    (bt-tick! rig tree)
+          res  (bt/execute-tree-node! tree (:ectx rig) (:st rig) [] "Pace" (registry/agent-by-id :coco))]
+      (is (= :failure (:status res)))
+      (is (= :timeout (:reason res))))))
+
+(deftest timeout-inside-sequence-fails-the-sequence-and-restarts-test
+  (let [rig  (bt-rig :coco)
+        tree [:sequence (probe :a) [:timeout {:ticks 2} (probe :slow)] (probe :c)]]
+    (probe-reset! {:slow (vec (repeat 10 :running))})
+    (is (= :running (bt-tick! rig tree)))
+    (is (= :running (bt-tick! rig tree)))
+    (take-calls!)
+    (is (= :failure (bt-tick! rig tree)) "timeout expirado falha a sequencia")
+    (is (empty? (:bt-memory @(:st rig))))
+    (is (= [] (take-calls!)))
+    (is (= :running (bt-tick! rig tree)))
+    (is (= [:a :slow] (take-calls!)) "a sequencia recomeca do 1o filho")))
+
+(deftest timeout-ticks-on-async-action-test
+  (let [rig  (bt-rig :coco)
+        tree [:action :bt-probe {:id :slow :timeout-ticks 2}]]
+    (probe-reset! {:slow (vec (repeat 10 :running))})
+    (is (= :running (bt-tick! rig tree)))
+    (is (= :running (bt-tick! rig tree)))
+    (is (= :failure (bt-tick! rig tree)))
+    (is (= [:slow :slow] (take-calls!)))))
+
+(deftest timeout-state-is-keyed-by-agent-test
+  (let [ectx (atom {})
+        coco (bt-rig ectx :coco)
+        pic  (bt-rig ectx :picard)
+        tree [:timeout {:ticks 2} (probe :slow)]]
+    (probe-reset! {:slow (vec (repeat 20 :running))})
+    (bt-tick! coco tree)
+    (bt-tick! coco tree)
+    (is (= :running (bt-tick! pic tree)) "o relogio do Picard comeca no 1o tick dele")
+    (is (= :failure (bt-tick! coco tree)))
+    (is (= :running (bt-tick! pic tree)))))
+
+(deftest timeout-releases-pending-body-requests-and-leases-test
+  (let [rig  (bt-rig :coco)
+        lmgr ((requiring-resolve 'craft.agents.leases/create-lease-manager))
+        acq! (requiring-resolve 'craft.agents.leases/acquire-agent-leases!)
+        act  (requiring-resolve 'craft.agents.leases/active-agent-leases)
+        request! (body-fn 'request!)
+        tree [:timeout {:ticks 1} (probe :slow)]]
+    ((body-fn 'reset-buffer!))
+    (swap! (:ectx rig) assoc :lease-mgr lmgr)
+    (probe-reset! {:slow (vec (repeat 5 :running))})
+    (acq! lmgr :coco {:channels #{:legs} :owner-id :bt-probe :priority 40})
+    (acq! lmgr :coco {:channels #{:gaze} :owner-id :combat :priority 80})
+    (acq! lmgr :picard {:channels #{:legs} :owner-id :bt-probe :priority 40})
+    (request! {:agent :coco :channel :legs :source :bt :target [1.0 65.0 1.0]})
+    (request! {:agent :coco :channel :hands :source :combat :use true})
+    (request! {:agent :picard :channel :legs :source :bt :target [2.0 65.0 2.0]})
+    (is (= :running (bt-tick! rig tree)))
+    (is (= :failure (bt-tick! rig tree)))
+    (testing "lease da acao abortada e pedido pendente do :bt da Coco sao liberados"
+      (is (nil? (get-in (act lmgr :coco) [:legs :owner-id])))
+      (is (nil? (get (pending-for :coco) [:coco :legs]))))
+    (testing "o que pertence a outra fonte ou a outro agente permanece"
+      (is (= :combat (get-in (act lmgr :coco) [:gaze :owner-id])))
+      (is (some? (get (into {} (pending-for :coco)) [:coco :hands])))
+      (is (= :bt-probe (get-in (act lmgr :picard) [:legs :owner-id])))
+      (is (seq (pending-for :picard))))
+    ((body-fn 'reset-buffer!))))
+
+;; ----------------------------------------------------------------------------
+;; CA-107: ponto de entrada de bt/engine sobre o mesmo nucleo
+;; ----------------------------------------------------------------------------
+
+(defn- engine-actions
+  "Acoes de `bt/engine` que seguem o mesmo roteiro de `probe-script` (id em :params)."
+  []
+  {:bt-probe (fn [{{:keys [id]} :params}]
+               (swap! probe-calls conj id)
+               (let [[status & more] (get @probe-script id)]
+                 (swap! probe-script assoc id (vec more))
+                 {:status (or status :success)}))})
+
+(deftest engine-entry-point-shares-the-unified-core-test
+  (let [tick-tree (requiring-resolve 'craft.agents.bt.engine/tick-tree)
+        tree [:sequence (probe :a) (probe :b) (probe :c)]
+        ctx  {:actions (engine-actions) :bt-state (atom {})}]
+    (probe-reset! {:b [:running :success]})
+    (testing "mesma semantica de :running e memoria que goals.bt"
+      (is (= :running (:status (tick-tree tree ctx))))
+      (is (= [:a :b] (take-calls!)))
+      (is (= :success (:status (tick-tree tree ctx))))
+      (is (= [:b :c] (take-calls!)) "retoma do filho :running"))
+    (testing "sem :bt-state o engine segue puro e sem memoria"
+      (probe-reset! {:b [:running]})
+      (is (= :running (:status (tick-tree tree {:actions (engine-actions)}))))
+      (take-calls!)
+      (tick-tree tree {:actions (engine-actions)})
+      (is (= :a (first (take-calls!)))))
+    (testing "o nucleo comum e exposto"
+      (is (fn? @(requiring-resolve 'craft.agents.bt.core/exec-node))))))
+
+(deftest engine-supports-timeout-and-cooldown-test
+  (let [tick-tree (requiring-resolve 'craft.agents.bt.engine/tick-tree)
+        ctx  {:actions (engine-actions) :bt-state (atom {})}
+        tree [:timeout {:ticks 2} (probe :slow)]]
+    (probe-reset! {:slow (vec (repeat 10 :running))})
+    (is (= :running (:status (tick-tree tree ctx))))
+    (is (= :running (:status (tick-tree tree ctx))))
+    (is (= :failure (:status (tick-tree tree ctx))))
+    (is (= [:slow :slow] (take-calls!)))
+    (testing "ganchos :on-timeout recebem o filho abortado"
+      (let [seen (atom nil)
+            ctx2 {:actions (engine-actions) :bt-state (atom {}) :on-timeout (fn [child] (reset! seen child))}]
+        (probe-reset! {:slow (vec (repeat 10 :running))})
+        (tick-tree [:timeout {:ticks 1} (probe :slow)] ctx2)
+        (tick-tree [:timeout {:ticks 1} (probe :slow)] ctx2)
+        (is (= (probe :slow) @seen))))
+    (testing "cooldown multi-tick tambem vale no engine"
+      (let [ctx3 {:actions (engine-actions) :bt-state (atom {})}
+            t    [:cooldown {:ticks 2} (probe :x)]]
+        (probe-reset! {})
+        (is (= :success (:status (tick-tree t ctx3))))
+        (is (= :failure (:status (tick-tree t ctx3))))
+        (is (= :failure (:status (tick-tree t ctx3))))
+        (is (= :success (:status (tick-tree t ctx3))))
+        (is (= [:x :x] (take-calls!)))))))

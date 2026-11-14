@@ -250,3 +250,23 @@
               "Canal :legs de :karlach deve expirar apos 3 ticks")
           (is (= :idle-stroll (get-in (active-agent-leases lmgr :coco) [:legs :owner-id]))
               "Lease renovado de :coco (ttl 5) permanece ativo"))))))
+
+(deftest ca-107-engine-tick-tree-timeout-and-memory-test
+  (testing "CA-107: tick-tree mantem assinatura e :active-path e ganha :timeout/memoria opcionais via :bt-state"
+    (let [calls (atom 0)
+          ctx   {:bt-state (atom {})
+                 :actions {:stuck (fn [_] (swap! calls inc) {:status :running})}}
+          tree  [:selector [:timeout {:ticks 2} [:action :stuck {}]] [:action :stuck {}]]
+          out1  (bt/tick-tree tree ctx)
+          _     (bt/tick-tree tree ctx)
+          out3  (bt/tick-tree tree ctx)]
+      (is (= :running (:status out1)))
+      (is (vector? (:active-path out1)))
+      (is (= [:selector 0 :stuck] (:active-path out1)) "trace atravessa o :timeout sem poluir o caminho")
+      (is (= :running (:status out3)) "timeout falha o 1o filho e o seletor cai no irmao")
+      (is (= [:selector 1 :stuck] (:active-path out3)))
+      (is (= 3 @calls) "o filho preso nao e reexecutado apos o timeout")))
+  (testing "CA-107: arvore invalida e op desconhecida continuam com os codigos antigos"
+    (is (= :INVALID_NODE (:reason (bt/tick-tree :nope {}))))
+    (is (= :UNKNOWN_OP (:reason (bt/tick-tree [:xyz] {}))))
+    (is (= :UNKNOWN_ACTION (:reason (bt/tick-tree [:action :nope {}] {}))))))
