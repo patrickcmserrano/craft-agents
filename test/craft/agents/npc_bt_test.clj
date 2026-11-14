@@ -6,9 +6,11 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [craft.agents.backend.fabric.actions :as actions]
+            [craft.agents.backend.fabric.atelier.behavior :as atelier-behavior]
             [craft.agents.backend.fabric.engine.bt-tick :as bt-tick]
             [craft.agents.backend.fabric.goals :as goals]
             [craft.agents.backend.fabric.goals.bt :as bt]
+            [craft.agents.backend.fabric.navigation :as nav]
             [craft.agents.backend.fabric.transport :as transport]
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.state :as npc-state]
@@ -40,11 +42,12 @@
       (bt-tick/tick-bt-agents! env))
     (let [with-root (set (map :agent/id (filter :bt/root (registry/all-agents))))
           got       (set @ticked)]
-      (is (not (contains? got :coco)) "Coco e conduzida pelo tick do atelie; BT nao pode ser segundo motorista")
+      (is (contains? got :coco) "Coco roda a BT sob o arbitro npc.body (canal :gaze), sem ser segundo motorista de :legs")
       (is (every? with-root got) "so agente com :bt/root e ticado")
       (is (= (apply disj with-root bt-tick/self-driven) got)
-          "todos menos os que ja tem tick dedicado (Karlach, Picard, Richeh, Coco)")
-      (is (= #{:karlach :picard :richeh :coco} bt-tick/self-driven))
+          "todos os agentes com :bt/root; nenhum fica de fora")
+      (is (= with-root got) "todos os agentes com :bt/root sao ticados")
+      (is (= #{} bt-tick/self-driven) "CA-104: ninguem excluido, o arbitro unico resolve o conflito corpo/cabeca")
       (is (= (count @ticked) (count got)) "um passo por agente"))))
 
 (deftest agents-without-bt-root-keep-their-tick-test
@@ -56,8 +59,9 @@
                   bt-tick/tick-agent! (fn [_ agent] (swap! ticked conj (:agent/id agent)))]
       (bt-tick/tick-bt-agents! {:engine-ctx-atom (atom {}) :tick 4}))
     (is (not (some #{:plain} @ticked)) "agente sem :bt/root mantem o tick atual")
-    (doseq [id [:picard :richeh :karlach]]
-      (is (not (some #{id} @ticked)) (str id " mantem o tick dedicado (tick-picard!/atelier/karlach)")))))
+    (doseq [id [:picard :richeh :karlach]
+            :when (:bt/root (registry/agent-by-id id))]
+      (is (some #{id} @ticked) (str id " roda a BT sob arbitragem (CA-104), alem do tick dedicado")))))
 
 (deftest bt-engine-runs-at-5hz-and-isolates-errors-test
   (let [ticked (atom [])]
@@ -195,3 +199,77 @@
     (is (= 100000 (get-in (:ctx a) [:cooldowns :duo-study])))
     (is (= :failure (get-in b [:res :status])) "dentro dos 45 s")
     (is (= :success (get-in c [:res :status])) "depois dos 45 s")))
+
+;; ----------------------------------------------------------------------------
+;; CA-104: Coco = rotina do atelie (:legs) + BT (:gaze) no mesmo tick, sob npc.body
+;; ----------------------------------------------------------------------------
+
+(defn- body-fn [sym] (requiring-resolve (symbol "craft.agents.npc.body" (name sym))))
+
+(defn- move-fields
+  "Campos numericos [x y z yaw pitch] de uma linha MOVE|nome|x|y|z|yaw|pitch|..."
+  [line]
+  (mapv parse-double (subvec (str/split line #"\|") 2 7)))
+
+(defn- coco-tick-with-bt!
+  "Um tick aberto: atelie da Coco (estado `coco-st`) e BT :face-entity da Coco (olhar para `look-pos`
+   a partir de `bt-self-pos`), depois flush!. `pre` roda dentro do tick antes do atelie. Devolve
+   {:cmds (todas as linhas enviadas ao transport) :before-flush (linhas antes do flush!)}."
+  [coco-st bt-self-pos look-pos pre]
+  (let [begin! (body-fn 'begin-tick!) flush! (body-fn 'flush!) reset! (body-fn 'reset-buffer!)
+        cmds   (atom [])
+        ectx   (atom {:agents {:richeh {:pos look-pos}}})
+        st     (npc-state/agent-atom ectx :coco {:pos bt-self-pos})
+        before (atom nil)]
+    (with-redefs [transport/send-bridge-cmd! (fn [c] (swap! cmds conj c) "OK")
+                  actions/query-online-players (fn [] [])]
+      (reset!)
+      (begin!)
+      (pre)
+      (atelier-behavior/step-coco-tick! coco-st transport/send-bridge-cmd! 1 [])
+      (goals/execute-tree-node! [:action :face-entity {:target :richeh}] ectx st [] "Pace"
+                                (registry/agent-by-id :coco))
+      (reset! before @cmds)
+      (flush!))
+    {:cmds @cmds :before-flush @before}))
+
+(defn- coco-moves [cmds] (filter #(str/starts-with? % "MOVE|Coco|") cmds))
+
+(deftest coco-atelier-legs-and-bt-gaze-emit-a-single-move-test
+  (let [coco-st (atelier-behavior/create-coco-state)
+        start   (:pos @coco-st)
+        {:keys [cmds before-flush]} (coco-tick-with-bt! coco-st start [-20.0 66.0 190.0] (fn []))
+        ms      (coco-moves cmds)
+        [x y z yaw] (some-> (first ms) move-fields)
+        [nx ny nz]  (:pos @coco-st)]
+    (testing "o arbitro retem os dois pedidos: nada de MOVE antes do flush!"
+      (is (empty? (coco-moves before-flush))))
+    (testing "exatamente 1 MOVE|Coco| por tick"
+      (is (= 1 (count ms))))
+    (testing ":legs (atelie) define a posicao; o olhar da BT nao a sobrescreve"
+      (is (not= start [nx ny nz]) "o atelie andou")
+      (is (< (Math/abs (- (double (or x 1e9)) nx)) 0.001))
+      (is (< (Math/abs (- (double (or y 1e9)) ny)) 0.001))
+      (is (< (Math/abs (- (double (or z 1e9)) nz)) 0.001)))
+    (testing ":gaze (BT, prioridade maior) define o yaw: Richeh esta a +x"
+      (is (< (Math/abs (- (double (or yaw 1e9)) (nav/compute-yaw 10.0 0.0))) 0.06)))))
+
+(deftest coco-lower-priority-legs-never-overrides-higher-test
+  (let [coco-st  (atelier-behavior/create-coco-state)
+        request! (body-fn 'request!)
+        target   [3.0 70.0 4.0]
+        {:keys [cmds]} (coco-tick-with-bt!
+                        coco-st (:pos @coco-st) [-20.0 66.0 190.0]
+                        #(request! {:agent :coco :channel :legs :source :combat :target target}))
+        ms (coco-moves cmds)
+        [x y z] (some-> (first ms) move-fields)]
+    (is (= 1 (count ms)) "um unico MOVE|Coco| mesmo com tres fontes no tick")
+    (is (= [3.0 70.0 4.0] [x y z]) ":legs de prioridade :combat vence o :atelier")))
+
+(deftest body-step-outside-an-open-tick-sends-immediately-test
+  (let [step! (body-fn 'step!)
+        cmds  (atom [])]
+    (with-redefs [transport/send-bridge-cmd! (fn [c] (swap! cmds conj c) "OK")]
+      (step! {:agent :coco :source :atelier :x 1.0 :y 64.0 :z 2.0 :yaw 10.0 :pitch 0.0}))
+    (is (= ["MOVE|Coco|1.000|64.000|2.000|10.0|0.0|false|false"] @cmds)
+        "fora de tick aberto (testes isolados) o passo sai direto, no mesmo formato")))
