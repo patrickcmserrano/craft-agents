@@ -37,7 +37,8 @@
             [craft.agents.npc-bt-test]
             [craft.agents.npc-bridge-world-test]
             [craft.agents.npc-docs-test]
-            [craft.agents.npc-perception-tick-test]))
+            [craft.agents.npc-perception-tick-test]
+            [craft.agents.npc-body-test]))
 
 (def epic-suites
   [{:epic 0 :title "Epico 0 — Fundacao, Build e Contratos (CA-001..CA-005)"      :ns 'craft.agents.epic0-foundation-test}
@@ -76,7 +77,8 @@
    {:epic 33 :title "CA-094 — Behavior Tree para todo agente com :bt/root" :ns 'craft.agents.npc-bt-test}
    {:epic 34 :title "CA-095 — Mundo do agente por nome nos ops da ponte" :ns 'craft.agents.npc-bridge-world-test}
    {:epic 35 :title "CA-096 — Invariantes estruturais do NPC Core (tamanho, perfis, cobertura de metas)" :ns 'craft.agents.npc-docs-test}
-   {:epic 36 :title "CA-100 — Snapshot unico de percepcao por tick e metricas de tick" :ns 'craft.agents.npc-perception-tick-test}])
+   {:epic 36 :title "CA-100 — Snapshot unico de percepcao por tick e metricas de tick" :ns 'craft.agents.npc-perception-tick-test}
+   {:epic 37 :title "CA-102 — Arbitro unico de atuadores corporais (npc.body)" :ns 'craft.agents.npc-body-test}])
 
 (defn- parse-args [args]
   (loop [rem args opts {:summary-only? false :epic nil}]
