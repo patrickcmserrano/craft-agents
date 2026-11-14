@@ -1,6 +1,17 @@
 # Pendências da Sprint `atelier-core-01` (`CA-106` .. `CA-113`)
 
-> Gerado no planejamento inicial da sprint (`2026-11-14`). Será atualizado automaticamente ao término de `CA-113`.
+> Gerado no planejamento inicial da sprint (`2026-11-14`). Atualizado no fechamento (`CA-113`).
+
+## Estado verificado em testes (CA-113)
+
+- `GET /api/state` do Studio devolve, por agente, `:routine` (`:activity`/`:place`/`:hour` do bloco vigente de `:agent/routine`, ausente sem hora do mundo), `:bt-memory` (caminho de nó em texto, ex. `"0.1"`, → memória) e `:bt-tick`; cartões legados (`:leases`, `:cooldowns`, `:events`) preservados. Coberto em `npc_routine_test.clj` (`studio-state-*`).
+- Coco e Richeh rodam rotina, dupla, pontos do ateliê e reações só via `:bt/root` + `bt-tick/tick-agent!` (CA-111/CA-112), com emissão única pelo `npc.body`.
+- Guards falham fechado sem percepção/hora (`:in-quiet-corner?`, `:at-place?`, `:routine-activity?`).
+- A UI estática (`public/app.js`) ainda não renderiza `routine`/`bt-memory`: os campos só estão no JSON.
+
+## Pendente ao vivo em jogo
+
+Ver a seção seguinte (servidor Minecraft vivo) e os itens por tarefa abaixo; nada disso foi simulado.
 
 ## Verificações dependentes de servidor Minecraft vivo
 

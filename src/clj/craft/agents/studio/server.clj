@@ -8,6 +8,7 @@
             [craft.agents.backend.fabric :as fabric]
             [craft.agents.cognition.semantic-router :as router]
             [craft.agents.npc.registry :as registry]
+            [craft.agents.npc.routine :as routine]
             [craft.agents.npc.state :as npc-state]
             [nrepl.server :as nrepl]
             [org.httpkit.server :as http]))
@@ -35,6 +36,18 @@
                      (file-seq skills-dir))))
       [])))
 
+(defn- routine-summary
+  "Resumo do bloco de rotina vigente (`:activity`, `:place`, `:hour`) ou nil sem hora/rotina (CA-113)."
+  [spec world-time]
+  (when (and spec (:agent/routine spec))
+    (when-let [slot (routine/current-slot spec world-time)]
+      {:activity (:activity slot) :place (:place slot) :hour (routine/world-hour world-time)})))
+
+(defn- bt-memory-summary
+  "Memoria da BT com caminhos de no (vetores) viram texto `\"0.1.2\"`, serializavel em JSON (CA-113)."
+  [mem]
+  (into {} (map (fn [[path v]] [(str/join "." path) v])) mem))
+
 (defn build-agent-cards
   "Monta dinamicamente os cartoes de todos os agentes a partir de `registry/all-agents`,
    `(:agent-states ctx)` e `(:agents ctx)`, incluindo `:cooldowns`, `:events` e `:leases`
@@ -60,6 +73,11 @@
                        card   (merge (select-keys st [:pos :mode :status :task :skills :last-learned
                                                       :cooldowns :events :leases])
                                      (when spec {:name (:agent/name spec)})
+                                     (when-let [r (routine-summary spec (:world-time ctx))]
+                                       {:routine r})
+                                     (when (seq (:bt-memory st))
+                                       {:bt-memory (bt-memory-summary (:bt-memory st))})
+                                     (when (:bt-tick st) {:bt-tick (:bt-tick st)})
                                      pub
                                      {:cooldowns (or (not-empty (:cooldowns pub))
                                                      (:cooldowns st)
