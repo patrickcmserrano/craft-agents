@@ -3,7 +3,7 @@
    barco, mineracao, abrigo de chuva, patrulha/cercados) e publica o estado no
    engine-ctx do Agent Studio. As decisoes puras vivem em follow e patrol e sao
    reexportadas aqui."
-  (:require [craft.agents.backend.fabric.actions :refer [karlach-say!]]
+  (:require [craft.agents.backend.fabric.actions :as actions :refer [karlach-say!]]
             [craft.agents.backend.fabric.engine.follow :as follow]
             [craft.agents.backend.fabric.engine.mining :as mining]
             [craft.agents.backend.fabric.engine.patrol :as patrol]
@@ -11,7 +11,8 @@
              :refer [rain-shelter-decision shelter-route-steps stand-karlach!]]
             [craft.agents.backend.fabric.sanctuary :refer [sanctuary-route]]
             [craft.agents.backend.fabric.sentry :refer [proactive-sentry-scan!]]
-            [craft.agents.backend.fabric.transport :refer [send-bridge-cmd! uformat]]))
+            [craft.agents.backend.fabric.transport :as transport :refer [send-bridge-cmd! uformat]]
+            [craft.agents.npc.perception-tick :as perception-tick]))
 
 ;; Decisoes puras do tick da Karlach (definidas em follow/patrol).
 (def follow-tick-decision follow/follow-tick-decision)
@@ -114,39 +115,64 @@
   "Um tick da Karlach. `env`: :engine-ctx-atom :nav-state :picard-state :coco-state
    :richeh-state :tick."
   [{:keys [engine-ctx-atom nav-state tick] :as env0}]
-  (when (zero? (mod tick 25))
-    (let [[kx ky kz] (:pos @nav-state)]
-      (send-bridge-cmd!
-       (uformat "CMD|particle minecraft:flame %.2f %.2f %.2f 0.15 0.2 0.15 0.01 3 normal"
-                kx (+ ky 1.1) kz))
-      (send-bridge-cmd!
-       (uformat "CMD|particle minecraft:smoke %.2f %.2f %.2f 0.15 0.25 0.15 0.01 2 normal"
-                kx (+ ky 1.2) kz))))
-  (tick-other-followers! env0)
-  (let [env (with-cards env0)
-        st  @nav-state]
-    ;; CA-060: expoe o modo e o clima da Karlach para observabilidade
-    ;; (nav-state e let local, ilegivel do REPL; o ctx e legivel).
-    (swap! engine-ctx-atom assoc
-           :karlach-mode (:mode st)
-           :karlach-nav-pos (:pos st)
-           :weather (:last-weather st)
-           :sheltering? (:sheltering? st false)
-           :shelter-steps-left (count (:steps st))
-           :shelter-step-head (first (:steps st)))
-    (let [patrolling? (= (:mode st) :sanctuary-patrol)
-          shelter     (when patrolling? (shelter-decision st))]
-      (cond
-        (pos? (:dance-ticks st 0))                       (tick-dance! env st)
-        (contains? #{:follow :bodyguard} (:mode st))     (follow/tick-follow! env :karlach)
-        (= (:mode st) :mining)                           (mining/tick-mining! env st)
-        (contains? #{:shelter :resume} (:action shelter)) (tick-shelter! env st shelter)
+  (let [t0-ns     (System/nanoTime)
+        cmd-count (atom 0)
+        orig-send transport/send-bridge-cmd!
+        orig-qop  actions/query-online-players]
+    (with-redefs [transport/send-bridge-cmd!
+                  (fn [line]
+                    (swap! cmd-count inc)
+                    (orig-send line))
+                  actions/query-online-players
+                  (fn []
+                    (let [snap (perception-tick/capture-snapshot!
+                                engine-ctx-atom
+                                {:tick     (or tick (when engine-ctx-atom (:tick @engine-ctx-atom)) 0)
+                                 :agent-id :karlach
+                                 :query-players-fn
+                                 (when-not (identical? orig-qop perception-tick/default-query-online-players)
+                                   orig-qop)})]
+                      (:players snap)))]
+      (when (zero? (mod tick 25))
+        (let [[kx ky kz] (:pos @nav-state)]
+          (send-bridge-cmd!
+           (uformat "CMD|particle minecraft:flame %.2f %.2f %.2f 0.15 0.2 0.15 0.01 3 normal"
+                    kx (+ ky 1.1) kz))
+          (send-bridge-cmd!
+           (uformat "CMD|particle minecraft:smoke %.2f %.2f %.2f 0.15 0.25 0.15 0.01 2 normal"
+                    kx (+ ky 1.2) kz))))
+      (tick-other-followers! env0)
+      (let [env (with-cards env0)
+            st  @nav-state]
+        ;; CA-060: expoe o modo e o clima da Karlach para observabilidade
+        ;; (nav-state e let local, ilegivel do REPL; o ctx e legivel).
+        (swap! engine-ctx-atom assoc
+               :karlach-mode (:mode st)
+               :karlach-nav-pos (:pos st)
+               :weather (:last-weather st)
+               :sheltering? (:sheltering? st false)
+               :shelter-steps-left (count (:steps st))
+               :shelter-step-head (first (:steps st)))
+        (let [patrolling? (= (:mode st) :sanctuary-patrol)
+              shelter     (when patrolling? (shelter-decision st))]
+          (cond
+            (pos? (:dance-ticks st 0))                       (tick-dance! env st)
+            (contains? #{:follow :bodyguard} (:mode st))     (follow/tick-follow! env :karlach)
+            (= (:mode st) :mining)                           (mining/tick-mining! env st)
+            (contains? #{:shelter :resume} (:action shelter)) (tick-shelter! env st shelter)
 
-        ;; Patrulha & cuidado dos cercados (desligado durante o abrigo: nao sai
-        ;; para resgatar animal na chuva)
-        (and patrolling?
-             (not (:sheltering? st false))
-             (proactive-sentry-scan! engine-ctx-atom nav-state sanctuary-route))
-        nil
+            ;; Patrulha & cuidado dos cercados (desligado durante o abrigo: nao sai
+            ;; para resgatar animal na chuva)
+            (and patrolling?
+                 (not (:sheltering? st false))
+                 (proactive-sentry-scan! engine-ctx-atom nav-state sanctuary-route))
+            nil
 
-        :else (patrol/tick-patrol! env st)))))
+            :else (patrol/tick-patrol! env st)))))
+    (when engine-ctx-atom
+      (let [elapsed-ms (/ (double (- (System/nanoTime) t0-ns)) 1000000.0)]
+        (perception-tick/record-tick-metrics! engine-ctx-atom
+                                              {:tick          (or tick (:tick @engine-ctx-atom) 0)
+                                               :tick-ms       elapsed-ms
+                                               :cmds-per-tick @cmd-count})))
+    nil))

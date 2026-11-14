@@ -4,6 +4,7 @@
    Coco tem tick dedicado (`self-driven`) e nao sao ticados aqui para nao haver dois motoristas."
   (:require [craft.agents.backend.fabric.goals :as goals]
             [craft.agents.backend.fabric.sanctuary :refer [sanctuary-route]]
+            [craft.agents.npc.perception-tick :as perception-tick]
             [craft.agents.npc.registry :as registry]
             [craft.agents.npc.state :as npc-state]))
 
@@ -18,10 +19,18 @@
 (defn tick-agent!
   "Um passo da `:bt/root` de `agent` (spec do registro). `env`: :engine-ctx-atom e, opcional,
    :sanctuary-route. Devolve o resultado do no raiz."
-  [{:keys [engine-ctx-atom] :as env} agent]
-  (let [st (npc-state/agent-atom engine-ctx-atom (:agent/id agent))]
-    (goals/execute-tree-node! (:bt/root agent) engine-ctx-atom st
-                              (or (:sanctuary-route env) sanctuary-route) nil agent)))
+  [{:keys [engine-ctx-atom tick] :as env} agent]
+  (let [agent-id (:agent/id agent)
+        st       (npc-state/agent-atom engine-ctx-atom agent-id)
+        snap     (when engine-ctx-atom
+                   (perception-tick/capture-snapshot! engine-ctx-atom
+                                                      {:tick (or tick (:tick @engine-ctx-atom) 0)
+                                                       :agent-id agent-id}))]
+    (when (and engine-ctx-atom snap)
+      (perception-tick/inject-perception! engine-ctx-atom agent-id snap))
+    (perception-tick/with-snapshot-players snap
+      #(goals/execute-tree-node! (:bt/root agent) engine-ctx-atom st
+                                 (or (:sanctuary-route env) sanctuary-route) nil agent))))
 
 (defn tick-bt-agents!
   "Roda um passo de BT por agente com `:bt/root` (menos os `self-driven`) a cada

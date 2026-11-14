@@ -64,10 +64,19 @@
   (let [ctx (if (instance? clojure.lang.IDeref engine-ctx) @engine-ctx engine-ctx)
         online-players (try (fabric/query-online-players) (catch Throwable _ []))
         weather-info   (try (fabric/query-minecraft-weather) (catch Throwable _ {:clock "12:00" :phase "Dia" :sky "Céu Limpo"}))
-        {:keys [agents inventory]} (studio-snapshot ctx)]
-    {:tick      (:tick ctx 0)
-     :timestamp (System/currentTimeMillis)
-     :agents    agents
+        {:keys [agents inventory]} (studio-snapshot ctx)
+        tick-metrics   (merge {:tick-ms 0.0 :cmds-per-tick 0 :tick-p95-ms 0.0}
+                              (:metrics ctx)
+                              (get-in ctx [:telemetry :tick])
+                              (select-keys ctx [:tick-ms :cmds-per-tick :tick-p95-ms]))]
+    {:tick          (:tick ctx 0)
+     :timestamp     (System/currentTimeMillis)
+     :tick-ms       (:tick-ms tick-metrics)
+     :cmds-per-tick (:cmds-per-tick tick-metrics)
+     :tick-p95-ms   (:tick-p95-ms tick-metrics)
+     :telemetry     (assoc (:telemetry ctx {}) :tick tick-metrics)
+     :metrics       tick-metrics
+     :agents        agents
      :karlach-mode (:karlach-mode ctx)
      :karlach-nav-pos (:karlach-nav-pos ctx)
      :sheltering? (:sheltering? ctx)
@@ -120,7 +129,7 @@
                      "Access-Control-Allow-Origin" "*"}
            :body (json/write-str payload)})
 
-        (= uri "/api/status")
+        (contains? #{"/api/status" "/api/state"} uri)
         {:status 200
          :headers {"Content-Type" "application/json; charset=utf-8"}
          :body (json/write-str (build-telemetry-frame engine-ctx))}
